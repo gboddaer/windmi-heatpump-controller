@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windmi Heat Pump Controller</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Windmi Heat Pump</h1>
+            <div class="status-bar">
+                <span id="deviceStatus" class="status-indicator offline">Offline</span>
+                <span id="runStatus" class="status-indicator stopped">Stopped</span>
+            </div>
+        </header>
+
+        <main>
+            <section class="status-card">
+                <h2>Current Status</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="label">Mode</span>
+                        <span id="modeValue" class="value">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Priority</span>
+                        <span id="priorityValue" class="value">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Outdoor Temp</span>
+                        <span id="outdoorTempValue" class="value">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Last Update</span>
+                        <span id="lastUpdate" class="value">-</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="temps-card">
+                <h2>Temperatures</h2>
+                <div class="temp-grid">
+                    <div class="temp-item">
+                        <span class="label">DHW Tank</span>
+                        <span id="dhwTempValue" class="value">-</span>
+                    </div>
+                    <div class="temp-item">
+                        <span class="label">Heating (LWT)</span>
+                        <span id="heatingTempValue" class="value">-</span>
+                    </div>
+                    <div class="temp-item">
+                        <span class="label">DHW Target</span>
+                        <span id="dhwTargetValue" class="value">-</span>
+                    </div>
+                    <div class="temp-item">
+                        <span class="label">Heating Target</span>
+                        <span id="heatingTargetValue" class="value">-</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="controls-card">
+                <h2>Controls</h2>
+                
+                <div class="control-group">
+                    <label for="dhwSlider">DHW Temperature (°C)</label>
+                    <div class="slider-container">
+                        <input type="range" id="dhwSlider" min="40" max="63" step="0.5" value="50">
+                        <input type="number" id="dhwInput" min="40" max="63" step="0.5" value="50">
+                    </div>
+                    <button id="setDhwBtn" class="btn">Set DHW</button>
+                </div>
+
+                <div class="control-group">
+                    <label for="heatingSlider">Heating Temperature (°C)</label>
+                    <div class="slider-container">
+                        <input type="range" id="heatingSlider" min="25" max="63" step="0.5" value="40">
+                        <input type="number" id="heatingInput" min="25" max="63" step="0.5" value="40">
+                    </div>
+                    <button id="setHeatingBtn" class="btn">Set Heating</button>
+                </div>
+
+                <div class="control-group priority-group">
+                    <label>Priority Mode</label>
+                    <div class="toggle-container">
+                        <button id="dhwPriorityBtn" class="toggle-btn active">DHW</button>
+                        <button id="heatingPriorityBtn" class="toggle-btn">Heating</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Auto-refresh: <span id="refreshCountdown">5</span>s</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
