@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-static struct mg_mgr s_mgr;
+static struct mg_mgr mgr;
 static bool g_running = false;
 static spsc_cmd_t_queue_t *g_cmd_queue = NULL;
 static spsc_status_snapshot_t_queue_t *g_status_queue = NULL;
@@ -196,12 +196,12 @@ int web_server_init(int port, const char *static_dir,
     g_status_queue = status_queue;
     memset(&g_last_status, 0, sizeof(g_last_status));
 
-    mg_mgr_init(&g_mgr);
+    mg_mgr_init(&mgr);
 
     char url[64];
     snprintf(url, sizeof(url), "http://%s:%d", WEB_SERVER_IP, port);
 
-    struct mg_connection *conn = mg_http_listen(&g_mgr, url, http_handler, NULL);
+    struct mg_connection *conn = mg_http_listen(&mgr, url, http_handler, NULL);
     if (conn == NULL) {
         fprintf(stderr, "Failed to start server on %s\n", url);
         return -1;
@@ -216,11 +216,11 @@ int web_server_init(int port, const char *static_dir,
 
 void web_server_run(void) {
     while (g_running) {
-        mg_mgr_poll(&g_mgr, 1000);
+        mg_mgr_poll(&mgr, 1000);
     }
 }
 
 void web_server_stop(void) {
     g_running = false;
-    mg_mgr_free(&g_mgr);
+    mg_mgr_free(&mgr);
 }

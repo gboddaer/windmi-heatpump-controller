@@ -1,10 +1,10 @@
 # Makefile
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -O2 -D_POSIX_C_SOURCE=200809L
+CFLAGS = -Wall -Wextra -std=c99 -O2 -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE
 LDFLAGS = -lpthread
 
-# Mongoose library
-MONGOOSE_LIB = mongoose/libmongoose.a
+# Mongoose library (single-file v7.x)
+MONGOOSE_SRC = mongoose/mongoose.c
 MONGOOSE_INC = mongoose
 
 SRC_DIR = src
@@ -18,20 +18,24 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/crc16.c
 
 OBJECTS = $(SOURCES:.c=.o)
+MONGOOSE_OBJ = mongoose/mongoose.o
 TARGET = windmi-control
 
 .PHONY: all clean run setup mongoose
 
 all: $(TARGET)
 
-$(TARGET): $(OBJECTS) $(MONGOOSE_LIB)
-	$(CC) $(OBJECTS) -L$(dir $(MONGOOSE_LIB)) -lmongoose $(LDFLAGS) -o $(TARGET)
+$(TARGET): $(OBJECTS) $(MONGOOSE_OBJ)
+	$(CC) $(OBJECTS) $(MONGOOSE_OBJ) $(LDFLAGS) -o $(TARGET)
 
 $(SRC_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -I$(MONGOOSE_INC) -I$(SRC_DIR) -c $< -o $@
 
+mongoose/mongoose.o: mongoose/mongoose.c
+	$(CC) $(CFLAGS) -I$(MONGOOSE_INC) -c $< -o $@
+
 clean:
-	rm -f $(OBJECTS) $(TARGET)
+	rm -f $(OBJECTS) $(MONGOOSE_OBJ) $(TARGET)
 
 run: $(TARGET)
 	./$(TARGET)
