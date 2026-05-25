@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rotenso Windmi Control</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: #fff;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 500px;
+            width: 100%;
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .status-bar {
+            display: flex;
+            justify-content: space-around;
+            padding: 15px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .status-item {
+            text-align: center;
+        }
+        .status-label {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+        .status-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #495057;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .status-indicator.active {
+            background: #28a745;
+            box-shadow: 0 0 10px #28a745;
+        }
+        .status-indicator.inactive {
+            background: #dc3545;
+        }
+        .content {
+            padding: 25px;
+        }
+        .control-section {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .control-section h2 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        .control-section h2 .icon {
+            margin-right: 10px;
+            font-size: 12px;
+            font-weight: 700;
+            background: #f5576c;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .temp-display {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .temp-value {
+            font-size: 48px;
+            font-weight: 700;
+            color: #f5576c;
+        }
+        .temp-unit {
+            font-size: 24px;
+            color: #6c757d;
+        }
+        .slider-container {
+            position: relative;
+            margin: 20px 0;
+        }
+        .slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #e9ecef;
+            outline: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+        }
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+        }
+        .slider::-moz-range-track {
+            height: 8px;
+            border-radius: 4px;
+            background: #e9ecef;
+        }
+        .slider::-moz-range-thumb {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+        }
+        .slider-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #6c757d;
+        }
+        .priority-section {
+            background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .priority-section h2 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 15px;
+        }
+        .priority-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .priority-btn {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #f5576c;
+            background: white;
+            color: #f5576c;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .priority-btn:hover {
+            background: #f5576c;
+            color: white;
+        }
+        .priority-btn.active {
+            background: #f5576c;
+            color: white;
+        }
+        .temps-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .temp-info-item {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .temp-info-label {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+        .temp-info-value {
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+        }
+        .footer {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+            font-size: 12px;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Rotenso Windmi</h1>
+            <p>Heat Pump Control Interface</p>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-label">Heating Mode</div>
+                <div class="status-value">
+                    <span class="status-indicator active"></span>Active
+                </div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">DHW Mode</div>
+                <div class="status-value">
+                    <span class="status-indicator inactive"></span>Standby
+                </div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">System</div>
+                <div class="status-value">Online</div>
+            </div>
+        </div>
+
+        <div class="content">
+            <!-- DHW Control Section -->
+            <div class="control-section">
+                <h2><span class="icon">DHW</span>Domestic Hot Water (DHW)</h2>
+                <div class="temp-display">
+                    <span class="temp-value" id="dhw-temp">45</span>
+                    <span class="temp-unit">°C</span>
+                </div>
+                <div class="slider-container">
+                    <input type="range" min="30" max="60" value="45" class="slider" id="dhw-slider">
+                    <div class="slider-labels">
+                        <span>30°C</span>
+                        <span>60°C</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Heating Control Section -->
+            <div class="control-section">
+                <h2><span class="icon">HEAT</span>Heating Temperature</h2>
+                <div class="temp-display">
+                    <span class="temp-value" id="heat-temp">35</span>
+                    <span class="temp-unit">°C</span>
+                </div>
+                <div class="slider-container">
+                    <input type="range" min="20" max="55" value="35" class="slider" id="heat-slider">
+                    <div class="slider-labels">
+                        <span>20°C</span>
+                        <span>55°C</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Priority Control Section -->
+            <div class="priority-section">
+                <h2>System Priority</h2>
+                <div class="priority-buttons">
+                    <button class="priority-btn active" id="dhw-priority">DHW Priority</button>
+                    <button class="priority-btn" id="heat-priority">Heating Priority</button>
+                </div>
+            </div>
+
+            <!-- Current Temperatures Display -->
+            <div class="control-section">
+                <h2>Current Temperatures</h2>
+                <div class="temps-info">
+                    <div class="temp-info-item">
+                        <div class="temp-info-label">Tank Temperature</div>
+                        <div class="temp-info-value">42°C</div>
+                    </div>
+                    <div class="temp-info-item">
+                        <div class="temp-info-label">Leaving Water</div>
+                        <div class="temp-info-value">33°C</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            Rotenso Windmi Control Panel | CGI Interface
+        </div>
+    </div>
+
+    <script>
+        // DHW Slider
+        const dhwSlider = document.getElementById('dhw-slider');
+        const dhwTemp = document.getElementById('dhw-temp');
+        dhwSlider.addEventListener('input', function() {
+            dhwTemp.textContent = this.value;
+        });
+
+        // Heating Slider
+        const heatSlider = document.getElementById('heat-slider');
+        const heatTemp = document.getElementById('heat-temp');
+        heatSlider.addEventListener('input', function() {
+            heatTemp.textContent = this.value;
+        });
+
+        // Priority Buttons
+        const dhwPriorityBtn = document.getElementById('dhw-priority');
+        const heatPriorityBtn = document.getElementById('heat-priority');
+
+        dhwPriorityBtn.addEventListener('click', function() {
+            dhwPriorityBtn.classList.add('active');
+            heatPriorityBtn.classList.remove('active');
+        });
+
+        heatPriorityBtn.addEventListener('click', function() {
+            heatPriorityBtn.classList.add('active');
+            dhwPriorityBtn.classList.remove('active');
+        });
+    </script>
+</body>
+</html>
