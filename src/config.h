@@ -50,14 +50,23 @@
 #define MODE_HOME_ANTIFREEZE   20
 
 // Modbus Register Addresses
+#define REG_DEVICE_TYPE           0x1006
 #define REG_OUTDOOR_TEMP          0x0001
 #define REG_INDOOR_TEMP           0x0002
 #define REG_ENTERING_WATER_TEMP   0x0003
 #define REG_LEAVING_WATER_TEMP    0x0004
+#define REG_WATER_CONTROL_POINT   0x0033
 #define REG_RUNNING_MODE          0x002D
-#define REG_DHW_TARGET            0x0194
 #define REG_HEATING_TARGET        0x0191
-#define REG_DHW_PRIORITY          0x028F
-#define REG_DHW_TANK_TEMP         0x1C5B
+#define REG_DHW_TARGET            0x0194
+#define REG_DHW_PRIORITY          0x02BF
+#define REG_DHW_TANK_TEMP         0x00CE
+#define REG_AC_CURRENT            0x1014
+#define REG_DC_CURRENT            0x1015
+#define REG_AC_VOLTAGE            0x1016
+#define REG_DC_VOLTAGE            0x1017
+
+// Self-test configuration
+#define SELFTEST_DHW_TARGET_TEMP  45.0f
 
 #endif // CONFIG_H

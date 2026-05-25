@@ -12,8 +12,15 @@
 #include <fcntl.h>
 
 #define MODBUS_MAX_FRAME 256
-#define MODBUS_EXCEPTION_OFFSET 5
-#define MODBUS_RESPONSE_HEADER_LEN 5
+
+// Modbus RTU response frame layout:
+//   Normal:  [slave(1)][func(1)][byte_count(1)][data(N)][crc_lo(1)][crc_hi(1)]
+//   Exception: [slave(1)][func|0x80(1)][exception_code(1)][crc_lo(1)][crc_hi(1)]
+//
+// Normal read header is 3 bytes (slave + func + byte_count).
+// We read the 3-byte header first, then read byte_count data + 2 CRC bytes.
+
+#define MODBUS_READ_HEADER_LEN 3
 
 struct modbus_client {
     char ip[16];
@@ -23,11 +30,17 @@ struct modbus_client {
     bool connected;
 };
 
+#ifdef TEST_BUILD
+#define STATIC_FOR_TEST
+#else
+#define STATIC_FOR_TEST static
+#endif
+
 static uint16_t bytes_to_uint16(const uint8_t *bytes) {
     return (uint16_t)((bytes[0] << 8) | bytes[1]);
 }
 
-static void build_read_frame(uint8_t *frame, uint8_t slave_id, uint16_t address, uint16_t count) {
+STATIC_FOR_TEST void build_read_frame(uint8_t *frame, uint8_t slave_id, uint16_t address, uint16_t count) {
     frame[0] = slave_id;
     frame[1] = 0x03;  // Read Holding Registers
     frame[2] = (address >> 8) & 0xFF;
@@ -40,7 +53,7 @@ static void build_read_frame(uint8_t *frame, uint8_t slave_id, uint16_t address,
     frame[7] = (crc >> 8) & 0xFF;
 }
 
-static void build_write_frame(uint8_t *frame, uint8_t slave_id, uint16_t address, uint16_t value) {
+STATIC_FOR_TEST void build_write_frame(uint8_t *frame, uint8_t slave_id, uint16_t address, uint16_t value) {
     frame[0] = slave_id;
     frame[1] = 0x06;  // Write Single Register
     frame[2] = (address >> 8) & 0xFF;
@@ -160,45 +173,68 @@ static int modbus_read_write_registers_internal(modbus_client_t *client,
     build_read_frame(frame, client->slave_id, address, read_count);
     
     if (send_frame(client, frame, 8) != 0) {
+        client->connected = false;
         return -1;
     }
     
-    uint8_t response[MODBUS_MAX_FRAME];
-    
-    if (receive_exact(client, response, MODBUS_RESPONSE_HEADER_LEN) != 0) {
+    // Step 1: Read 3-byte header: [slave][func][byte_count]
+    uint8_t header[MODBUS_READ_HEADER_LEN];
+    if (receive_exact(client, header, MODBUS_READ_HEADER_LEN) != 0) {
+        client->connected = false;
         return -1;
     }
     
-    if (response[0] != client->slave_id) {
+    if (header[0] != client->slave_id) {
         return -1;
     }
     
-    if (response[1] == 0x83) {
+    // Check for exception response (func | 0x80)
+    if (header[1] & 0x80) {
+        // Exception frame: [slave][func|0x80][exception_code][crc_lo][crc_hi]
+        // We already read 3 bytes: slave, func|0x80, and what we thought was byte_count
+        // is actually the exception code. Read the remaining 2 CRC bytes.
+        uint8_t exc_crc[2];
+        receive_exact(client, exc_crc, 2);
+        fprintf(stderr, "Modbus exception: slave=%d func=0x%02X code=%d\n",
+                header[0], header[1], header[2]);
         return -1;
     }
     
-    uint8_t byte_count = response[2];
-    uint16_t expected_response_len = MODBUS_RESPONSE_HEADER_LEN + 1 + byte_count + 2;
-    
+    uint8_t byte_count = header[2];
     if (byte_count != read_count * 2) {
+        fprintf(stderr, "Unexpected byte count: %d (expected %d)\n",
+                byte_count, read_count * 2);
         return -1;
     }
     
-    if (receive_exact(client, response + MODBUS_RESPONSE_HEADER_LEN, 
-                      expected_response_len - MODBUS_RESPONSE_HEADER_LEN) != 0) {
+    // Step 2: Read data + CRC (byte_count data bytes + 2 CRC bytes)
+    uint8_t data_and_crc[MODBUS_MAX_FRAME];
+    size_t remaining = byte_count + 2;
+    if (receive_exact(client, data_and_crc, remaining) != 0) {
+        client->connected = false;
         return -1;
     }
     
-    uint16_t crc_received = response[expected_response_len - 2] | 
-                           (response[expected_response_len - 1] << 8);
-    uint16_t crc_calculated = crc16_modbus(response, expected_response_len - 2);
+    // Step 3: Verify CRC over the full frame (header + data + crc)
+    uint8_t full_frame[MODBUS_MAX_FRAME];
+    size_t total_len = MODBUS_READ_HEADER_LEN + remaining;
+    full_frame[0] = header[0];
+    full_frame[1] = header[1];
+    full_frame[2] = header[2];
+    memcpy(full_frame + 3, data_and_crc, remaining);
+    
+    uint16_t crc_received = (uint16_t)full_frame[total_len - 2] |
+                           ((uint16_t)full_frame[total_len - 1] << 8);
+    uint16_t crc_calculated = crc16_modbus(full_frame, total_len - 2);
     
     if (crc_received != crc_calculated) {
+        fprintf(stderr, "CRC error in read response\n");
         return -1;
     }
     
+    // Step 4: Extract values as signed 16-bit
     for (uint16_t i = 0; i < read_count; i++) {
-        uint16_t raw_value = bytes_to_uint16(&response[3 + i * 2]);
+        uint16_t raw_value = bytes_to_uint16(&data_and_crc[i * 2]);
         values[i] = (int16_t)raw_value;
     }
     
@@ -231,6 +267,14 @@ int modbus_write_register(modbus_client_t *client, uint16_t address, uint16_t va
     }
     
     if (response[0] != client->slave_id || response[1] != 0x06) {
+        fprintf(stderr, "Write response mismatch: slave=%d func=0x%02X\n",
+                response[0], response[1]);
+        return -1;
+    }
+    
+    // Check for exception response
+    if (response[1] & 0x80) {
+        fprintf(stderr, "Modbus exception on write: code=%d\n", response[2]);
         return -1;
     }
     

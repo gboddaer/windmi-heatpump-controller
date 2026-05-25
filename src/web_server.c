@@ -75,7 +75,7 @@ static void api_set_dhw_handler(struct mg_connection *c, struct mg_str *body) {
     }
 
     double temperature = 0;
-    if (mg_json_get_num(*body, "$.temperature", &temperature) == 0) {
+    if (mg_json_get_num(*body, "$.temperature", &temperature) < 1) {
         send_json_reply(c, 400, "{\"error\":\"Missing or invalid temperature\"}");
         return;
     }
@@ -101,7 +101,7 @@ static void api_set_heating_handler(struct mg_connection *c, struct mg_str *body
     }
 
     double temperature = 0;
-    if (mg_json_get_num(*body, "$.temperature", &temperature) == 0) {
+    if (mg_json_get_num(*body, "$.temperature", &temperature) < 1) {
         send_json_reply(c, 400, "{\"error\":\"Missing or invalid temperature\"}");
         return;
     }
@@ -216,7 +216,7 @@ int web_server_init(int port, const char *static_dir,
 
 void web_server_run(void) {
     while (g_running) {
-        mg_mgr_poll(&mgr, 1000);
+        mg_mgr_poll(&mgr, 100);
     }
 }
 

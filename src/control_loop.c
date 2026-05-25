@@ -1,5 +1,4 @@
 #define _POSIX_C_SOURCE 200809L
-#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -27,9 +26,7 @@ static spsc_status_snapshot_t_queue_t *thread_status_queue = NULL;
 
 // Current control state
 static priority_mode_t current_priority = PRIORITY_HEATING;
-static float last_dhw_target = 55.0f;
 static float last_heating_target = 45.0f;
-static int16_t last_dhw_tank_temp_raw = 0;
 
 // Convert raw register value to temperature (divide by 10)
 static inline float raw_to_temp(int16_t raw) {
@@ -46,41 +43,37 @@ static bool dhw_needs_heating(float tank_temp, float target, float hysteresis) {
     return (target - tank_temp) > hysteresis;
 }
 
-// Check if space heating is needed
-// For now, we assume heating is always needed if in heat mode
-// This could be expanded with thermostat logic later
-static bool heating_is_needed(int running_mode) {
-    return running_mode == MODE_HEAT;
+// Check if space heating is needed based on leaving water temperature
+// vs heating target with hysteresis
+static bool heating_is_needed(status_snapshot_t *status) {
+    if (!status) return false;
+    return (status->heating_target - status->leaving_water_temp) > HEATING_HYSTERESIS_C;
 }
 
 // Determine the desired priority mode based on current conditions
-static priority_mode_t determine_priority(float tank_temp, float dhw_target,
-                                          float heating_target __attribute__((unused)),
-                                          int running_mode) {
-    // If DHW needs heating, prioritize DHW
-    if (dhw_needs_heating(tank_temp, dhw_target, DHW_HYSTERESIS_C)) {
+static priority_mode_t determine_priority(status_snapshot_t *status) {
+    if (!status) return PRIORITY_HEATING;
+    
+    // If DHW tank is more than 3°C below target, prioritize DHW
+    if (dhw_needs_heating(status->dhw_tank_temp, status->dhw_target, DHW_HYSTERESIS_C)) {
         return PRIORITY_DHW;
     }
     
     // If DHW is satisfied and space heating is needed, prioritize heating
-    if (heating_is_needed(running_mode)) {
+    if (heating_is_needed(status)) {
         return PRIORITY_HEATING;
     }
     
-    // Default to heating mode if neither needs attention
     return PRIORITY_HEATING;
 }
 
 // Set the running mode on the heat pump
-__attribute__((unused))
 static int set_running_mode(int mode) {
-    if (!thread_client || !thread_cmd_queue) {
+    if (!thread_client) {
         return -1;
     }
     
-    // Write mode to register 0x002D
-    int16_t raw_mode = (int16_t)mode;
-    if (modbus_write_register(thread_client, REG_RUNNING_MODE, (uint16_t)raw_mode) != 0) {
+    if (modbus_write_register(thread_client, REG_RUNNING_MODE, (uint16_t)mode) != 0) {
         fprintf(stderr, "Failed to set running mode to %d\n", mode);
         return -1;
     }
@@ -122,90 +115,79 @@ static int set_heating_target(float temp) {
 }
 
 // Read registers and update status snapshot
+// Returns true if all critical registers were read successfully.
+// On partial failure, status fields retain their last-known values.
 static bool read_status(status_snapshot_t *status) {
     if (!thread_client || !status) {
         return false;
     }
     
-    int16_t values[6];
-    
-    // Read outdoor temp (0x0001)
-    if (modbus_read_register(thread_client, REG_OUTDOOR_TEMP, &values[0]) != 0) {
-        fprintf(stderr, "Failed to read outdoor temp\n");
-        return false;
-    }
-    
-    // Read indoor temp (0x0002)
-    if (modbus_read_register(thread_client, REG_INDOOR_TEMP, &values[1]) != 0) {
-        fprintf(stderr, "Failed to read indoor temp\n");
-        return false;
-    }
-    
-    // Read entering water temp (0x0003)
-    if (modbus_read_register(thread_client, REG_ENTERING_WATER_TEMP, &values[2]) != 0) {
-        fprintf(stderr, "Failed to read entering water temp\n");
-        return false;
-    }
-    
-    // Read leaving water temp (0x0004)
-    if (modbus_read_register(thread_client, REG_LEAVING_WATER_TEMP, &values[3]) != 0) {
-        fprintf(stderr, "Failed to read leaving water temp\n");
-        return false;
-    }
-    
-    // Read running mode (0x002D)
-    if (modbus_read_register(thread_client, REG_RUNNING_MODE, &values[4]) != 0) {
-        fprintf(stderr, "Failed to read running mode\n");
-        return false;
-    }
-    
-    // Read DHW target (0x0194)
-    if (modbus_read_register(thread_client, REG_DHW_TARGET, &values[5]) != 0) {
-        fprintf(stderr, "Failed to read DHW target\n");
-        return false;
-    }
-    
-    status->outdoor_temp = raw_to_temp(values[0]);
-    status->indoor_temp = raw_to_temp(values[1]);
-    status->leaving_water_temp = raw_to_temp(values[3]);
-    status->running_mode = values[4];
-    status->dhw_target = raw_to_temp(values[5]);
-    status->device_online = true;
-    status->is_running = true;
-    
-    return true;
-}
+    int16_t raw;
+    bool ok = true;
 
-// Read DHW tank temperature (separate register at 0x1C5B)
-static bool read_dhw_tank_temp(float *temp) {
-    if (!thread_client || !temp) {
-        return false;
+    // Read outdoor temp (0x0001) — non-critical for control
+    if (modbus_read_register(thread_client, REG_OUTDOOR_TEMP, &raw) == 0) {
+        status->outdoor_temp = raw_to_temp(raw);
+    } else {
+        ok = false;
+    }
+
+    // Read indoor temp (0x0002) — optional
+    if (modbus_read_register(thread_client, REG_INDOOR_TEMP, &raw) == 0) {
+        status->indoor_temp = raw_to_temp(raw);
+    }
+
+    // Read leaving water temp (0x0004) — critical for heating logic
+    if (modbus_read_register(thread_client, REG_LEAVING_WATER_TEMP, &raw) == 0) {
+        status->leaving_water_temp = raw_to_temp(raw);
+    } else {
+        ok = false;
     }
     
-    int16_t raw_temp;
-    if (modbus_read_register(thread_client, REG_DHW_TANK_TEMP, &raw_temp) != 0) {
+    // Read DHW tank temp (0x1C5B) — critical for DHW priority logic
+    // If read fails, status->dhw_tank_temp retains its value (0.0 initially,
+    // last-known value on subsequent calls). We do NOT leave it at 0.0
+    // because that would incorrectly trigger DHW priority.
+    if (modbus_read_register(thread_client, REG_DHW_TANK_TEMP, &raw) == 0) {
+        status->dhw_tank_temp = raw_to_temp(raw);
+    } else {
         fprintf(stderr, "Failed to read DHW tank temp\n");
-        return false;
+        ok = false;
     }
     
-    *temp = raw_to_temp(raw_temp);
-    return true;
-}
+    // Read running mode (0x002D) — critical
+    if (modbus_read_register(thread_client, REG_RUNNING_MODE, &raw) == 0) {
+        status->running_mode = raw;
+        status->is_running = (raw != MODE_OFF);
+    } else {
+        ok = false;
+    }
+    
+    // Read DHW target (0x0194) — critical
+    if (modbus_read_register(thread_client, REG_DHW_TARGET, &raw) == 0) {
+        status->dhw_target = raw_to_temp(raw);
+    } else {
+        ok = false;
+    }
+    
+    // Read heating target (0x0191) — critical
+    if (modbus_read_register(thread_client, REG_HEATING_TARGET, &raw) == 0) {
+        status->heating_target = raw_to_temp(raw);
+        last_heating_target = status->heating_target;
+    } else {
+        status->heating_target = last_heating_target;
+    }
 
-// Read heating target temperature
-static bool read_heating_target(float *target) {
-    if (!thread_client || !target) {
-        return false;
+    // Read DHW priority (0x028F) — critical
+    if (modbus_read_register(thread_client, REG_DHW_PRIORITY, &raw) == 0) {
+        status->dhw_priority = (raw != 0);
+        current_priority = status->dhw_priority ? PRIORITY_DHW : PRIORITY_HEATING;
+    } else {
+        ok = false;
     }
     
-    int16_t raw_temp;
-    if (modbus_read_register(thread_client, REG_HEATING_TARGET, &raw_temp) != 0) {
-        fprintf(stderr, "Failed to read heating target\n");
-        return false;
-    }
-    
-    *target = raw_to_temp(raw_temp);
-    return true;
+    status->device_online = ok;
+    return ok;
 }
 
 // Process incoming commands from the queue
@@ -219,7 +201,6 @@ static void process_commands(void) {
         switch (cmd.type) {
             case CMD_SET_DHW_TEMP:
                 set_dhw_target(cmd.float_val);
-                last_dhw_target = cmd.float_val;
                 break;
                 
             case CMD_SET_HEATING_TEMP:
@@ -228,9 +209,15 @@ static void process_commands(void) {
                 break;
                 
             case CMD_SET_PRIORITY:
-                current_priority = (cmd.int_val == 0) ? PRIORITY_DHW : PRIORITY_HEATING;
-                printf("Control loop: Priority set to %s\n", 
-                       cmd.int_val == 0 ? "DHW" : "Heating");
+                // int_val == 1 means DHW priority, int_val == 0 means heating priority
+                // (matches REG_DHW_PRIORITY register: 1=DHW, 0=heating)
+                if (modbus_write_register(thread_client, REG_DHW_PRIORITY, (uint16_t)cmd.int_val) == 0) {
+                    current_priority = (cmd.int_val == 1) ? PRIORITY_DHW : PRIORITY_HEATING;
+                    printf("Control loop: Priority set to %s\n",
+                           cmd.int_val == 1 ? "DHW" : "Heating");
+                } else {
+                    fprintf(stderr, "Control loop: Failed to set priority register\n");
+                }
                 break;
                 
             default:
@@ -241,34 +228,40 @@ static void process_commands(void) {
 }
 
 // Apply control logic based on current state
+// When DHW priority is active:
+//   - If tank < target - 3°C, switch heat pump to DHW mode
+//   - If tank >= target and space heating needed, switch back to Heat mode
 static void apply_control_logic(status_snapshot_t *status) {
     if (!status) {
         return;
     }
     
-    float dhw_target = status->dhw_target;
-    float heating_target = last_heating_target;
-    int running_mode = status->running_mode;
+    priority_mode_t desired = determine_priority(status);
     
-    // Determine desired priority based on conditions
-    priority_mode_t desired_priority = determine_priority(
-        status->dhw_tank_temp,
-        dhw_target,
-        heating_target,
-        running_mode
-    );
-    
-    // Apply priority mode
-    if (desired_priority == PRIORITY_DHW) {
+    if (desired == PRIORITY_DHW) {
+        // DHW tank needs heating: switch to DHW mode if currently heating
+        if (status->running_mode == MODE_HEAT) {
+            printf("Control loop: DHW needs heating (tank=%.1f target=%.1f), switching to DHW mode\n",
+                   status->dhw_tank_temp, status->dhw_target);
+            if (set_running_mode(MODE_DHW) == 0) {
+                current_priority = PRIORITY_DHW;
+            }
+        }
         if (current_priority != PRIORITY_DHW) {
-            printf("Control loop: Switching to DHW priority mode\n");
+            printf("Control loop: Switching to DHW priority\n");
             current_priority = PRIORITY_DHW;
-            // In DHW priority mode, the heat pump focuses on heating domestic hot water
-            // The device handles this internally once we set the target
         }
     } else {
+        // DHW satisfied: switch back to heating if needed
+        if (status->running_mode == MODE_DHW && heating_is_needed(status)) {
+            printf("Control loop: DHW target reached (tank=%.1f), switching to Heat mode\n",
+                   status->dhw_tank_temp);
+            if (set_running_mode(MODE_HEAT) == 0) {
+                current_priority = PRIORITY_HEATING;
+            }
+        }
         if (current_priority != PRIORITY_HEATING) {
-            printf("Control loop: Switching to heating priority mode\n");
+            printf("Control loop: Switching to heating priority\n");
             current_priority = PRIORITY_HEATING;
         }
     }
@@ -280,20 +273,15 @@ static void *control_loop_thread_func(void *arg) {
     
     printf("Control loop thread started\n");
     
-    // Perform self-test
-    selftest_report_t selftest_result = selftest_run(thread_client);
-    printf("Self-test: %d/%d registers passed\n", selftest_result.passed, selftest_result.total);
-    
     // Main loop
     while (!stop_requested) {
         struct timespec start_time;
         clock_gettime(CLOCK_MONOTONIC, &start_time);
         
-        // Check connection
+        // Check connection and reconnect if needed
         if (!thread_client || !modbus_client_is_connected(thread_client)) {
             printf("Control loop: Not connected, attempting to reconnect...\n");
             
-            // Try to reconnect
             int retries = 0;
             while (!stop_requested && retries < MODBUS_MAX_RETRIES) {
                 if (modbus_client_connect(thread_client)) {
@@ -301,7 +289,6 @@ static void *control_loop_thread_func(void *arg) {
                     break;
                 }
                 retries++;
-                printf("Control loop: Reconnection attempt %d failed, retrying...\n", retries);
                 sleep(MODBUS_RECONNECT_INTERVAL_S);
             }
             
@@ -318,20 +305,8 @@ static void *control_loop_thread_func(void *arg) {
         // Read current status
         status_snapshot_t status;
         memset(&status, 0, sizeof(status));
-        status.device_online = false;
-        status.is_running = false;
         
         if (read_status(&status)) {
-            // Read DHW tank temperature separately
-            if (read_dhw_tank_temp(&status.dhw_tank_temp)) {
-                last_dhw_tank_temp_raw = temp_to_raw(status.dhw_tank_temp);
-            }
-            
-            // Read heating target
-            if (!read_heating_target(&status.heating_target)) {
-                status.heating_target = last_heating_target;
-            }
-            
             // Apply control logic
             apply_control_logic(&status);
             
@@ -341,6 +316,11 @@ static void *control_loop_thread_func(void *arg) {
             }
         } else {
             fprintf(stderr, "Control loop: Failed to read status\n");
+            // Publish offline status
+            status.device_online = false;
+            if (!spsc_push_status_snapshot_t(thread_status_queue, status)) {
+                fprintf(stderr, "Control loop: Status queue full, dropping snapshot\n");
+            }
         }
         
         // Calculate sleep time to maintain interval
@@ -366,12 +346,12 @@ static void *control_loop_thread_func(void *arg) {
     return NULL;
 }
 
-void control_loop_start(modbus_client_t *client,
-                        spsc_cmd_t_queue_t *cmd_queue,
-                        spsc_status_snapshot_t_queue_t *status_queue) {
+int control_loop_start(modbus_client_t *client,
+                       spsc_cmd_t_queue_t *cmd_queue,
+                       spsc_status_snapshot_t_queue_t *status_queue) {
     if (control_loop_running) {
         printf("Control loop already running\n");
-        return;
+        return -1;
     }
     
     // Initialize thread-local state
@@ -380,15 +360,34 @@ void control_loop_start(modbus_client_t *client,
     thread_status_queue = status_queue;
     stop_requested = false;
     
+    // Connect to Modbus gateway before starting thread
+    if (!modbus_client_connect(client)) {
+        fprintf(stderr, "Failed to connect to Modbus gateway\n");
+        return -1;
+    }
+    
+    // Run self-test synchronously before starting the thread
+    selftest_report_t selftest_result = selftest_run(client);
+    printf("Self-test: %d/%d registers passed\n", selftest_result.passed, selftest_result.total);
+    
+    if (!selftest_result.all_critical_passed) {
+        fprintf(stderr, "Self-test failed: critical registers did not pass\n");
+        selftest_print_report(&selftest_result);
+        modbus_client_disconnect(client);
+        return -1;
+    }
+    
     // Create the thread
     int ret = pthread_create(&control_loop_thread, NULL, control_loop_thread_func, NULL);
     if (ret != 0) {
         fprintf(stderr, "Failed to create control loop thread: %s\n", strerror(ret));
-        return;
+        modbus_client_disconnect(client);
+        return -1;
     }
     
     control_loop_running = true;
     printf("Control loop started successfully\n");
+    return 0;
 }
 
 void control_loop_stop(void) {

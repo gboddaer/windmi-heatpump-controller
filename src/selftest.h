@@ -14,7 +14,7 @@ typedef struct {
 } selftest_result_t;
 
 typedef struct {
-    selftest_result_t results[8]; // 8 registers tested
+    selftest_result_t results[6]; // 6 test steps
     int total;
     int passed;
     int failed;

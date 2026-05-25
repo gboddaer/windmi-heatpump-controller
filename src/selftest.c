@@ -1,94 +1,192 @@
 #include "selftest.h"
 #include "crc16.h"
+#include "config.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h>
 
-// Register test entries
-typedef struct {
-    const char *name;
-    uint16_t address;
-    bool read_only;
-    bool critical;
-} selftest_entry_t;
-
-// Test table: 8 registers from design doc
-static const selftest_entry_t test_table[] = {
-    {"Outdoor Temp", 0x0001, true, true},
-    {"Indoor Temp", 0x0002, true, false},
-    {"Leaving Water Temp", 0x0004, true, true},
-    {"Running Mode", 0x002D, false, true},
-    {"DHW Target", 0x0194, false, true},
-    {"Heating Target", 0x0191, false, true},
-    {"DHW Priority", 0x028F, false, true},
-    {"DHW Tank Temp", 0x1C5B, true, true}
-};
-
-#define NUM_TESTS (sizeof(test_table) / sizeof(test_table[0]))
-
-// Internal: Read a single register using public API
-static int read_register_internal(modbus_client_t *client, uint16_t address, int16_t *value) {
-    return modbus_read_register(client, address, value);
+// Convert temperature to raw register value (multiply by 10)
+static inline int16_t temp_to_raw(float temp) {
+    return (int16_t)(temp * 10.0f);
 }
 
-// Internal: Write a single register using public API
-static int write_register_internal(modbus_client_t *client, uint16_t address, uint16_t value) {
-    return modbus_write_register(client, address, value);
+// Convert raw register value to temperature (divide by 10)
+static inline float raw_to_temp(int16_t raw) {
+    return raw / 10.0f;
 }
 
 selftest_report_t selftest_run(modbus_client_t *client) {
     selftest_report_t report;
     memset(&report, 0, sizeof(report));
     
-    report.total = (int)NUM_TESTS;
+    report.total = 6;
     report.all_critical_passed = true;
     
-    for (size_t i = 0; i < NUM_TESTS; i++) {
-        const selftest_entry_t *entry = &test_table[i];
-        selftest_result_t *result = &report.results[i];
+    int test_idx = 0;
+    
+    // Test 1: Read device type (should be Rotenso Windmi 8kW = 8)
+    {
+        selftest_result_t *r = &report.results[test_idx++];
+        r->name = "Device Type";
+        r->address = REG_DEVICE_TYPE;
+        r->read_ok = false;
+        r->write_ok = true;
+        r->verify_ok = true;
         
-        result->name = entry->name;
-        result->address = entry->address;
-        result->read_ok = false;
-        result->write_ok = false;
-        result->verify_ok = false;
-        result->read_value = 0;
+        int16_t device_type;
+        if (modbus_read_register(client, REG_DEVICE_TYPE, &device_type) == 0) {
+            r->read_ok = true;
+            r->read_value = device_type;
+            printf("Self-test: Device type = %d\n", device_type);
+            if (device_type != 8) {
+                fprintf(stderr, "Self-test: Unexpected device type: %d (expected 8 for Windmi 8kW)\n", device_type);
+                report.all_critical_passed = false;
+            }
+        } else {
+            fprintf(stderr, "Self-test: Failed to read device type\n");
+            report.all_critical_passed = false;
+        }
+    }
+    
+    // Test 2: Read heating setpoint
+    {
+        selftest_result_t *r = &report.results[test_idx++];
+        r->name = "Heating Setpoint";
+        r->address = REG_HEATING_TARGET;
+        r->read_ok = false;
+        r->write_ok = true;
+        r->verify_ok = true;
         
-        // Step 1: Read current value
-        int16_t current_value;
-        if (read_register_internal(client, entry->address, &current_value) == 0) {
-            result->read_ok = true;
-            result->read_value = current_value;
-            
-            if (entry->read_only) {
-                // Read-only register: pass if read succeeded
-                result->write_ok = true;
-                result->verify_ok = true;
-            } else {
-                // Read-write register: write back the same value (unintrusive)
-                if (write_register_internal(client, entry->address, (uint16_t)current_value) == 0) {
-                    result->write_ok = true;
-                    
-                    // Step 2: Verify by reading back
-                    int16_t verify_value;
-                    if (read_register_internal(client, entry->address, &verify_value) == 0) {
-                        if (verify_value == current_value) {
-                            result->verify_ok = true;
-                        }
+        int16_t heating_setpoint;
+        if (modbus_read_register(client, REG_HEATING_TARGET, &heating_setpoint) == 0) {
+            r->read_ok = true;
+            r->read_value = heating_setpoint;
+            printf("Self-test: Heating setpoint = %.1f C\n", raw_to_temp(heating_setpoint));
+        } else {
+            fprintf(stderr, "Self-test: Failed to read heating setpoint\n");
+            report.all_critical_passed = false;
+        }
+    }
+    
+    // Test 3: Read DHW setpoint
+    {
+        selftest_result_t *r = &report.results[test_idx++];
+        r->name = "DHW Setpoint";
+        r->address = REG_DHW_TARGET;
+        r->read_ok = false;
+        r->write_ok = true;
+        r->verify_ok = true;
+        
+        int16_t dhw_setpoint;
+        if (modbus_read_register(client, REG_DHW_TARGET, &dhw_setpoint) == 0) {
+            r->read_ok = true;
+            r->read_value = dhw_setpoint;
+            printf("Self-test: DHW setpoint = %.1f C\n", raw_to_temp(dhw_setpoint));
+        } else {
+            fprintf(stderr, "Self-test: Failed to read DHW setpoint\n");
+            report.all_critical_passed = false;
+        }
+    }
+    
+    // Test 4: Read outdoor temperature
+    {
+        selftest_result_t *r = &report.results[test_idx++];
+        r->name = "Outdoor Temp";
+        r->address = REG_OUTDOOR_TEMP;
+        r->read_ok = false;
+        r->write_ok = true;
+        r->verify_ok = true;
+        
+        int16_t outdoor_temp;
+        if (modbus_read_register(client, REG_OUTDOOR_TEMP, &outdoor_temp) == 0) {
+            r->read_ok = true;
+            r->read_value = outdoor_temp;
+            printf("Self-test: Outdoor temp = %.1f C\n", raw_to_temp(outdoor_temp));
+        } else {
+            fprintf(stderr, "Self-test: Failed to read outdoor temp\n");
+            report.all_critical_passed = false;
+        }
+    }
+    
+    // Test 5: Read DHW temperature (tank temp)
+    {
+        selftest_result_t *r = &report.results[test_idx++];
+        r->name = "DHW Tank Temp";
+        r->address = REG_DHW_TANK_TEMP;
+        r->read_ok = false;
+        r->write_ok = true;
+        r->verify_ok = true;
+        
+        int16_t dhw_temp;
+        if (modbus_read_register(client, REG_DHW_TANK_TEMP, &dhw_temp) == 0) {
+            r->read_ok = true;
+            r->read_value = dhw_temp;
+            printf("Self-test: DHW tank temp = %.1f C\n", raw_to_temp(dhw_temp));
+        } else {
+            fprintf(stderr, "Self-test: Failed to read DHW tank temp\n");
+            report.all_critical_passed = false;
+        }
+    }
+    
+    // Test 6: Write-then-verify test for heating setpoint
+    {
+        selftest_result_t *r = &report.results[test_idx++];
+        r->name = "Write Verify Test";
+        r->address = REG_HEATING_TARGET;
+        r->read_ok = true;
+        r->write_ok = false;
+        r->verify_ok = false;
+        r->read_value = 0;
+        
+        // Save original heating setpoint
+        int16_t original_heating;
+        if (modbus_read_register(client, REG_HEATING_TARGET, &original_heating) != 0) {
+            fprintf(stderr, "Self-test: Failed to read original heating setpoint\n");
+            report.all_critical_passed = false;
+            r->write_ok = false;
+        } else {
+            // Write test value (45 C)
+            int16_t test_value = temp_to_raw(SELFTEST_DHW_TARGET_TEMP);
+            if (modbus_write_register(client, REG_HEATING_TARGET, (uint16_t)test_value) == 0) {
+                r->write_ok = true;
+                
+                // Verify by reading back
+                int16_t verify_value;
+                if (modbus_read_register(client, REG_HEATING_TARGET, &verify_value) == 0) {
+                    if (verify_value == test_value) {
+                        r->verify_ok = true;
+                        printf("Self-test: Write verify passed (heating setpoint = %.1f C)\n", raw_to_temp(verify_value));
+                    } else {
+                        fprintf(stderr, "Self-test: Write verify failed (wrote %.1f, read %.1f)\n", 
+                                raw_to_temp(test_value), raw_to_temp(verify_value));
+                        report.all_critical_passed = false;
                     }
+                } else {
+                    fprintf(stderr, "Self-test: Failed to verify heating setpoint\n");
+                    report.all_critical_passed = false;
                 }
+                
+                // Restore original heating setpoint
+                if (modbus_write_register(client, REG_HEATING_TARGET, (uint16_t)original_heating) != 0) {
+                    fprintf(stderr, "Self-test: Failed to restore original heating setpoint\n");
+                    report.all_critical_passed = false;
+                } else {
+                    printf("Self-test: Restored heating setpoint to %.1f C\n", raw_to_temp(original_heating));
+                }
+            } else {
+                fprintf(stderr, "Self-test: Failed to write heating setpoint\n");
+                report.all_critical_passed = false;
             }
         }
-        
-        // Update report counters
-        if (result->read_ok && result->write_ok && result->verify_ok) {
+    }
+    
+    // Count passed tests
+    for (int i = 0; i < report.total; i++) {
+        selftest_result_t *r = &report.results[i];
+        if (r->read_ok && r->write_ok && r->verify_ok) {
             report.passed++;
         } else {
             report.failed++;
-            if (entry->critical) {
-                report.all_critical_passed = false;
-            }
         }
     }
     
@@ -101,14 +199,14 @@ void selftest_print_report(const selftest_report_t *report) {
     }
     
     printf("\n========== Self-Test Report ==========\n");
-    printf("\nRegister Results:\n");
-    printf("%-20s  %8s  %6s  %6s  %6s  %8s\n", 
-           "Name", "Address", "Read", "Write", "Verify", "Value");
+    printf("\nTest Results:\n");
+    printf("%-20s  %8s  %6s  %6s  %6s  %10s\n", 
+           "Test", "Address", "Read", "Write", "Verify", "Value");
     printf("----------------------------------------------------------------\n");
     
     for (int i = 0; i < report->total; i++) {
         const selftest_result_t *r = &report->results[i];
-        printf("%-20s  0x%04X  %6s  %6s  %6s  %8d\n",
+        printf("%-20s  0x%04X  %6s  %6s  %6s  %10d\n",
                r->name,
                r->address,
                r->read_ok ? "OK" : "FAIL",
@@ -119,7 +217,7 @@ void selftest_print_report(const selftest_report_t *report) {
     
     printf("----------------------------------------------------------------\n");
     printf("\nSummary:\n");
-    printf("  Total registers tested: %d\n", report->total);
+    printf("  Total tests: %d\n", report->total);
     printf("  Passed: %d\n", report->passed);
     printf("  Failed: %d\n", report->failed);
     printf("  All critical passed: %s\n", report->all_critical_passed ? "YES" : "NO");

@@ -14,6 +14,8 @@ static volatile sig_atomic_t g_running = 1;
 static void signal_handler(int sig) {
     (void)sig;
     g_running = 0;
+    // Wake up the web server poll loop
+    web_server_stop();
 }
 
 int main(int argc, char *argv[]) {
@@ -57,7 +59,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    control_loop_start(client, &cmd_queue, &status_queue);
+    if (control_loop_start(client, &cmd_queue, &status_queue) != 0) {
+        fprintf(stderr, "[Main] Failed to start control loop (self-test failed)\n");
+        modbus_client_destroy(client);
+        return 1;
+    }
 
     if (web_server_init(web_port, "static", &cmd_queue, &status_queue) != 0) {
         fprintf(stderr, "[Main] Failed to initialize web server\n");

@@ -8,9 +8,10 @@
 
 // Start the control loop thread (connects, polls, runs control loop)
 // Reads from cmd_queue, writes to status_queue
-void control_loop_start(modbus_client_t *client,
-                         spsc_cmd_t_queue_t *cmd_queue,
-                         spsc_status_snapshot_t_queue_t *status_queue);
+// Returns 0 on success, -1 on self-test failure
+int control_loop_start(modbus_client_t *client,
+                       spsc_cmd_t_queue_t *cmd_queue,
+                       spsc_status_snapshot_t_queue_t *status_queue);
 
 // Stop the control loop thread
 void control_loop_stop(void);
