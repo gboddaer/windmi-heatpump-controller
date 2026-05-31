@@ -43,6 +43,7 @@ static int desired_working_mode = 3;  // Default to DHW+Heating
 // These are updated when the user explicitly sets a target.
 static float saved_dhw_target = 46.0f;
 static float saved_heating_target = 45.0f;
+static bool saved_targets_initialized = false;  // Set true after first read from device
 
 // Minimum targets used to effectively disable a circuit:
 #define DHW_TARGET_MIN      40.0f   // Minimum DHW target (device limit)
@@ -211,8 +212,9 @@ static bool read_status(status_snapshot_t *status) {
     // Read DHW target (0x0194) — critical
     if (modbus_read_register(thread_client, REG_DHW_TARGET, &raw) == 0) {
         status->dhw_target = raw_to_temp(raw);
-        // Only save user targets when in DHW+Heating mode (not overriding)
-        if (desired_working_mode == 3) {
+        // Initialize saved targets from device on first read only
+        // After that, saved targets are only updated by explicit user commands
+        if (!saved_targets_initialized) {
             saved_dhw_target = status->dhw_target;
         }
     } else {
@@ -223,8 +225,7 @@ static bool read_status(status_snapshot_t *status) {
     if (modbus_read_register(thread_client, REG_HEATING_TARGET, &raw) == 0) {
         status->heating_target = raw_to_temp(raw);
         last_heating_target = status->heating_target;
-        // Only save user targets when in DHW+Heating mode (not overriding)
-        if (desired_working_mode == 3) {
+        if (!saved_targets_initialized) {
             saved_heating_target = status->heating_target;
         }
     } else {
@@ -261,6 +262,9 @@ static bool read_status(status_snapshot_t *status) {
     }
     
     status->device_online = ok;
+    if (ok) {
+        saved_targets_initialized = true;
+    }
     return ok;
 }
 
