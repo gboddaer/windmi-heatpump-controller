@@ -119,10 +119,26 @@ main {
 
 .status-row {
     display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
+    flex-wrap: nowrap;
+    gap: 8px;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.status-row::-webkit-scrollbar {
+    height: 6px;
+}
+
+.status-row::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+}
+
+.status-row::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
 }
 
 .status-item {
@@ -379,6 +395,11 @@ footer {
     .status-bar {
         flex-direction: column;
         gap: 10px;
+    }
+
+    .status-row {
+        flex-wrap: wrap;
+        justify-content: space-between;
     }
 
     .slider-container {
