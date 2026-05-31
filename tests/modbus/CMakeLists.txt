@@ -3,3 +3,6 @@ add_executable(test_modbus
 )
 target_link_libraries(test_modbus PRIVATE windmi_modbus windmi_utils GTest::gtest_main)
 target_include_directories(test_modbus PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+
+# Register tests
+add_test(NAME test_modbus COMMAND test_modbus)
