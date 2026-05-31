@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
 #include "control_loop.h"
 #include "config.h"
 #include "selftest.h"
@@ -25,8 +26,22 @@ static spsc_cmd_t_queue_t *thread_cmd_queue = NULL;
 static spsc_status_snapshot_t_queue_t *thread_status_queue = NULL;
 
 // Current control state
-static priority_mode_t current_priority = PRIORITY_HEATING;
+static priority_mode_t current_priority = PRIORITY_DHW;  // Default to DHW priority
+static int current_mode = MODE_SET_HEAT_DHW;  // Device mode we last set (0, 1, or 2)
 static float last_heating_target = 45.0f;
+
+// Track desired working mode from user commands:
+// -1 = not set (use automatic control logic)
+//  0 = user wants OFF
+//  1 = user wants DHW-only
+//  2 = user wants Heating-only
+//  3 = user wants DHW+Heating
+static int desired_working_mode = 3;  // Default to DHW+Heating
+
+// Semaphore for immediate control loop wake-up
+static pthread_mutex_t kick_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t kick_cond = PTHREAD_COND_INITIALIZER;
+static bool kicked = false;
 
 // Convert raw register value to temperature (divide by 10)
 static inline float raw_to_temp(int16_t raw) {
@@ -68,8 +83,15 @@ static priority_mode_t determine_priority(status_snapshot_t *status) {
 }
 
 // Set the running mode on the heat pump
+// Only modes 0 (Off), 1 (Cool+DHW), 2 (Heat+DHW) are valid device modes
 static int set_running_mode(int mode) {
     if (!thread_client) {
+        return -1;
+    }
+    
+    // Validate mode: only 0, 1, 2 are allowed by the device
+    if (mode < 0 || mode > 2) {
+        fprintf(stderr, "Invalid device mode %d: only 0 (Off), 1 (Cool+DHW), 2 (Heat+DHW) supported\n", mode);
         return -1;
     }
     
@@ -155,10 +177,23 @@ static bool read_status(status_snapshot_t *status) {
         ok = false;
     }
     
-    // Read running mode (0x002D) — critical
+    // Read running mode setting (0x002C) — read/write, values: 0=Off, 1=Cool+DHW, 2=Heat+DHW
+    // Also update our tracking of the current device mode
     if (modbus_read_register(thread_client, REG_RUNNING_MODE, &raw) == 0) {
         status->running_mode = raw;
-        status->is_running = (raw != MODE_OFF);
+        // Update current_mode from the device (may have been changed externally)
+        if (raw == 0 || raw == 1 || raw == 2) {
+            current_mode = raw;
+        }
+    } else {
+        ok = false;
+    }
+    
+    // Read running status (0x002D) — read-only, actual device state
+    // Values: 0=Off, 1=Cool, 2=Heat, 4=DHW, 7=Defrost, 20=Anti-freeze
+    if (modbus_read_register(thread_client, REG_RUNNING_STATUS, &raw) == 0) {
+        status->running_status = raw;
+        status->is_running = (raw != MODE_STATUS_OFF);
     } else {
         ok = false;
     }
@@ -178,12 +213,33 @@ static bool read_status(status_snapshot_t *status) {
         status->heating_target = last_heating_target;
     }
 
-    // Read DHW priority (0x028F) — critical
+    // Read DHW priority (0x02BF) — critical
     if (modbus_read_register(thread_client, REG_DHW_PRIORITY, &raw) == 0) {
         status->dhw_priority = (raw != 0);
         current_priority = status->dhw_priority ? PRIORITY_DHW : PRIORITY_HEATING;
+        // Note: current_mode is managed by apply_control_logic, not here
     } else {
         ok = false;
+    }
+    
+    // Read power monitoring registers
+    int16_t ac_current_raw, dc_current_raw, ac_voltage_raw, dc_voltage_raw;
+    if (modbus_read_register(thread_client, REG_AC_CURRENT, &ac_current_raw) == 0 &&
+        modbus_read_register(thread_client, REG_DC_CURRENT, &dc_current_raw) == 0 &&
+        modbus_read_register(thread_client, REG_AC_VOLTAGE, &ac_voltage_raw) == 0 &&
+        modbus_read_register(thread_client, REG_DC_VOLTAGE, &dc_voltage_raw) == 0) {
+        // Apply scaling factors per device spec
+        status->ac_current = ac_current_raw * 2.0f;      // Actual = Display * 2
+        status->dc_current = dc_current_raw * 4.0f;      // Actual = Display * 4
+        status->ac_voltage = (float)ac_voltage_raw;      // Actual = Display
+        status->dc_voltage = dc_voltage_raw / 2.0f;      // Actual = Display / 2
+        status->ac_power = status->ac_voltage * status->ac_current;  // Power in Watts (AC)
+    } else {
+        status->ac_current = 0.0f;
+        status->dc_current = 0.0f;
+        status->ac_voltage = 0.0f;
+        status->dc_voltage = 0.0f;
+        status->ac_power = 0.0f;
     }
     
     status->device_online = ok;
@@ -197,18 +253,27 @@ static void process_commands(void) {
     }
     
     cmd_t cmd;
+    int cmd_count = 0;
     while (spsc_pop_cmd_t(thread_cmd_queue, &cmd)) {
+        cmd_count++;
+        printf("Control loop: Processing command #%d - type=%d", cmd_count, cmd.type);
+        
+        // Kick the loop to process immediately after handling commands
+        
         switch (cmd.type) {
             case CMD_SET_DHW_TEMP:
+                printf(" (CMD_SET_DHW_TEMP, temp=%.1f°C)\n", cmd.float_val);
                 set_dhw_target(cmd.float_val);
                 break;
                 
             case CMD_SET_HEATING_TEMP:
+                printf(" (CMD_SET_HEATING_TEMP, temp=%.1f°C)\n", cmd.float_val);
                 set_heating_target(cmd.float_val);
                 last_heating_target = cmd.float_val;
                 break;
                 
             case CMD_SET_PRIORITY:
+                printf(" (CMD_SET_PRIORITY, pri_val=%d)\n", cmd.int_val);
                 // int_val == 1 means DHW priority, int_val == 0 means heating priority
                 // (matches REG_DHW_PRIORITY register: 1=DHW, 0=heating)
                 if (modbus_write_register(thread_client, REG_DHW_PRIORITY, (uint16_t)cmd.int_val) == 0) {
@@ -220,49 +285,84 @@ static void process_commands(void) {
                 }
                 break;
                 
+            case CMD_SET_RUNNING_MODE:
+                printf(" (CMD_SET_RUNNING_MODE, mode=%d)\n", cmd.int_val);
+                // Working mode: 0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating
+                // Map to device modes (device only supports 0, 1, 2):
+                // 0 (Off)          -> 0 (Off)
+                // 1 (DHW-only)     -> 2 (Heat+DHW) with heating target raised very high
+                // 2 (Heating-only) -> 2 (Heat+DHW) with DHW target lowered (or accept device heats DHW too)
+                // 3 (DHW+Heating)  -> 2 (Heat+DHW)
+                //
+                // Since the device only has Off, Cool+DHW, and Heat+DHW modes,
+                // we cannot truly have "DHW only" or "Heating only".
+                // We use Heat+DHW (mode 2) for any combination that includes heating,
+                // and Off (mode 0) for complete shutdown.
+                
+                desired_working_mode = cmd.int_val;
+                
+                int target_device_mode;
+                switch (cmd.int_val) {
+                    case 0:  target_device_mode = MODE_SET_OFF;        break;
+                    case 1:  target_device_mode = MODE_SET_HEAT_DHW;   break;  // DHW-only: device has no separate mode
+                    case 2:  target_device_mode = MODE_SET_HEAT_DHW;   break;  // Heating-only: device has no separate mode
+                    case 3:  target_device_mode = MODE_SET_HEAT_DHW;   break;  // DHW+Heating
+                    default: target_device_mode = MODE_SET_HEAT_DHW;  break;
+                }
+                
+                if (set_running_mode(target_device_mode) == 0) {
+                    current_mode = target_device_mode;
+                    printf("Control loop: Working mode set to %d (device mode=%d)\n", cmd.int_val, target_device_mode);
+                } else {
+                    fprintf(stderr, "Control loop: Failed to set running mode\n");
+                }
+                break;
+                
             default:
-                fprintf(stderr, "Unknown command type: %d\n", cmd.type);
+                fprintf(stderr, "Control loop: Unknown command type: %d\n", cmd.type);
                 break;
         }
+    }
+    if (cmd_count == 0) {
+        // No commands to process - this is normal, just silent
+    } else {
+        printf("Control loop: Batch complete - processed %d command(s)\n", cmd_count);
+        // Signal that commands were processed, wake up main loop if sleeping
+        pthread_mutex_lock(&kick_mutex);
+        kicked = true;
+        pthread_cond_signal(&kick_cond);
+        pthread_mutex_unlock(&kick_mutex);
     }
 }
 
 // Apply control logic based on current state
-// When DHW priority is active:
-//   - If tank < target - 3°C, switch heat pump to DHW mode
-//   - If tank >= target and space heating needed, switch back to Heat mode
+// Respects the user's desired working mode:
+// - desired_working_mode 0 = OFF: keep device in MODE_SET_OFF
+// - desired_working_mode 1 = DHW only: keep device in MODE_SET_HEAT_DHW (device limitation)
+// - desired_working_mode 2 = Heating only: keep device in MODE_SET_HEAT_DHW (device limitation)
+// - desired_working_mode 3 = DHW+Heating: keep device in MODE_SET_HEAT_DHW
+// We only set the mode if it differs from current_mode (to avoid spamming).
 static void apply_control_logic(status_snapshot_t *status) {
     if (!status) {
         return;
     }
     
-    priority_mode_t desired = determine_priority(status);
+    // Determine what device mode we should be in
+    int desired_device_mode;
+    switch (desired_working_mode) {
+        case 0:  desired_device_mode = MODE_SET_OFF;        break;  // Off
+        case 1:  desired_device_mode = MODE_SET_HEAT_DHW;   break;  // DHW only (device limitation)
+        case 2:  desired_device_mode = MODE_SET_HEAT_DHW;   break;  // Heating only (device limitation)
+        case 3:  desired_device_mode = MODE_SET_HEAT_DHW;   break;  // DHW + Heating
+        default: desired_device_mode = MODE_SET_HEAT_DHW;   break;  // Fallback
+    }
     
-    if (desired == PRIORITY_DHW) {
-        // DHW tank needs heating: switch to DHW mode if currently heating
-        if (status->running_mode == MODE_HEAT) {
-            printf("Control loop: DHW needs heating (tank=%.1f target=%.1f), switching to DHW mode\n",
-                   status->dhw_tank_temp, status->dhw_target);
-            if (set_running_mode(MODE_DHW) == 0) {
-                current_priority = PRIORITY_DHW;
-            }
-        }
-        if (current_priority != PRIORITY_DHW) {
-            printf("Control loop: Switching to DHW priority\n");
-            current_priority = PRIORITY_DHW;
-        }
-    } else {
-        // DHW satisfied: switch back to heating if needed
-        if (status->running_mode == MODE_DHW && heating_is_needed(status)) {
-            printf("Control loop: DHW target reached (tank=%.1f), switching to Heat mode\n",
-                   status->dhw_tank_temp);
-            if (set_running_mode(MODE_HEAT) == 0) {
-                current_priority = PRIORITY_HEATING;
-            }
-        }
-        if (current_priority != PRIORITY_HEATING) {
-            printf("Control loop: Switching to heating priority\n");
-            current_priority = PRIORITY_HEATING;
+    // Only change mode if it doesn't match
+    if (current_mode != desired_device_mode) {
+        printf("Control loop: Correcting device mode from %d to %d (desired working mode=%d)\n",
+               current_mode, desired_device_mode, desired_working_mode);
+        if (set_running_mode(desired_device_mode) == 0) {
+            current_mode = desired_device_mode;
         }
     }
 }
@@ -272,6 +372,17 @@ static void *control_loop_thread_func(void *arg) {
     (void)arg;
     
     printf("Control loop thread started\n");
+    
+    // Publish initial status snapshot immediately so web server has data
+    {
+        status_snapshot_t initial_status;
+        memset(&initial_status, 0, sizeof(initial_status));
+        if (read_status(&initial_status)) {
+            initial_status.device_online = true;
+            initial_status.working_mode = desired_working_mode;
+            spsc_push_status_snapshot_t(thread_status_queue, initial_status);
+        }
+    }
     
     // Main loop
     while (!stop_requested) {
@@ -310,6 +421,9 @@ static void *control_loop_thread_func(void *arg) {
             // Apply control logic
             apply_control_logic(&status);
             
+            // Set working mode for status reporting
+            status.working_mode = desired_working_mode;
+            
             // Publish status to queue
             if (!spsc_push_status_snapshot_t(thread_status_queue, status)) {
                 fprintf(stderr, "Control loop: Status queue full, dropping snapshot\n");
@@ -318,6 +432,7 @@ static void *control_loop_thread_func(void *arg) {
             fprintf(stderr, "Control loop: Failed to read status\n");
             // Publish offline status
             status.device_online = false;
+            status.working_mode = desired_working_mode;
             if (!spsc_push_status_snapshot_t(thread_status_queue, status)) {
                 fprintf(stderr, "Control loop: Status queue full, dropping snapshot\n");
             }
@@ -331,7 +446,24 @@ static void *control_loop_thread_func(void *arg) {
         long sleep_ms = CONTROL_LOOP_INTERVAL_S * 1000 - elapsed_ms;
         
         if (sleep_ms > 0) {
-            usleep(sleep_ms * 1000);
+            // Wait with timeout, but can be woken up early if kicked
+            pthread_mutex_lock(&kick_mutex);
+            kicked = false;
+            struct timespec wait_time;
+            clock_gettime(CLOCK_MONOTONIC, &wait_time);
+            long wait_sec = sleep_ms / 1000;
+            long wait_nsec = (sleep_ms % 1000) * 1000000;
+            wait_time.tv_sec += wait_sec;
+            wait_time.tv_nsec += wait_nsec;
+            if (wait_time.tv_nsec >= 1000000000) {
+                wait_time.tv_sec++;
+                wait_time.tv_nsec -= 1000000000;
+            }
+            while (!kicked && !stop_requested) {
+                int ret = pthread_cond_timedwait(&kick_cond, &kick_mutex, &wait_time);
+                if (ret == ETIMEDOUT) break;
+            }
+            pthread_mutex_unlock(&kick_mutex);
         }
     }
     
@@ -348,7 +480,8 @@ static void *control_loop_thread_func(void *arg) {
 
 int control_loop_start(modbus_client_t *client,
                        spsc_cmd_t_queue_t *cmd_queue,
-                       spsc_status_snapshot_t_queue_t *status_queue) {
+                       spsc_status_snapshot_t_queue_t *status_queue,
+                       bool run_selftest) {
     if (control_loop_running) {
         printf("Control loop already running\n");
         return -1;
@@ -366,15 +499,17 @@ int control_loop_start(modbus_client_t *client,
         return -1;
     }
     
-    // Run self-test synchronously before starting the thread
-    selftest_report_t selftest_result = selftest_run(client);
-    printf("Self-test: %d/%d registers passed\n", selftest_result.passed, selftest_result.total);
-    
-    if (!selftest_result.all_critical_passed) {
-        fprintf(stderr, "Self-test failed: critical registers did not pass\n");
-        selftest_print_report(&selftest_result);
-        modbus_client_disconnect(client);
-        return -1;
+    // Run self-test if requested (only during startup, not in normal operation)
+    if (run_selftest) {
+        selftest_report_t selftest_result = selftest_run(client);
+        printf("Self-test: %d/%d registers passed\n", selftest_result.passed, selftest_result.total);
+        
+        if (!selftest_result.all_critical_passed) {
+            fprintf(stderr, "Self-test failed: critical registers did not pass\n");
+            selftest_print_report(&selftest_result);
+            modbus_client_disconnect(client);
+            return -1;
+        }
     }
     
     // Create the thread

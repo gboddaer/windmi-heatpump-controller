@@ -9,21 +9,13 @@
 // Producer calls spsc_push(), consumer calls spsc_pop()
 // Only safe for ONE producer thread and ONE consumer thread
 
-#define SPSC_QUEUE_DECLARE(TYPE, SIZE) \
-    typedef struct { \
-        TYPE buf[SIZE]; \
-        _Alignas(64) volatile uint32_t head; \
-        _Alignas(64) volatile uint32_t tail; \
-    } spsc_##TYPE##_queue_t
+// ---- Type definitions ----
 
-#define SPSC_PUSH(q, item) spsc_push_##TYPE((q), (item))
-#define SPSC_POP(q, item)  spsc_pop_##TYPE((q), (item))
-
-// Generic SPSC queue for cmd_t
 typedef enum {
     CMD_SET_DHW_TEMP,
     CMD_SET_HEATING_TEMP,
     CMD_SET_PRIORITY,
+    CMD_SET_RUNNING_MODE,
 } cmd_type_t;
 
 typedef struct {
@@ -32,10 +24,50 @@ typedef struct {
     int int_val;
 } cmd_t;
 
-SPSC_QUEUE_DECLARE(cmd_t, 16);
+typedef struct {
+    float outdoor_temp;
+    float indoor_temp;
+    float leaving_water_temp;
+    float dhw_tank_temp;
+    float dhw_target;
+    float heating_target;
+    int running_mode;        // From REG_RUNNING_MODE (0x002C): 0=Off, 1=Cool+DHW, 2=Heat+DHW
+    int running_status;       // From REG_RUNNING_STATUS (0x002D): 0=Off, 1=Cool, 2=Heat, 4=DHW, 7=Defrost, 20=Anti-freeze
+    bool dhw_priority;
+    bool is_running;
+    bool device_online;
+    // Power monitoring
+    float ac_current;      // AC current in Amps (raw * 2)
+    float dc_current;      // DC current in Amps (raw * 4)
+    float ac_voltage;      // AC voltage in Volts (raw)
+    float dc_voltage;      // DC voltage in Volts (raw / 2)
+    float ac_power;        // AC power in Watts (ac_voltage * ac_current)
+    // Working mode (0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating)
+    int working_mode;
+} status_snapshot_t;
+
+// ---- Queue sizes ----
+#define CMD_QUEUE_SIZE         16
+#define STATUS_QUEUE_SIZE      32
+
+// ---- Queue struct definitions ----
+
+typedef struct {
+    cmd_t buf[CMD_QUEUE_SIZE];
+    _Alignas(64) volatile uint32_t head;
+    _Alignas(64) volatile uint32_t tail;
+} spsc_cmd_t_queue_t;
+
+typedef struct {
+    status_snapshot_t buf[STATUS_QUEUE_SIZE];
+    _Alignas(64) volatile uint32_t head;
+    _Alignas(64) volatile uint32_t tail;
+} spsc_status_snapshot_t_queue_t;
+
+// ---- cmd_t queue operations ----
 
 static inline bool spsc_push_cmd_t(spsc_cmd_t_queue_t *q, cmd_t item) {
-    uint32_t next_head = (q->head + 1) % 16;
+    uint32_t next_head = (q->head + 1) % CMD_QUEUE_SIZE;
     if (next_head == q->tail) {
         return false; // full
     }
@@ -51,28 +83,14 @@ static inline bool spsc_pop_cmd_t(spsc_cmd_t_queue_t *q, cmd_t *item) {
     }
     *item = q->buf[q->tail];
     __asm__ __volatile__("" ::: "memory"); // load-load barrier
-    q->tail = (q->tail + 1) % 16;
+    q->tail = (q->tail + 1) % CMD_QUEUE_SIZE;
     return true;
 }
 
-// Generic SPSC queue for status_snapshot_t
-typedef struct {
-    float outdoor_temp;
-    float indoor_temp;
-    float leaving_water_temp;
-    float dhw_tank_temp;
-    float dhw_target;
-    float heating_target;
-    int running_mode;
-    bool dhw_priority;
-    bool is_running;
-    bool device_online;
-} status_snapshot_t;
-
-SPSC_QUEUE_DECLARE(status_snapshot_t, 4);
+// ---- status_snapshot_t queue operations ----
 
 static inline bool spsc_push_status_snapshot_t(spsc_status_snapshot_t_queue_t *q, status_snapshot_t item) {
-    uint32_t next_head = (q->head + 1) % 4;
+    uint32_t next_head = (q->head + 1) % STATUS_QUEUE_SIZE;
     if (next_head == q->tail) {
         return false;
     }
@@ -88,7 +106,7 @@ static inline bool spsc_pop_status_snapshot_t(spsc_status_snapshot_t_queue_t *q,
     }
     *item = q->buf[q->tail];
     __asm__ __volatile__("" ::: "memory");
-    q->tail = (q->tail + 1) % 4;
+    q->tail = (q->tail + 1) % STATUS_QUEUE_SIZE;
     return true;
 }
 

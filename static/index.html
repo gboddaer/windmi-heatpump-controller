@@ -13,6 +13,7 @@
             <div class="status-bar">
                 <span id="deviceStatus" class="status-indicator offline">Offline</span>
                 <span id="runStatus" class="status-indicator stopped">Stopped</span>
+                <button id="powerBtn" class="power-btn off">OFF</button>
             </div>
         </header>
 
@@ -36,6 +37,17 @@
                         <span class="label">Last Update</span>
                         <span id="lastUpdate" class="value">-</span>
                     </div>
+                </div>
+            </section>
+
+            <section id="powerSection" class="temps-card" style="display:none;">
+                <h2>Power Monitoring</h2>
+                <div class="power-row">
+                    <div class="power-item"><span class="label">AC Current:</span> <span id="acCurrentValue" class="value">-</span></div>
+                    <div class="power-item"><span class="label">DC Current:</span> <span id="dcCurrentValue" class="value">-</span></div>
+                    <div class="power-item"><span class="label">AC Voltage:</span> <span id="acVoltageValue" class="value">-</span></div>
+                    <div class="power-item"><span class="label">DC Voltage:</span> <span id="dcVoltageValue" class="value">-</span></div>
+                    <div class="power-item"><span class="label">AC Power:</span> <span id="acPowerValue" class="value">-</span></div>
                 </div>
             </section>
 
@@ -82,8 +94,18 @@
                     <button id="setHeatingBtn" class="btn">Set Heating</button>
                 </div>
 
-                <div class="control-group priority-group">
-                    <label>Priority Mode</label>
+                <div class="control-group mode-group">
+                    <label>Working Mode</label>
+                    <div class="mode-selector">
+                        <button id="modeOffBtn" class="mode-btn">OFF</button>
+                        <button id="modeDhwBtn" class="mode-btn">DHW Only</button>
+                        <button id="modeHeatBtn" class="mode-btn">Heating Only</button>
+                        <button id="modeBothBtn" class="mode-btn active">DHW + Heating</button>
+                    </div>
+                </div>
+                
+                <div class="control-group priority-group" id="prioritySection">
+                    <label>Priority (when both enabled)</label>
                     <div class="toggle-container">
                         <button id="dhwPriorityBtn" class="toggle-btn active">DHW</button>
                         <button id="heatingPriorityBtn" class="toggle-btn">Heating</button>

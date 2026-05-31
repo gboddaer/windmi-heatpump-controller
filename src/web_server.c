@@ -14,14 +14,27 @@ static spsc_status_snapshot_t_queue_t *g_status_queue = NULL;
 static status_snapshot_t g_last_status;
 
 static const char *mode_to_string(int mode) {
+    // Values from REG_RUNNING_MODE (0x002C), the writable mode register
+    // 0=Off, 1=Cool+DHW, 2=Heat+DHW
     switch (mode) {
-    case MODE_OFF:              return "off";
-    case MODE_COOL:             return "cool";
-    case MODE_HEAT:             return "heat";
-    case MODE_DHW:              return "dhw";
-    case MODE_DEFROST:          return "defrost";
-    case MODE_HOME_ANTIFREEZE:  return "antifreeze";
-    default:                    return "unknown";
+    case 0:  return "off";
+    case 1:  return "cool+dhw";
+    case 2:  return "heat+dhw";
+    default: return "unknown";
+    }
+}
+
+static const char *status_to_string(int status) {
+    // Values from REG_RUNNING_STATUS (0x002D), the read-only status register
+    // 0=Off, 1=Cool, 2=Heat, 4=DHW, 7=Defrost, 20=Home anti-freeze
+    switch (status) {
+    case 0:  return "off";
+    case 1:  return "cool";
+    case 2:  return "heat";
+    case 4:  return "dhw";
+    case 7:  return "defrost";
+    case 20: return "antifreeze";
+    default: return "unknown";
     }
 }
 
@@ -41,7 +54,7 @@ static void api_status_handler(struct mg_connection *c) {
         g_last_status = snapshot;
     }
 
-    char response[1024];
+    char response[2048];
     snprintf(response, sizeof(response),
         "{\"dhwTemperature\":%.1f,"
         "\"dhwTarget\":%.1f,"
@@ -50,9 +63,16 @@ static void api_status_handler(struct mg_connection *c) {
         "\"outdoorTemperature\":%.1f,"
         "\"leavingWaterTemperature\":%.1f,"
         "\"mode\":\"%s\","
+        "\"runningStatus\":\"%s\","
         "\"priority\":\"%s\","
         "\"status\":\"%s\","
-        "\"deviceOnline\":%s}\n",
+        "\"deviceOnline\":%s,"
+        "\"acCurrent\":%.2f,"
+        "\"dcCurrent\":%.2f,"
+        "\"acVoltage\":%.1f,"
+        "\"dcVoltage\":%.1f,"
+        "\"acPower\":%.1f,"
+        "\"workingMode\":%d}\n",
         g_last_status.dhw_tank_temp,
         g_last_status.dhw_target,
         g_last_status.leaving_water_temp,
@@ -60,9 +80,16 @@ static void api_status_handler(struct mg_connection *c) {
         g_last_status.outdoor_temp,
         g_last_status.leaving_water_temp,
         mode_to_string(g_last_status.running_mode),
+        status_to_string(g_last_status.running_status),
         g_last_status.dhw_priority ? "dhw" : "heating",
         g_last_status.is_running ? "running" : "stopped",
-        g_last_status.device_online ? "true" : "false"
+        g_last_status.device_online ? "true" : "false",
+        g_last_status.ac_current,
+        g_last_status.dc_current,
+        g_last_status.ac_voltage,
+        g_last_status.dc_voltage,
+        g_last_status.ac_power,
+        g_last_status.working_mode
     );
 
     send_json_reply(c, 200, response);
@@ -85,12 +112,16 @@ static void api_set_dhw_handler(struct mg_connection *c, struct mg_str *body) {
         return;
     }
 
+    printf("Web server: Received DHW set request - temperature=%.1f°C (range: %.0f-%.0f)\n",
+           temperature, DHW_TEMP_MIN, DHW_TEMP_MAX);
+
     cmd_t cmd = {
         .type = CMD_SET_DHW_TEMP,
         .float_val = (float)temperature,
         .int_val = 0
     };
-    spsc_push_cmd_t(g_cmd_queue, cmd);
+    bool pushed = spsc_push_cmd_t(g_cmd_queue, cmd);
+    printf("Web server: DHW command pushed to queue (temp=%.1f, pushed=%d)\n", temperature, pushed);
     send_json_reply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
 }
 
@@ -111,12 +142,16 @@ static void api_set_heating_handler(struct mg_connection *c, struct mg_str *body
         return;
     }
 
+    printf("Web server: Received heating set request - temperature=%.1f°C (range: %.0f-%.0f)\n",
+           temperature, HEATING_TEMP_MIN, HEATING_TEMP_MAX);
+
     cmd_t cmd = {
         .type = CMD_SET_HEATING_TEMP,
         .float_val = (float)temperature,
         .int_val = 0
     };
-    spsc_push_cmd_t(g_cmd_queue, cmd);
+    bool pushed = spsc_push_cmd_t(g_cmd_queue, cmd);
+    printf("Web server: Heating command pushed to queue (temp=%.1f, pushed=%d)\n", temperature, pushed);
     send_json_reply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
 }
 
@@ -143,14 +178,55 @@ static void api_set_priority_handler(struct mg_connection *c, struct mg_str *bod
         return;
     }
 
+    printf("Web server: Received priority set request - priority=%s (pri_val=%d)\n",
+           priority, pri_val);
     free(priority);
-
+    
     cmd_t cmd = {
         .type = CMD_SET_PRIORITY,
         .float_val = 0.0f,
         .int_val = pri_val
     };
-    spsc_push_cmd_t(g_cmd_queue, cmd);
+    bool pushed = spsc_push_cmd_t(g_cmd_queue, cmd);
+    printf("Web server: Priority command pushed to queue (pri_val=%d, pushed=%d)\n", pri_val, pushed);
+    send_json_reply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
+}
+
+static void api_set_mode_handler(struct mg_connection *c, struct mg_str *body) {
+    if (body->len == 0) {
+        send_json_reply(c, 400, "{\"error\":\"Empty request body\"}");
+        return;
+    }
+    
+    // Parse mode (0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating)
+    long mode = mg_json_get_long(*body, "$.mode", -1);
+    if (mode == -1) {
+        send_json_reply(c, 400, "{\"error\":\"Missing mode parameter\"}");
+        return;
+    }
+    
+    // Parse priority (optional, defaults to DHW)
+    long priority = mg_json_get_long(*body, "$.priority", 1); // Default to DHW priority
+    
+    printf("Web server: Received mode set request - mode=%ld, priority=%ld\n", mode, priority);
+    
+    // Map working mode to device mode:
+    // 0 (Off) -> Mode 0 (Off)
+    // 1 (DHW-only) -> Mode 0 (Off) + set heating target very high
+    // 2 (Heating-only) -> Mode 2 (Heat+DHW) + set DHW target very high
+    // 3 (DHW+Heating) -> Mode 2 (Heat+DHW)
+    
+    cmd_t mode_cmd = {
+        .type = CMD_SET_RUNNING_MODE,
+        .int_val = mode
+    };
+    
+    // If DHW-only, also queue a command to disable heating
+    // If Heating-only, also queue a command to disable DHW
+    
+    bool pushed = spsc_push_cmd_t(g_cmd_queue, mode_cmd);
+    printf("Web server: Mode command pushed to queue (mode=%ld, pushed=%d)\n", mode, pushed);
+    
     send_json_reply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
 }
 
@@ -180,6 +256,12 @@ static void http_handler(struct mg_connection *c, int ev, void *ev_data) {
     } else if (mg_strcmp(hm->uri, mg_str("/api/set-priority")) == 0) {
         if (mg_strcasecmp(hm->method, mg_str("POST")) == 0) {
             api_set_priority_handler(c, &hm->body);
+        } else {
+            send_json_reply(c, 405, "{\"error\":\"Method not allowed\"}");
+        }
+    } else if (mg_strcmp(hm->uri, mg_str("/api/set-mode")) == 0) {
+        if (mg_strcasecmp(hm->method, mg_str("POST")) == 0) {
+            api_set_mode_handler(c, &hm->body);
         } else {
             send_json_reply(c, 405, "{\"error\":\"Method not allowed\"}");
         }

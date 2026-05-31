@@ -7,12 +7,26 @@ const REFRESH_INTERVAL = 5000; // 5 seconds
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
+// Track pending user settings to prevent UI from reverting before server updates
+let pendingDhwTarget = null;
+let pendingHeatingTarget = null;
+
+// Working mode: 'off', 'dhw', 'heat', 'both'
+let currentMode = 'both';
+let currentPriority = 'dhw'; // 'dhw' or 'heating'
+
 // DOM Elements
 const elements = {
     deviceStatus: document.getElementById('deviceStatus'),
     runStatus: document.getElementById('runStatus'),
+    powerBtn: document.getElementById('powerBtn'),
     modeValue: document.getElementById('modeValue'),
     priorityValue: document.getElementById('priorityValue'),
+    prioritySection: document.getElementById('prioritySection'),
+    modeOffBtn: document.getElementById('modeOffBtn'),
+    modeDhwBtn: document.getElementById('modeDhwBtn'),
+    modeHeatBtn: document.getElementById('modeHeatBtn'),
+    modeBothBtn: document.getElementById('modeBothBtn'),
     outdoorTempValue: document.getElementById('outdoorTempValue'),
     lastUpdate: document.getElementById('lastUpdate'),
     dhwTempValue: document.getElementById('dhwTempValue'),
@@ -27,11 +41,16 @@ const elements = {
     setHeatingBtn: document.getElementById('setHeatingBtn'),
     dhwPriorityBtn: document.getElementById('dhwPriorityBtn'),
     heatingPriorityBtn: document.getElementById('heatingPriorityBtn'),
-    refreshCountdown: document.getElementById('refreshCountdown')
+    refreshCountdown: document.getElementById('refreshCountdown'),
+    powerSection: document.getElementById('powerSection'),
+    acCurrentValue: document.getElementById('acCurrentValue'),
+    dcCurrentValue: document.getElementById('dcCurrentValue'),
+    acVoltageValue: document.getElementById('acVoltageValue'),
+    dcVoltageValue: document.getElementById('dcVoltageValue'),
+    acPowerValue: document.getElementById('acPowerValue')
 };
 
 // State
-let currentPriority = 'dhw';
 let countdown = 5;
 let isUpdating = false;
 
@@ -61,14 +80,18 @@ elements.setDhwBtn.addEventListener('click', async () => {
         return;
     }
     
+    // Set pending value immediately to update UI
+    pendingDhwTarget = temperature;
     elements.setDhwBtn.disabled = true;
     elements.setDhwBtn.textContent = 'Setting...';
     
     try {
         await apiPost(API_SET_DHW_URL, { temperature });
         showNotification('DHW temperature set successfully', 'success');
+        pendingDhwTarget = null; // Clear pending on success
     } catch (error) {
         showNotification('Failed to set DHW temperature: ' + error.message, 'error');
+        pendingDhwTarget = null; // Clear pending on failure
     } finally {
         elements.setDhwBtn.disabled = false;
         elements.setDhwBtn.textContent = 'Set DHW';
@@ -83,21 +106,69 @@ elements.setHeatingBtn.addEventListener('click', async () => {
         return;
     }
     
+    // Set pending value immediately to update UI
+    pendingHeatingTarget = temperature;
     elements.setHeatingBtn.disabled = true;
     elements.setHeatingBtn.textContent = 'Setting...';
     
     try {
         await apiPost(API_SET_HEATING_URL, { temperature });
         showNotification('Heating temperature set successfully', 'success');
+        pendingHeatingTarget = null; // Clear pending on success
     } catch (error) {
         showNotification('Failed to set heating temperature: ' + error.message, 'error');
+        pendingHeatingTarget = null; // Clear pending on failure
     } finally {
         elements.setHeatingBtn.disabled = false;
         elements.setHeatingBtn.textContent = 'Set Heating';
     }
 });
 
-// Priority toggle
+// Working mode buttons
+function setWorkingMode(mode) {
+    if (mode === currentMode) return;
+    
+    currentMode = mode;
+    
+    // Update button states
+    elements.modeOffBtn.classList.toggle('active', mode === 'off');
+    elements.modeDhwBtn.classList.toggle('active', mode === 'dhw');
+    elements.modeHeatBtn.classList.toggle('active', mode === 'heat');
+    elements.modeBothBtn.classList.toggle('active', mode === 'both');
+    
+    // Show/hide priority section based on mode
+    elements.prioritySection.style.display = (mode === 'both') ? 'block' : 'none';
+    
+    // Send mode command to server
+    const modeMap = {
+        'off': 0,
+        'dhw': 1,  // Will be mapped to DHW-only on backend
+        'heat': 2, // Will be mapped to Heating-only on backend
+        'both': 2  // DHW + Heating
+    };
+    
+    apiPost('/api/set-mode', { mode: modeMap[mode], priority: currentPriority })
+        .then(() => showNotification('Mode set to ' + mode, 'success'))
+        .catch(error => showNotification('Failed to set mode: ' + error.message, 'error'));
+}
+
+elements.modeOffBtn.addEventListener('click', () => setWorkingMode('off'));
+elements.modeDhwBtn.addEventListener('click', () => setWorkingMode('dhw'));
+elements.modeHeatBtn.addEventListener('click', () => setWorkingMode('heat'));
+elements.modeBothBtn.addEventListener('click', () => setWorkingMode('both'));
+
+// Power button (ON/OFF toggle)
+elements.powerBtn.addEventListener('click', () => {
+    if (currentMode === 'off') {
+        // Turn on: restore to DHW+Heating (default on mode)
+        setWorkingMode('both');
+    } else {
+        // Turn off
+        setWorkingMode('off');
+    }
+});
+
+// Priority toggle (only active when mode is 'both')
 elements.dhwPriorityBtn.addEventListener('click', () => {
     setPriority('dhw');
 });
@@ -107,7 +178,7 @@ elements.heatingPriorityBtn.addEventListener('click', () => {
 });
 
 function setPriority(priority) {
-    if (priority === currentPriority) return;
+    if (priority === currentPriority || currentMode !== 'both') return;
     
     currentPriority = priority;
     elements.dhwPriorityBtn.classList.toggle('active', priority === 'dhw');
@@ -167,8 +238,9 @@ function updateUI(status) {
         elements.deviceStatus.className = 'status-indicator offline';
     }
     
-    // Run status
-    if (status.status === 'running') {
+    // Run status — based on actual device running status
+    const isRunning = status.runningStatus && status.runningStatus !== 'off';
+    if (status.deviceOnline && isRunning) {
         elements.runStatus.textContent = 'Running';
         elements.runStatus.className = 'status-indicator running';
     } else {
@@ -176,37 +248,87 @@ function updateUI(status) {
         elements.runStatus.className = 'status-indicator stopped';
     }
     
-    // Mode
-    elements.modeValue.textContent = formatMode(status.mode);
+    // Mode display — show the set mode (0x002C) and actual running status (0x002D)
+    // If running status differs from set mode (e.g. defrost, anti-freeze), show both
+    const setModeStr = status.mode.toUpperCase();
+    const runStatus = (status.runningStatus || 'off').toUpperCase();
+    if (runStatus !== setModeStr && runStatus !== 'OFF') {
+        // Device is in a special state (defrost, anti-freeze, etc.)
+        elements.modeValue.textContent = setModeStr + ' (' + runStatus + ')';
+    } else {
+        elements.modeValue.textContent = setModeStr;
+    }
     
-    // Priority
+    // Priority display
     elements.priorityValue.textContent = status.priority.toUpperCase();
+    
+    // Map working mode from server (0=off, 1=dhw, 2=heat, 3=both)
+    const modeMap = ['off', 'dhw', 'heat', 'both'];
+    const displayMode = modeMap[status.workingMode] || 'both';
+    
+    currentMode = displayMode;
+    currentPriority = status.priority.toLowerCase();
+    
+    // Update mode button active states
+    elements.modeOffBtn.classList.toggle('active', currentMode === 'off');
+    elements.modeDhwBtn.classList.toggle('active', currentMode === 'dhw');
+    elements.modeHeatBtn.classList.toggle('active', currentMode === 'heat');
+    elements.modeBothBtn.classList.toggle('active', currentMode === 'both');
+    
+    // Update power button
+    if (currentMode === 'off') {
+        elements.powerBtn.textContent = 'ON';
+        elements.powerBtn.className = 'power-btn off';
+    } else {
+        elements.powerBtn.textContent = 'OFF';
+        elements.powerBtn.className = 'power-btn on';
+    }
+    
+    // Show/hide priority section based on mode
+    elements.prioritySection.style.display = (currentMode === 'both') ? 'block' : 'none';
+    
+    // Update priority buttons
+    elements.dhwPriorityBtn.classList.toggle('active', currentPriority === 'dhw');
+    elements.heatingPriorityBtn.classList.toggle('active', currentPriority === 'heating');
     
     // Temperatures
     elements.outdoorTempValue.textContent = status.outdoorTemperature + '°C';
     elements.dhwTempValue.textContent = status.dhwTemperature + '°C';
     elements.heatingTempValue.textContent = status.heatingTemperature + '°C';
-    elements.dhwTargetValue.textContent = status.dhwTarget + '°C';
-    elements.heatingTargetValue.textContent = status.heatingTarget + '°C';
+    
+    // Use pending values if set, otherwise use server values
+    const dhwTargetDisplay = pendingDhwTarget !== null ? pendingDhwTarget : status.dhwTarget;
+    const heatingTargetDisplay = pendingHeatingTarget !== null ? pendingHeatingTarget : status.heatingTarget;
+    
+    elements.dhwTargetValue.textContent = dhwTargetDisplay + '°C';
+    elements.heatingTargetValue.textContent = heatingTargetDisplay + '°C';
+    
+    // Power monitoring
+    if (status.acPower > 0) {
+        elements.acCurrentValue.textContent = status.acCurrent.toFixed(2) + ' A';
+        elements.dcCurrentValue.textContent = status.dcCurrent.toFixed(2) + ' A';
+        elements.acVoltageValue.textContent = status.acVoltage.toFixed(1) + ' V';
+        elements.dcVoltageValue.textContent = status.dcVoltage.toFixed(1) + ' V';
+        elements.acPowerValue.textContent = status.acPower.toFixed(1) + ' W';
+        elements.powerSection.style.display = 'block';
+    } else {
+        elements.powerSection.style.display = 'none';
+    }
     
     // Last update
     const now = new Date();
     elements.lastUpdate.textContent = now.toLocaleTimeString();
     
-    // Update sliders if values are within range
-    if (status.dhwTarget >= 40 && status.dhwTarget <= 63) {
-        elements.dhwSlider.value = status.dhwTarget;
-        elements.dhwInput.value = status.dhwTarget;
+    // Update sliders if values are within range (use pending values if set)
+    if (dhwTargetDisplay >= 40 && dhwTargetDisplay <= 63) {
+        elements.dhwSlider.value = dhwTargetDisplay;
+        elements.dhwInput.value = dhwTargetDisplay;
     }
-    if (status.heatingTarget >= 25 && status.heatingTarget <= 63) {
-        elements.heatingSlider.value = status.heatingTarget;
-        elements.heatingInput.value = status.heatingTarget;
+    if (heatingTargetDisplay >= 25 && heatingTargetDisplay <= 63) {
+        elements.heatingSlider.value = heatingTargetDisplay;
+        elements.heatingInput.value = heatingTargetDisplay;
     }
     
-    // Update priority buttons
-    currentPriority = status.priority;
-    elements.dhwPriorityBtn.classList.toggle('active', status.priority === 'dhw');
-    elements.heatingPriorityBtn.classList.toggle('active', status.priority === 'heating');
 }
 
 function formatMode(mode) {
