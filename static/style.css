@@ -12,7 +12,7 @@ body {
 }
 
 .container {
-    max-width: 800px;
+    max-width: 1080px;
     margin: 0 auto;
     padding: 20px;
 }
@@ -104,7 +104,7 @@ main {
 .status-card, .temps-card, .controls-card {
     background: rgba(255, 255, 255, 0.05);
     border-radius: 16px;
-    padding: 24px 48px;
+    padding: 24px;
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
@@ -118,48 +118,43 @@ main {
 }
 
 .status-row {
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 6px;
-    align-items: center;
-    justify-content: center;
-    padding: 4px 8px;
     width: 100%;
 }
 
-.status-row::-webkit-scrollbar {
-    height: 6px;
+.status-row-main {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
 }
 
-.status-row::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 3px;
-}
-
-.status-row::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 3px;
+.status-row-power {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
 }
 
 .status-item {
     background: rgba(255, 255, 255, 0.03);
-    padding: 6px 10px;
+    padding: 10px 12px;
     border-radius: 8px;
     text-align: center;
-    flex: 0 0 auto;
-    min-width: 110px;
+    min-width: 0;
 }
 
 .status-item .label {
-    font-size: 0.85rem;
+    display: block;
+    font-size: 0.8rem;
     color: #9ca3af;
-    margin-right: 6px;
+    margin-bottom: 6px;
+    white-space: nowrap;
 }
 
 .status-item .value {
+    display: block;
     font-size: 1.1rem;
     font-weight: 700;
     color: #fff;
+    white-space: nowrap;
 }
 
 .temp-grid {
@@ -381,6 +376,16 @@ footer {
     font-weight: 700;
 }
 
+@media (max-width: 900px) {
+    .status-row-main {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .status-row-power {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
 @media (max-width: 600px) {
     .container {
         padding: 15px;
@@ -390,18 +395,25 @@ footer {
         font-size: 1.5rem;
     }
 
+    .status-card, .temps-card, .controls-card {
+        padding: 18px;
+    }
+
     .temp-grid {
         grid-template-columns: 1fr;
+    }
+
+    .status-row-main {
+        grid-template-columns: 1fr;
+    }
+
+    .status-row-power {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .status-bar {
         flex-direction: column;
         gap: 10px;
-    }
-
-    .status-row {
-        flex-wrap: wrap;
-        justify-content: space-between;
     }
 
     .slider-container {

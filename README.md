@@ -53,3 +53,10 @@ Two threads communicating via lock-free SPSC queues:
 The Waveshare gateway operates in transparent mode (TCP:8899).
 Full Modbus RTU frames (including CRC) are sent/received over the TCP socket.
 No MBAP header. No virtual COM port needed.
+
+## Working mode strategy
+
+See `docs/working-modes.md` for details about:
+- UI working modes (`off`, `dhw`, `heat`, `both`)
+- mode register (`0x002C`) vs running status register (`0x002D`)
+- DHW/heating target override behavior used to emulate single-purpose modes
