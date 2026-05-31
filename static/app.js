@@ -29,7 +29,6 @@ const elements = {
     modeHeatBtn: document.getElementById('modeHeatBtn'),
     modeBothBtn: document.getElementById('modeBothBtn'),
     outdoorTempValue: document.getElementById('outdoorTempValue'),
-    lastUpdate: document.getElementById('lastUpdate'),
     dhwTempValue: document.getElementById('dhwTempValue'),
     heatingTempValue: document.getElementById('heatingTempValue'),
     dhwTargetValue: document.getElementById('dhwTargetValue'),
@@ -254,10 +253,10 @@ function updateUI(status) {
     const isRunning = status.runningStatus && status.runningStatus !== 'off';
     if (status.deviceOnline && isRunning) {
         elements.runStatus.textContent = 'Running';
-        elements.runStatus.className = 'status-indicator running';
+        elements.runStatus.style.color = '#22c55e';
     } else {
         elements.runStatus.textContent = 'Stopped';
-        elements.runStatus.className = 'status-indicator stopped';
+        elements.runStatus.style.color = '#9ca3af';
     }
     
     // Mode display — show the set mode (0x002C) and actual running status (0x002D)
@@ -351,7 +350,6 @@ function updateUI(status) {
     
     // Last update
     const now = new Date();
-    elements.lastUpdate.textContent = now.toLocaleTimeString();
     
     // Update sliders if values are within range (use pending values if set)
     if (dhwTargetDisplay >= 40 && dhwTargetDisplay <= 63) {

@@ -6,6 +6,7 @@
 #include <string.h>
 #include <time.h>
 #include <errno.h>
+#include <math.h>
 #include "control_loop.h"
 #include "config.h"
 #include "selftest.h"
@@ -33,10 +34,19 @@ static float last_heating_target = 45.0f;
 // Track desired working mode from user commands:
 // -1 = not set (use automatic control logic)
 //  0 = user wants OFF
-//  1 = user wants DHW-only
-//  2 = user wants Heating-only
+//  1 = user wants DHW-only (set heating target to min)
+//  2 = user wants Heating-only (set DHW target to min)
 //  3 = user wants DHW+Heating
 static int desired_working_mode = 3;  // Default to DHW+Heating
+
+// Saved user target temperatures, so we can restore when switching modes.
+// These are updated when the user explicitly sets a target.
+static float saved_dhw_target = 46.0f;
+static float saved_heating_target = 45.0f;
+
+// Minimum targets used to effectively disable a circuit:
+#define DHW_TARGET_MIN      40.0f   // Minimum DHW target (device limit)
+#define HEATING_TARGET_MIN  25.0f   // Minimum heating target (device limit)
 
 // Semaphore for immediate control loop wake-up
 static pthread_mutex_t kick_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -201,6 +211,10 @@ static bool read_status(status_snapshot_t *status) {
     // Read DHW target (0x0194) — critical
     if (modbus_read_register(thread_client, REG_DHW_TARGET, &raw) == 0) {
         status->dhw_target = raw_to_temp(raw);
+        // Only save user targets when in DHW+Heating mode (not overriding)
+        if (desired_working_mode == 3) {
+            saved_dhw_target = status->dhw_target;
+        }
     } else {
         ok = false;
     }
@@ -209,6 +223,10 @@ static bool read_status(status_snapshot_t *status) {
     if (modbus_read_register(thread_client, REG_HEATING_TARGET, &raw) == 0) {
         status->heating_target = raw_to_temp(raw);
         last_heating_target = status->heating_target;
+        // Only save user targets when in DHW+Heating mode (not overriding)
+        if (desired_working_mode == 3) {
+            saved_heating_target = status->heating_target;
+        }
     } else {
         status->heating_target = last_heating_target;
     }
@@ -264,12 +282,14 @@ static void process_commands(void) {
             case CMD_SET_DHW_TEMP:
                 printf(" (CMD_SET_DHW_TEMP, temp=%.1f°C)\n", cmd.float_val);
                 set_dhw_target(cmd.float_val);
+                saved_dhw_target = cmd.float_val;  // Save user's desired target
                 break;
                 
             case CMD_SET_HEATING_TEMP:
                 printf(" (CMD_SET_HEATING_TEMP, temp=%.1f°C)\n", cmd.float_val);
                 set_heating_target(cmd.float_val);
                 last_heating_target = cmd.float_val;
+                saved_heating_target = cmd.float_val;  // Save user's desired target
                 break;
                 
             case CMD_SET_PRIORITY:
@@ -288,25 +308,24 @@ static void process_commands(void) {
             case CMD_SET_RUNNING_MODE:
                 printf(" (CMD_SET_RUNNING_MODE, mode=%d)\n", cmd.int_val);
                 // Working mode: 0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating
-                // Map to device modes (device only supports 0, 1, 2):
-                // 0 (Off)          -> 0 (Off)
-                // 1 (DHW-only)     -> 2 (Heat+DHW) with heating target raised very high
-                // 2 (Heating-only) -> 2 (Heat+DHW) with DHW target lowered (or accept device heats DHW too)
-                // 3 (DHW+Heating)  -> 2 (Heat+DHW)
                 //
-                // Since the device only has Off, Cool+DHW, and Heat+DHW modes,
-                // we cannot truly have "DHW only" or "Heating only".
-                // We use Heat+DHW (mode 2) for any combination that includes heating,
-                // and Off (mode 0) for complete shutdown.
+                // Device only supports: 0=Off, 1=Cool+DHW, 2=Heat+DHW
+                // Strategy for single-purpose modes:
+                // - DHW-only (1): Set device to Heat+DHW, but lower heating target to min
+                //   so the compressor only runs to heat DHW.
+                // - Heating-only (2): Set device to Heat+DHW, but lower DHW target to min
+                //   so the compressor only runs for space heating.
+                // - DHW+Heating (3): Set device to Heat+DHW, restore user's saved targets.
+                // - Off (0): Set device to Off.
                 
                 desired_working_mode = cmd.int_val;
                 
                 int target_device_mode;
                 switch (cmd.int_val) {
                     case 0:  target_device_mode = MODE_SET_OFF;        break;
-                    case 1:  target_device_mode = MODE_SET_HEAT_DHW;   break;  // DHW-only: device has no separate mode
-                    case 2:  target_device_mode = MODE_SET_HEAT_DHW;   break;  // Heating-only: device has no separate mode
-                    case 3:  target_device_mode = MODE_SET_HEAT_DHW;   break;  // DHW+Heating
+                    case 1:  target_device_mode = MODE_SET_HEAT_DHW;   break;
+                    case 2:  target_device_mode = MODE_SET_HEAT_DHW;   break;
+                    case 3:  target_device_mode = MODE_SET_HEAT_DHW;   break;
                     default: target_device_mode = MODE_SET_HEAT_DHW;  break;
                 }
                 
@@ -315,6 +334,39 @@ static void process_commands(void) {
                     printf("Control loop: Working mode set to %d (device mode=%d)\n", cmd.int_val, target_device_mode);
                 } else {
                     fprintf(stderr, "Control loop: Failed to set running mode\n");
+                    break;
+                }
+                
+                // Override target temperatures and priority based on working mode
+                switch (cmd.int_val) {
+                    case 1:  // DHW-only: drop heating target to minimum, set DHW priority
+                        printf("Control loop: DHW-only mode, setting heating target to min (%.1f)\n", HEATING_TARGET_MIN);
+                        set_heating_target(HEATING_TARGET_MIN);
+                        if (modbus_write_register(thread_client, REG_DHW_PRIORITY, 1) == 0) {
+                            current_priority = PRIORITY_DHW;
+                            printf("Control loop: DHW-only mode, set DHW priority\n");
+                        }
+                        break;
+                    case 2:  // Heating-only: drop DHW target to minimum, clear DHW priority
+                        printf("Control loop: Heating-only mode, setting DHW target to min (%.1f)\n", DHW_TARGET_MIN);
+                        set_dhw_target(DHW_TARGET_MIN);
+                        if (modbus_write_register(thread_client, REG_DHW_PRIORITY, 0) == 0) {
+                            current_priority = PRIORITY_HEATING;
+                            printf("Control loop: Heating-only mode, cleared DHW priority\n");
+                        }
+                        break;
+                    case 3:  // DHW+Heating: restore user's saved targets, set DHW priority
+                        printf("Control loop: DHW+Heating mode, restoring targets (DHW=%.1f, Heating=%.1f)\n",
+                               saved_dhw_target, saved_heating_target);
+                        set_dhw_target(saved_dhw_target);
+                        set_heating_target(saved_heating_target);
+                        if (modbus_write_register(thread_client, REG_DHW_PRIORITY, 1) == 0) {
+                            current_priority = PRIORITY_DHW;
+                            printf("Control loop: DHW+Heating mode, set DHW priority\n");
+                        }
+                        break;
+                    case 0:  // Off: no target or priority changes needed
+                        break;
                 }
                 break;
                 
@@ -364,6 +416,59 @@ static void apply_control_logic(status_snapshot_t *status) {
         if (set_running_mode(desired_device_mode) == 0) {
             current_mode = desired_device_mode;
         }
+    }
+    
+    // Enforce target temperature overrides based on working mode
+    // This ensures targets stay correct even if read-back drifts
+    switch (desired_working_mode) {
+        case 1:  // DHW-only: keep heating target at minimum
+            if (status->heating_target > HEATING_TARGET_MIN + 0.5f) {
+                printf("Control loop: DHW-only enforcing heating target min (%.1f, was %.1f)\n",
+                       HEATING_TARGET_MIN, status->heating_target);
+                set_heating_target(HEATING_TARGET_MIN);
+            }
+            break;
+        case 2:  // Heating-only: keep DHW target at minimum
+            if (status->dhw_target > DHW_TARGET_MIN + 0.5f) {
+                printf("Control loop: Heating-only enforcing DHW target min (%.1f, was %.1f)\n",
+                       DHW_TARGET_MIN, status->dhw_target);
+                set_dhw_target(DHW_TARGET_MIN);
+            }
+            break;
+        case 3:  // DHW+Heating: ensure user's saved targets are active
+            // Only correct if significantly different (avoid spamming)
+            if (fabsf(status->dhw_target - saved_dhw_target) > 0.5f) {
+                printf("Control loop: Restoring DHW target (%.1f, was %.1f)\n",
+                       saved_dhw_target, status->dhw_target);
+                set_dhw_target(saved_dhw_target);
+            }
+            if (fabsf(status->heating_target - saved_heating_target) > 0.5f) {
+                printf("Control loop: Restoring heating target (%.1f, was %.1f)\n",
+                       saved_heating_target, status->heating_target);
+                set_heating_target(saved_heating_target);
+            }
+            break;
+    }
+    
+    // Enforce priority based on working mode
+    switch (desired_working_mode) {
+        case 1:  // DHW-only: must have DHW priority
+        case 3:  // DHW+Heating: must have DHW priority
+            if (current_priority != PRIORITY_DHW) {
+                printf("Control loop: Mode %d enforcing DHW priority\n", desired_working_mode);
+                if (modbus_write_register(thread_client, REG_DHW_PRIORITY, 1) == 0) {
+                    current_priority = PRIORITY_DHW;
+                }
+            }
+            break;
+        case 2:  // Heating-only: must have no DHW priority
+            if (current_priority != PRIORITY_HEATING) {
+                printf("Control loop: Heating-only mode clearing DHW priority\n");
+                if (modbus_write_register(thread_client, REG_DHW_PRIORITY, 0) == 0) {
+                    current_priority = PRIORITY_HEATING;
+                }
+            }
+            break;
     }
 }
 

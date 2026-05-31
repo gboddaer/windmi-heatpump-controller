@@ -12,7 +12,6 @@
             <h1>Windmi Heat Pump</h1>
             <div class="status-bar">
                 <span id="deviceStatus" class="status-indicator offline">Offline</span>
-                <span id="runStatus" class="status-indicator stopped">Stopped</span>
                 <button id="powerBtn" class="power-btn off">OFF</button>
             </div>
         </header>
@@ -20,23 +19,11 @@
         <main>
             <section class="status-card">
                 <h2>Current Status</h2>
-                <div class="status-grid">
-                    <div class="status-item">
-                        <span class="label">Mode</span>
-                        <span id="modeValue" class="value">-</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="label">Priority</span>
-                        <span id="priorityValue" class="value">-</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="label">Outdoor Temp</span>
-                        <span id="outdoorTempValue" class="value">-</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="label">Last Update</span>
-                        <span id="lastUpdate" class="value">-</span>
-                    </div>
+                <div class="status-row">
+                    <div class="status-item"><span class="label">Mode</span> <span id="modeValue" class="value">-</span></div>
+                    <div class="status-item"><span class="label">Status</span> <span id="runStatus" class="value">-</span></div>
+                    <div class="status-item"><span class="label">Priority</span> <span id="priorityValue" class="value">-</span></div>
+                    <div class="status-item"><span class="label">Outdoor</span> <span id="outdoorTempValue" class="value">-</span></div>
                 </div>
             </section>
 
