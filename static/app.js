@@ -42,7 +42,6 @@ const elements = {
     dhwPriorityBtn: document.getElementById('dhwPriorityBtn'),
     heatingPriorityBtn: document.getElementById('heatingPriorityBtn'),
     refreshCountdown: document.getElementById('refreshCountdown'),
-    powerSection: document.getElementById('powerSection'),
     acCurrentValue: document.getElementById('acCurrentValue'),
     dcCurrentValue: document.getElementById('dcCurrentValue'),
     acVoltageValue: document.getElementById('acVoltageValue'),
@@ -336,17 +335,12 @@ function updateUI(status) {
     elements.dhwTargetValue.textContent = dhwTargetDisplay + '°C';
     elements.heatingTargetValue.textContent = heatingTargetDisplay + '°C';
     
-    // Power monitoring
-    if (status.acPower > 0) {
-        elements.acCurrentValue.textContent = status.acCurrent.toFixed(2) + ' A';
-        elements.dcCurrentValue.textContent = status.dcCurrent.toFixed(2) + ' A';
-        elements.acVoltageValue.textContent = status.acVoltage.toFixed(1) + ' V';
-        elements.dcVoltageValue.textContent = status.dcVoltage.toFixed(1) + ' V';
-        elements.acPowerValue.textContent = status.acPower.toFixed(1) + ' W';
-        elements.powerSection.style.display = 'block';
-    } else {
-        elements.powerSection.style.display = 'none';
-    }
+    // Power monitoring — always displayed in status row
+    elements.acCurrentValue.textContent = status.acCurrent.toFixed(2) + ' A';
+    elements.dcCurrentValue.textContent = status.dcCurrent.toFixed(2) + ' A';
+    elements.acVoltageValue.textContent = status.acVoltage.toFixed(1) + ' V';
+    elements.dcVoltageValue.textContent = status.dcVoltage.toFixed(1) + ' V';
+    elements.acPowerValue.textContent = status.acPower.toFixed(1) + ' W';
     
     // Last update
     const now = new Date();

@@ -120,9 +120,13 @@ main {
 .status-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 16px;
+    gap: 12px;
     align-items: center;
     justify-content: space-between;
+}
+
+.status-row + .status-row {
+    margin-top: 12px;
 }
 
 .status-item {
@@ -390,45 +394,14 @@ footer {
     }
 }
 
-/* Power monitoring horizontal row */
-.power-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-    align-items: center;
-}
-
-.power-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 10px 15px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    min-width: 100px;
-}
-
-.power-item .label {
-    font-size: 0.75rem;
-    color: #9ca3af;
-    margin-bottom: 5px;
-}
-
-.power-item .value {
-    font-size: 1.1rem;
-    font-weight: 600;
+/* Power values in status row — use amber color */
+.status-row.power-row .value {
     color: #fbbf24;
 }
 
 @media (max-width: 600px) {
-    .power-row {
-        flex-direction: column;
-        align-items: stretch;
-    }
-    
-    .power-item {
+    .status-row, .status-row.power-row {
         flex-direction: row;
-        justify-content: space-between;
-        min-width: auto;
+        flex-wrap: wrap;
     }
 }
