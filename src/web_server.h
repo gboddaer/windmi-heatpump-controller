@@ -11,4 +11,7 @@ void web_server_run(void);
 
 void web_server_stop(void);
 
+// Check if server is shutting down
+bool web_server_is_shutting_down(void);
+
 #endif // WEB_SERVER_H

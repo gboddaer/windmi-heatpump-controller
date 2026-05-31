@@ -143,18 +143,20 @@ bool modbus_client_is_connected(modbus_client_t *client) {
 }
 
 // Flush any pending data in the socket read buffer
+// Returns number of bytes flushed
 static int flush_read_buffer(modbus_client_t *client) {
+    if (!client || client->socket_fd < 0) return 0;
+    
     uint8_t dummy[128];
     fd_set fds;
-    struct timeval tv = {0, 0}; // Zero timeout - just check what's available
+    struct timeval tv = {0, 0};
     int flushed = 0;
     
     while (1) {
         FD_ZERO(&fds);
         FD_SET(client->socket_fd, &fds);
         int ready = select(client->socket_fd + 1, &fds, NULL, NULL, &tv);
-        if (ready <= 0) break; // No more data
-        
+        if (ready <= 0) break;
         ssize_t n = recv(client->socket_fd, dummy, sizeof(dummy), MSG_DONTWAIT);
         if (n <= 0) break;
         flushed += n;
@@ -163,7 +165,12 @@ static int flush_read_buffer(modbus_client_t *client) {
     if (flushed > 0) {
         printf("Modbus: Flushed %d bytes of stale data from socket\n", flushed);
     }
-    return 0;
+    return flushed;
+}
+
+// Public API wrapper - same implementation, just void return
+void modbus_client_flush_buffer(modbus_client_t *client) {
+    flush_read_buffer(client);
 }
 
 static int send_frame(modbus_client_t *client, const uint8_t *frame, size_t len) {

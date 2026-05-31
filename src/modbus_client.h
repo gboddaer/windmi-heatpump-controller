@@ -12,6 +12,9 @@ bool modbus_client_connect(modbus_client_t *client);
 void modbus_client_disconnect(modbus_client_t *client);
 bool modbus_client_is_connected(modbus_client_t *client);
 
+// Flush any pending data in the socket read buffer
+void modbus_client_flush_buffer(modbus_client_t *client);
+
 // Read a single holding register. Returns 0 on success, -1 on error.
 // Value is signed (int16_t) to handle negative temperatures.
 int modbus_read_register(modbus_client_t *client, uint16_t address, int16_t *value);

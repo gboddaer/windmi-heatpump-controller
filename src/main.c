@@ -151,29 +151,56 @@ int main(int argc, char *argv[]) {
 
     printf("[Main] Shutting down...\n");
     
-    // Set heat pump to OFF before shutting down
-    printf("[Main] Setting heat pump to OFF...\n");
+    // Signal control loop to stop
+    control_loop_stop();
+    printf("[Shutdown] Control loop stopped\n");
+    
+    // Wait for control loop thread to join (should be immediate after stop flag)
+    usleep(150000); // 150ms drain/quiet period
+    printf("[Shutdown] Drain period complete\n");
+    
+    // Set heat pump to OFF via dedicated client
+    printf("[Shutdown] Writing OFF mode via dedicated client...\n");
     modbus_client_t *shutdown_client = modbus_client_create(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
     if (shutdown_client) {
-        // Try to connect with a short timeout
-        for (int i = 0; i < 3; i++) {
+        // Try to connect and write with retries
+        bool off_written = false;
+        for (int attempt = 1; attempt <= 3; attempt++) {
             if (modbus_client_connect(shutdown_client)) {
+                // Flush stale data first
+                modbus_client_flush_buffer(shutdown_client);
+                
                 // Set mode to OFF (0)
                 uint16_t mode_off = 0;
                 if (modbus_write_register(shutdown_client, REG_RUNNING_MODE, mode_off) == 0) {
-                    printf("[Main] Heat pump set to OFF successfully\n");
+                    printf("[Shutdown] OFF write OK (attempt %d)\n", attempt);
+                    off_written = true;
+                    modbus_client_disconnect(shutdown_client);
+                    break;
                 } else {
-                    fprintf(stderr, "[Main] Failed to write OFF mode (attempt %d)\n", i+1);
+                    fprintf(stderr, "[Shutdown] OFF write failed (attempt %d)\n", attempt);
+                    modbus_client_disconnect(shutdown_client);
                 }
-                modbus_client_disconnect(shutdown_client);
-                break;
+            } else {
+                fprintf(stderr, "[Shutdown] Connect failed (attempt %d)\n", attempt);
             }
-            usleep(100000); // 100ms retry
+            
+            // Retry delay
+            if (attempt < 3) {
+                usleep(100000); // 100ms before retry
+            }
         }
+        
         modbus_client_destroy(shutdown_client);
+        shutdown_client = NULL;
+        
+        if (!off_written) {
+            fprintf(stderr, "[Shutdown] OFF mode write failed after 3 attempts\n");
+        }
+    } else {
+        fprintf(stderr, "[Shutdown] Failed to create shutdown client\n");
     }
     
-    control_loop_stop();
     modbus_client_destroy(client);
 
     printf("[Main] Goodbye!\n");

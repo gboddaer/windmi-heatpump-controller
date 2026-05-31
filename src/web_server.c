@@ -6,9 +6,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <signal.h>
 
 static struct mg_mgr mgr;
 static bool g_running = false;
+static volatile sig_atomic_t g_shutting_down = 0;
 static spsc_cmd_t_queue_t *g_cmd_queue = NULL;
 static spsc_status_snapshot_t_queue_t *g_status_queue = NULL;
 static status_snapshot_t g_last_status;
@@ -96,6 +98,11 @@ static void api_status_handler(struct mg_connection *c) {
 }
 
 static void api_set_dhw_handler(struct mg_connection *c, struct mg_str *body) {
+    if (web_server_is_shutting_down()) {
+        send_json_reply(c, 503, "{\"error\":\"Server is shutting down\"}");
+        return;
+    }
+
     if (body->len == 0) {
         send_json_reply(c, 400, "{\"error\":\"Empty request body\"}");
         return;
@@ -126,6 +133,11 @@ static void api_set_dhw_handler(struct mg_connection *c, struct mg_str *body) {
 }
 
 static void api_set_heating_handler(struct mg_connection *c, struct mg_str *body) {
+    if (web_server_is_shutting_down()) {
+        send_json_reply(c, 503, "{\"error\":\"Server is shutting down\"}");
+        return;
+    }
+
     if (body->len == 0) {
         send_json_reply(c, 400, "{\"error\":\"Empty request body\"}");
         return;
@@ -156,6 +168,11 @@ static void api_set_heating_handler(struct mg_connection *c, struct mg_str *body
 }
 
 static void api_set_priority_handler(struct mg_connection *c, struct mg_str *body) {
+    if (web_server_is_shutting_down()) {
+        send_json_reply(c, 503, "{\"error\":\"Server is shutting down\"}");
+        return;
+    }
+
     if (body->len == 0) {
         send_json_reply(c, 400, "{\"error\":\"Empty request body\"}");
         return;
@@ -193,6 +210,11 @@ static void api_set_priority_handler(struct mg_connection *c, struct mg_str *bod
 }
 
 static void api_set_mode_handler(struct mg_connection *c, struct mg_str *body) {
+    if (web_server_is_shutting_down()) {
+        send_json_reply(c, 503, "{\"error\":\"Server is shutting down\"}");
+        return;
+    }
+
     if (body->len == 0) {
         send_json_reply(c, 400, "{\"error\":\"Empty request body\"}");
         return;
@@ -277,6 +299,7 @@ int web_server_init(int port, const char *static_dir,
     g_cmd_queue = cmd_queue;
     g_status_queue = status_queue;
     memset(&g_last_status, 0, sizeof(g_last_status));
+    g_shutting_down = 0;
 
     mg_mgr_init(&mgr);
 
@@ -300,9 +323,14 @@ void web_server_run(void) {
     while (g_running) {
         mg_mgr_poll(&mgr, 100);
     }
+    mg_mgr_free(&mgr);
 }
 
 void web_server_stop(void) {
+    g_shutting_down = 1;
     g_running = false;
-    mg_mgr_free(&mgr);
+}
+
+bool web_server_is_shutting_down(void) {
+    return g_shutting_down != 0;
 }
