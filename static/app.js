@@ -10,6 +10,7 @@ const RETRY_DELAY = 1000;
 // Track pending user settings to prevent UI from reverting before server updates
 let pendingDhwTarget = null;
 let pendingHeatingTarget = null;
+let pendingMode = null;  // Prevents status poll from reverting mode before command is processed
 
 // Working mode: 'off', 'dhw', 'heat', 'both'
 let currentMode = 'both';
@@ -129,6 +130,8 @@ function setWorkingMode(mode) {
     if (mode === currentMode) return;
     
     currentMode = mode;
+    pendingMode = mode;  // Block status poll from reverting until server confirms
+    setTimeout(() => { pendingMode = null; }, 10000);  // Safety: clear after 10s if server never confirms
     
     // Update button states
     elements.modeOffBtn.classList.toggle('active', mode === 'off');
@@ -149,7 +152,10 @@ function setWorkingMode(mode) {
     
     apiPost('/api/set-mode', { mode: modeMap[mode], priority: currentPriority })
         .then(() => showNotification('Mode set to ' + mode, 'success'))
-        .catch(error => showNotification('Failed to set mode: ' + error.message, 'error'));
+        .catch(error => {
+            showNotification('Failed to set mode: ' + error.message, 'error');
+            pendingMode = null;  // Clear pending on failure so status poll can correct
+        });
 }
 
 elements.modeOffBtn.addEventListener('click', () => setWorkingMode('off'));
@@ -266,10 +272,21 @@ function updateUI(status) {
     const modeMap = ['off', 'dhw', 'heat', 'both'];
     const displayMode = modeMap[status.workingMode] || 'both';
     
-    currentMode = displayMode;
+    // If we have a pending mode change, only accept server state once it matches
+    if (pendingMode !== null) {
+        if (displayMode === pendingMode) {
+            pendingMode = null;  // Server confirmed the mode — resume normal updates
+        } else {
+            // Server hasn't caught up yet — keep the user's choice, don't revert
+        }
+        // Fall through: still update currentPriority below
+    } else {
+        currentMode = displayMode;
+    }
+    
     currentPriority = status.priority.toLowerCase();
     
-    // Update mode button active states
+    // Update mode button active states (always reflect currentMode)
     elements.modeOffBtn.classList.toggle('active', currentMode === 'off');
     elements.modeDhwBtn.classList.toggle('active', currentMode === 'dhw');
     elements.modeHeatBtn.classList.toggle('active', currentMode === 'heat');
