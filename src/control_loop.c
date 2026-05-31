@@ -64,34 +64,6 @@ static inline int16_t temp_to_raw(float temp) {
     return (int16_t)(temp * 10.0f);
 }
 
-// Check if DHW needs heating (tank temp > hysteresis below target)
-static bool dhw_needs_heating(float tank_temp, float target, float hysteresis) {
-    return (target - tank_temp) > hysteresis;
-}
-
-// Check if space heating is needed based on leaving water temperature
-// vs heating target with hysteresis
-static bool heating_is_needed(status_snapshot_t *status) {
-    if (!status) return false;
-    return (status->heating_target - status->leaving_water_temp) > HEATING_HYSTERESIS_C;
-}
-
-// Determine the desired priority mode based on current conditions
-static priority_mode_t determine_priority(status_snapshot_t *status) {
-    if (!status) return PRIORITY_HEATING;
-    
-    // If DHW tank is more than 3°C below target, prioritize DHW
-    if (dhw_needs_heating(status->dhw_tank_temp, status->dhw_target, DHW_HYSTERESIS_C)) {
-        return PRIORITY_DHW;
-    }
-    
-    // If DHW is satisfied and space heating is needed, prioritize heating
-    if (heating_is_needed(status)) {
-        return PRIORITY_HEATING;
-    }
-    
-    return PRIORITY_HEATING;
-}
 
 // Set the running mode on the heat pump
 // Only modes 0 (Off), 1 (Cool+DHW), 2 (Heat+DHW) are valid device modes
