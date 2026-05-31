@@ -125,10 +125,6 @@ main {
     justify-content: space-between;
 }
 
-.status-row + .status-row {
-    margin-top: 12px;
-}
-
 .status-item {
     background: rgba(255, 255, 255, 0.03);
     padding: 8px 16px;
@@ -394,14 +390,7 @@ footer {
     }
 }
 
-/* Power values in status row — use amber color */
-.status-row.power-row .value {
-    color: #fbbf24;
-}
-
-@media (max-width: 600px) {
-    .status-row, .status-row.power-row {
-        flex-direction: row;
-        flex-wrap: wrap;
-    }
+/* Power values — amber color */
+.power-value {
+    color: #fbbf24 !important;
 }
