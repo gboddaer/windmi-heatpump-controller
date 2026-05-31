@@ -143,9 +143,11 @@ main {
 
 .status-item {
     background: rgba(255, 255, 255, 0.03);
-    padding: 8px 16px;
+    padding: 6px 12px;
     border-radius: 8px;
     text-align: center;
+    flex: 0 0 auto;
+    min-width: 80px;
 }
 
 .status-item .label {
