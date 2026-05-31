@@ -1,0 +1,2 @@
+/usr/bin/ar qc libwindmi_modbus.a CMakeFiles/windmi_modbus.dir/ModbusClient.cpp.o CMakeFiles/windmi_modbus.dir/__/modbus_client.c.o
+/usr/bin/ranlib libwindmi_modbus.a

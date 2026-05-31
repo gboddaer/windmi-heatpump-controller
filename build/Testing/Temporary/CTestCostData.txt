@@ -1,0 +1,5 @@
+test_core 1 0.00270815
+test_modbus 1 0.00208267
+test_web 1 0.00616741
+test_utils 1 0.00245249
+---

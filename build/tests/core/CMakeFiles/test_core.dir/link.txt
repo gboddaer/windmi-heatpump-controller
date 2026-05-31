@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/test_core.dir/test_control_loop.cpp.o CMakeFiles/test_core.dir/test_status_monitor.cpp.o -o test_core  ../../src/core/libwindmi_core.a ../../src/modbus/libwindmi_modbus.a ../../src/utils/libwindmi_utils.a ../../lib/libgtest_main.a ../../libmongoose.a ../../lib/libgtest.a -lpthread

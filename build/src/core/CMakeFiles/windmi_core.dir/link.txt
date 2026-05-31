@@ -1,0 +1,2 @@
+/usr/bin/ar qc libwindmi_core.a CMakeFiles/windmi_core.dir/ControlLoop.cpp.o CMakeFiles/windmi_core.dir/StatusMonitor.cpp.o
+/usr/bin/ranlib libwindmi_core.a

@@ -1,0 +1,214 @@
+Start testing: May 31 22:57 CEST
+----------------------------------------------------------
+1/4 Testing: test_core
+1/4 Test: test_core
+Command: "/home/gbo/develop/wpomp/build/tests/core/test_core"
+Directory: /home/gbo/develop/wpomp/build/tests/core
+"test_core" start time: May 31 22:57 CEST
+Output:
+----------------------------------------------------------
+Running main() from /home/gbo/develop/wpomp/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 12 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 4 tests from ControlLoopTest
+[ RUN      ] ControlLoopTest.CreateControlLoop
+[       OK ] ControlLoopTest.CreateControlLoop (0 ms)
+[ RUN      ] ControlLoopTest.StartAndStop
+Control loop thread started
+Control loop thread stopped
+[       OK ] ControlLoopTest.StartAndStop (0 ms)
+[ RUN      ] ControlLoopTest.EnqueueCommand
+Enqueue command: type=1, float=45.000000, int=0
+[       OK ] ControlLoopTest.EnqueueCommand (0 ms)
+[ RUN      ] ControlLoopTest.GetStatus
+[       OK ] ControlLoopTest.GetStatus (0 ms)
+[----------] 4 tests from ControlLoopTest (0 ms total)
+
+[----------] 8 tests from StatusMonitorTest
+[ RUN      ] StatusMonitorTest.CreateMonitor
+[       OK ] StatusMonitorTest.CreateMonitor (0 ms)
+[ RUN      ] StatusMonitorTest.UpdateAndRead
+[       OK ] StatusMonitorTest.UpdateAndRead (0 ms)
+[ RUN      ] StatusMonitorTest.CopyGet
+[       OK ] StatusMonitorTest.CopyGet (0 ms)
+[ RUN      ] StatusMonitorTest.DefaultState
+[       OK ] StatusMonitorTest.DefaultState (0 ms)
+[ RUN      ] StatusMonitorTest.UpdateSnapshot
+[       OK ] StatusMonitorTest.UpdateSnapshot (0 ms)
+[ RUN      ] StatusMonitorTest.MultipleUpdates
+[       OK ] StatusMonitorTest.MultipleUpdates (0 ms)
+[ RUN      ] StatusMonitorTest.ThreadSafety
+[       OK ] StatusMonitorTest.ThreadSafety (0 ms)
+[ RUN      ] StatusMonitorTest.Reset
+[       OK ] StatusMonitorTest.Reset (0 ms)
+[----------] 8 tests from StatusMonitorTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 12 tests from 2 test suites ran. (0 ms total)
+[  PASSED  ] 12 tests.
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_core" end time: May 31 22:57 CEST
+"test_core" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/4 Testing: test_modbus
+2/4 Test: test_modbus
+Command: "/home/gbo/develop/wpomp/build/tests/modbus/test_modbus"
+Directory: /home/gbo/develop/wpomp/build/tests/modbus
+"test_modbus" start time: May 31 22:57 CEST
+Output:
+----------------------------------------------------------
+Running main() from /home/gbo/develop/wpomp/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 5 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 5 tests from ModbusClientTest
+[ RUN      ] ModbusClientTest.CreateClient
+[       OK ] ModbusClientTest.CreateClient (0 ms)
+[ RUN      ] ModbusClientTest.NotConnectedInitially
+[       OK ] ModbusClientTest.NotConnectedInitially (0 ms)
+[ RUN      ] ModbusClientTest.ExceptionOnReadWhenNotConnected
+[       OK ] ModbusClientTest.ExceptionOnReadWhenNotConnected (0 ms)
+[ RUN      ] ModbusClientTest.ExceptionOnWriteWhenNotConnected
+[       OK ] ModbusClientTest.ExceptionOnWriteWhenNotConnected (0 ms)
+[ RUN      ] ModbusClientTest.DestructorDoesNotCrash
+[       OK ] ModbusClientTest.DestructorDoesNotCrash (0 ms)
+[----------] 5 tests from ModbusClientTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 5 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 5 tests.
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_modbus" end time: May 31 22:57 CEST
+"test_modbus" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/4 Testing: test_web
+3/4 Test: test_web
+Command: "/home/gbo/develop/wpomp/build/tests/web/test_web"
+Directory: /home/gbo/develop/wpomp/build/tests/web
+"test_web" start time: May 31 22:57 CEST
+Output:
+----------------------------------------------------------
+Running main() from /home/gbo/develop/wpomp/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 6 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from HttpClientTest
+[ RUN      ] HttpClientTest.BasicConnection
+[       OK ] HttpClientTest.BasicConnection (0 ms)
+[ RUN      ] HttpClientTest.StringComparison
+[       OK ] HttpClientTest.StringComparison (0 ms)
+[----------] 2 tests from HttpClientTest (0 ms total)
+
+[----------] 4 tests from WebServerTest
+[ RUN      ] WebServerTest.CreateServer
+38b4e115 3 net.c:306:mg_mgr_init        MG_IO_SIZE: 16384, TLS: none
+38b4e115 3 net.c:223:mg_listen          1 5 http://0.0.0.0:12345
+Web server started on http://0.0.0.0:12345
+38b4e117 3 net.c:159:mg_close_conn      1 5 closed
+38b4e117 3 net.c:270:mg_mgr_free        All connections closed
+38b4e117 3 net.c:270:mg_mgr_free        All connections closed
+[       OK ] WebServerTest.CreateServer (1 ms)
+[ RUN      ] WebServerTest.StartStop
+38b4e117 3 net.c:306:mg_mgr_init        MG_IO_SIZE: 16384, TLS: none
+38b4e117 3 net.c:223:mg_listen          1 5 http://0.0.0.0:12346
+Web server started on http://0.0.0.0:12346
+38b4e118 3 net.c:159:mg_close_conn      1 5 closed
+38b4e118 3 net.c:270:mg_mgr_free        All connections closed
+38b4e118 3 net.c:270:mg_mgr_free        All connections closed
+38b4e118 3 net.c:270:mg_mgr_free        All connections closed
+[       OK ] WebServerTest.StartStop (1 ms)
+[ RUN      ] WebServerTest.StatusCallback
+38b4e118 3 net.c:306:mg_mgr_init        MG_IO_SIZE: 16384, TLS: none
+38b4e118 3 net.c:223:mg_listen          1 5 http://0.0.0.0:12347
+Web server started on http://0.0.0.0:12347
+38b4e119 3 net.c:159:mg_close_conn      1 5 closed
+38b4e119 3 net.c:270:mg_mgr_free        All connections closed
+38b4e119 3 net.c:270:mg_mgr_free        All connections closed
+[       OK ] WebServerTest.StatusCallback (1 ms)
+[ RUN      ] WebServerTest.ShutdownFlag
+38b4e119 3 net.c:306:mg_mgr_init        MG_IO_SIZE: 16384, TLS: none
+38b4e119 3 net.c:223:mg_listen          1 5 http://0.0.0.0:12348
+Web server started on http://0.0.0.0:12348
+38b4e11a 3 net.c:159:mg_close_conn      1 5 closed
+38b4e11a 3 net.c:270:mg_mgr_free        All connections closed
+38b4e11a 3 net.c:270:mg_mgr_free        All connections closed
+38b4e11a 3 net.c:270:mg_mgr_free        All connections closed
+[       OK ] WebServerTest.ShutdownFlag (1 ms)
+[----------] 4 tests from WebServerTest (4 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 2 test suites ran. (4 ms total)
+[  PASSED  ] 6 tests.
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"test_web" end time: May 31 22:57 CEST
+"test_web" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/4 Testing: test_utils
+4/4 Test: test_utils
+Command: "/home/gbo/develop/wpomp/build/tests/utils/test_utils"
+Directory: /home/gbo/develop/wpomp/build/tests/utils
+"test_utils" start time: May 31 22:57 CEST
+Output:
+----------------------------------------------------------
+Running main() from /home/gbo/develop/wpomp/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 14 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 6 tests from ConfigTest
+[ RUN      ] ConfigTest.DefaultValues
+[       OK ] ConfigTest.DefaultValues (0 ms)
+[ RUN      ] ConfigTest.SetAndGetString
+[       OK ] ConfigTest.SetAndGetString (0 ms)
+[ RUN      ] ConfigTest.SetAndGetInt
+[       OK ] ConfigTest.SetAndGetInt (0 ms)
+[ RUN      ] ConfigTest.SetAndGetDouble
+[       OK ] ConfigTest.SetAndGetDouble (0 ms)
+[ RUN      ] ConfigTest.BooleanValues
+[       OK ] ConfigTest.BooleanValues (0 ms)
+[ RUN      ] ConfigTest.HasKey
+[       OK ] ConfigTest.HasKey (0 ms)
+[----------] 6 tests from ConfigTest (0 ms total)
+
+[----------] 4 tests from JsonHelpersTest
+[ RUN      ] JsonHelpersTest.GenerateStatusJson
+[       OK ] JsonHelpersTest.GenerateStatusJson (0 ms)
+[ RUN      ] JsonHelpersTest.GenerateSuccessResponse
+[       OK ] JsonHelpersTest.GenerateSuccessResponse (0 ms)
+[ RUN      ] JsonHelpersTest.GenerateErrorResponse
+[       OK ] JsonHelpersTest.GenerateErrorResponse (0 ms)
+[ RUN      ] JsonHelpersTest.EmptyString
+[       OK ] JsonHelpersTest.EmptyString (0 ms)
+[----------] 4 tests from JsonHelpersTest (0 ms total)
+
+[----------] 4 tests from CRC16Test
+[ RUN      ] CRC16Test.EmptyBuffer
+[       OK ] CRC16Test.EmptyBuffer (0 ms)
+[ RUN      ] CRC16Test.SingleByte
+[       OK ] CRC16Test.SingleByte (0 ms)
+[ RUN      ] CRC16Test.MultipleBytes
+[       OK ] CRC16Test.MultipleBytes (0 ms)
+[ RUN      ] CRC16Test.KnownValue
+[       OK ] CRC16Test.KnownValue (0 ms)
+[----------] 4 tests from CRC16Test (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 14 tests from 3 test suites ran. (0 ms total)
+[  PASSED  ] 14 tests.
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_utils" end time: May 31 22:57 CEST
+"test_utils" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: May 31 22:57 CEST

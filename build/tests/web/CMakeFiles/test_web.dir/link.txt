@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/test_web.dir/test_http_client.cpp.o CMakeFiles/test_web.dir/test_web_server.cpp.o -o test_web  ../../src/web/libwindmi_web.a ../../src/utils/libwindmi_utils.a ../../lib/libgtest_main.a ../../libmongoose.a ../../lib/libgtest.a -lpthread
