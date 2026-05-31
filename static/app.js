@@ -86,13 +86,16 @@ elements.setDhwBtn.addEventListener('click', async () => {
     elements.setDhwBtn.disabled = true;
     elements.setDhwBtn.textContent = 'Setting...';
     
+    // Safety: clear pending after 15s if server never confirms
+    const dhwTimeout = setTimeout(() => { pendingDhwTarget = null; }, 15000);
+    
     try {
         await apiPost(API_SET_DHW_URL, { temperature });
         showNotification('DHW temperature set successfully', 'success');
-        pendingDhwTarget = null; // Clear pending on success
     } catch (error) {
         showNotification('Failed to set DHW temperature: ' + error.message, 'error');
         pendingDhwTarget = null; // Clear pending on failure
+        clearTimeout(dhwTimeout);
     } finally {
         elements.setDhwBtn.disabled = false;
         elements.setDhwBtn.textContent = 'Set DHW';
@@ -112,13 +115,16 @@ elements.setHeatingBtn.addEventListener('click', async () => {
     elements.setHeatingBtn.disabled = true;
     elements.setHeatingBtn.textContent = 'Setting...';
     
+    // Safety: clear pending after 15s if server never confirms
+    const heatingTimeout = setTimeout(() => { pendingHeatingTarget = null; }, 15000);
+    
     try {
         await apiPost(API_SET_HEATING_URL, { temperature });
         showNotification('Heating temperature set successfully', 'success');
-        pendingHeatingTarget = null; // Clear pending on success
     } catch (error) {
         showNotification('Failed to set heating temperature: ' + error.message, 'error');
         pendingHeatingTarget = null; // Clear pending on failure
+        clearTimeout(heatingTimeout);
     } finally {
         elements.setHeatingBtn.disabled = false;
         elements.setHeatingBtn.textContent = 'Set Heating';
@@ -314,6 +320,17 @@ function updateUI(status) {
     elements.heatingTempValue.textContent = status.heatingTemperature + '°C';
     
     // Use pending values if set, otherwise use server values
+    if (pendingDhwTarget !== null) {
+        // Clear pending once server confirms the value (allow for rounding)
+        if (Math.abs(status.dhwTarget - pendingDhwTarget) < 1) {
+            pendingDhwTarget = null;
+        }
+    }
+    if (pendingHeatingTarget !== null) {
+        if (Math.abs(status.heatingTarget - pendingHeatingTarget) < 1) {
+            pendingHeatingTarget = null;
+        }
+    }
     const dhwTargetDisplay = pendingDhwTarget !== null ? pendingDhwTarget : status.dhwTarget;
     const heatingTargetDisplay = pendingHeatingTarget !== null ? pendingHeatingTarget : status.heatingTarget;
     
