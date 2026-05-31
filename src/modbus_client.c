@@ -53,7 +53,7 @@ STATIC_FOR_TEST void build_read_frame(uint8_t *frame, uint8_t slave_id, uint16_t
     frame[4] = (count >> 8) & 0xFF;
     frame[5] = count & 0xFF;
     
-    uint16_t crc = crc16_modbus(frame, 6);
+    uint16_t crc = crc16(frame, 6);
     frame[6] = crc & 0xFF;
     frame[7] = (crc >> 8) & 0xFF;
 }
@@ -66,7 +66,7 @@ STATIC_FOR_TEST void build_write_frame(uint8_t *frame, uint8_t slave_id, uint16_
     frame[4] = (value >> 8) & 0xFF;
     frame[5] = value & 0xFF;
     
-    uint16_t crc = crc16_modbus(frame, 6);
+    uint16_t crc = crc16(frame, 6);
     frame[6] = crc & 0xFF;
     frame[7] = (crc >> 8) & 0xFF;
 }
@@ -281,7 +281,7 @@ static int modbus_read_write_registers_internal(modbus_client_t *client,
     
     uint16_t crc_received = (uint16_t)full_frame[total_len - 2] |
                            ((uint16_t)full_frame[total_len - 1] << 8);
-    uint16_t crc_calculated = crc16_modbus(full_frame, total_len - 2);
+    uint16_t crc_calculated = crc16(full_frame, total_len - 2);
     
     if (crc_received != crc_calculated) {
         fprintf(stderr, "CRC error in read response\n");
@@ -345,7 +345,7 @@ int modbus_write_register(modbus_client_t *client, uint16_t address, uint16_t va
         }
         
         uint16_t crc_received = response[6] | (response[7] << 8);
-        uint16_t crc_calculated = crc16_modbus(response, 6);
+        uint16_t crc_calculated = crc16(response, 6);
         if (crc_received != crc_calculated) {
             fprintf(stderr, "Modbus CRC error on write (attempt %d/%d)\n", 
                     retry + 1, MODBUS_WRITE_MAX_RETRIES);

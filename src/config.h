@@ -13,7 +13,7 @@
 // MODBUS_GATEWAY_IP can be overridden via --ip command-line argument
 #define MODBUS_GATEWAY_IP      "192.168.123.10"
 #define MODBUS_GATEWAY_PORT    8899
-#define MODBUS_SLAVE_ID        11
+/* Modbus slave ID - use windmi::Config instead */
 #define MODBUS_POLL_INTERVAL_S 30
 
 // Only function code 0x03 (read holding registers) and 0x06 (write single
