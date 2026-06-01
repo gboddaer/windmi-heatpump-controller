@@ -1,0 +1,19 @@
+Building the windmi-controller Debian Package
+=============================================
+
+Prerequisites
+-------------
+  cmake (>= 3.16)  g++ (>= 10)  debhelper-compat (= 12)
+
+Build
+-----
+  debuild -us -uc
+
+The package includes:
+  - windmi-control binary
+  - /etc/windmi-controller.conf
+  - /usr/share/doc/windmi-controller/
+
+The mongoose HTTP library is bundled as a submodule and compiled
+statically. It is licensed under GPL-2.0, which is compatible with
+the GPL-2.0 license used by windmi-controller.

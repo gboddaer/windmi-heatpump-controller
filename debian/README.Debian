@@ -1,0 +1,14 @@
+Windmi Controller - Debian Packaging Notes
+==========================================
+
+The binary is installed as /usr/bin/windmi-control.
+
+Configuration is at /etc/windmi-controller.conf.
+
+Usage:
+  sudo windmi-control --web 8080 --ip 192.168.123.10 --port 8899
+
+For demo/testing without hardware:
+  sudo windmi-control --demo --web 8080
+
+See 'windmi-control --help' for all options.

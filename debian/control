@@ -1,0 +1,25 @@
+Source: windmi-controller
+Section: utils
+Priority: optional
+Maintainer: Windmi Controller Maintainer <maintainer@example.com>
+Build-Depends: cmake (>= 3.16), g++ (>= 10), libmongoose-dev | mongoose, debhelper-compat (= 12)
+Standards-Version: 4.6.0
+Homepage: https://github.com/windmi/windmi-controller
+Rules-Requires-Root: no
+
+Package: windmi-controller
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: Rotenso Windmi Heat Pump Controller
+ The Windmi Controller is a Modbus-based controller for the Rotenso
+ Windmi air-source heat pump.  It provides a local web interface for
+ monitoring and control, a structured logging system, and a demo mode
+ for development without hardware.
+ .
+ Features:
+  - Modbus TCP/RTU communication with the Windmi heat pump
+  - Embedded web server with real-time status monitoring
+  - Structured logging with configurable levels and file output
+  - Demo mode with simulated device for offline development
+  - Self-test for hardware register verification
+  - Instance locking to prevent multiple instances
