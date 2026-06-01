@@ -201,7 +201,7 @@ application. If profiling shows contention, it can be added later.
 
 ## 5. Implementation Plan
 
-### Phase 1: Core Logger (2-3 hours)
+### Phase 1: Core Logger (3-4 hours)
 1. Create `include/utils/Logger.hpp`
    - `LogLevel` enum
    - `LogEntry` struct
@@ -229,6 +229,7 @@ application. If profiling shows contention, it can be added later.
    - `#define LOG_TAG_WEBSERVER   "WebServer"`
    - `#define LOG_TAG_MAIN        "Main"`
    - `#define LOG_TAG_SELFTEST    "SelfTest"`
+   - `#define LOG_TAG_SIMULATOR   "Simulator"`
 
 5. Update `src/utils/CMakeLists.txt` to add `Logger.cpp` and `LoggerC.cpp`
 
@@ -245,7 +246,7 @@ application. If profiling shows contention, it can be added later.
    libraries that need it (`windmi_core`, `windmi_modbus`, `windmi_web`,
    `windmi_selftest`)
 
-### Phase 3: Migration (4-6 hours)
+### Phase 3: Migration (3-4 hours)
 **Rule**: Migrate one file at a time. Never mix printf and logger in the
 same function. Remove `#include <cstdio>` only when the file has zero
 remaining printf calls (including `snprintf` for string formatting — keep
@@ -253,41 +254,59 @@ remaining printf calls (including `snprintf` for string formatting — keep
 
 **Only migrate actual logging calls** (`printf`, `fprintf(stderr,...)`,
 `perror`). Do NOT migrate `snprintf`/`sprintf` used for string construction
-(e.g., HTTP response buffers in WebServer).
+(e.g., HTTP response buffers in WebServer, PID file in main).
 
 ---
 
 ## 6. File-by-File Migration
 
-### Files That Need Migration (actually have logging calls and are in the build)
+### Active Source Files That Need Migration
 
-| File | Language | Logging Calls | Tag | Notes |
-|------|----------|---------------|-----|-------|
-| `src/core/ControlLoop.cpp` | C++ | 46 | `ControlLoop` | printf + fprintf(stderr,...) |
-| `src/web/WebServer.cpp` | C++ | 11 | `WebServer` | printf + fprintf(stderr,...); skip `snprintf` on lines 57, 174 |
-| `src/main.cpp` | C++ | 43 | `Main` | printf + fprintf(stderr,...); skip `snprintf` on line 113 and other string-formatting uses |
-| `src/modbus_client.c` | C | 15 | `Modbus` | printf + fprintf(stderr,...) + 3× perror |
-| `src/selftest.c` | C | 30 | `SelfTest` | printf + fprintf(stderr,...) |
+| File | Language | printf | fprintf(stderr) | perror | snprintf (keep) | Tag | Notes |
+|------|----------|--------|------------------|--------|------------------|-----|-------|
+| `src/core/ControlLoop.cpp` | C++ | 28 | 18 | 0 | 0 | `ControlLoop` | Largest migration target |
+| `src/main.cpp` | C++ | 28 | 19 | 0 | 2 | `Main` | Keep `snprintf` at lines 115, 162 |
+| `src/web/WebServer.cpp` | C++ | 10 | 1 | 0 | 2 | `WebServer` | Keep `snprintf` at lines 57, 174 |
+| `src/modbus_client.c` | C | 3 | 9 | 3 | 0 | `Modbus` | Uses C bridge; `perror` → `WINDMI_C_LOG_ERROR` + `strerror(errno)` |
+| `src/selftest.c` | C | 19 | 11 | 0 | 0 | `SelfTest` | Uses C bridge |
 
-### Files That Need NO Migration (in the build but have no logging calls)
+**Total**: 46 `printf`, 58 `fprintf(stderr)`, 3 `perror` = **107 logging calls** to migrate.
 
-- `src/modbus/ModbusClient.cpp` — no logging
-- `src/core/StatusMonitor.cpp` — no logging
-- `src/utils/Config.cpp` — no logging
-- `src/utils/JsonHelpers.cpp` — no logging
-- `src/utils/SpscQueue.cpp` — no logging
+### Active Source Files That Need NO Migration
+
+| File | Reason |
+|------|--------|
+| `src/modbus/ModbusClient.cpp` | No logging calls (uses exceptions) |
+| `src/modbus/SimulatedModbusClient.cpp` | No logging calls (uses exceptions) |
+| `src/core/StatusMonitor.cpp` | No logging calls |
+| `src/utils/Config.cpp` | No logging calls |
+| `src/utils/JsonHelpers.cpp` | No logging calls |
+| `src/utils/SpscQueue.cpp` | No logging calls |
 
 ### Legacy Files NOT in the Build (do NOT migrate)
+
 These are superseded by C++ counterparts on the `PR_Cplusplus_conversion` branch:
 - `src/control_loop.c` → replaced by `src/core/ControlLoop.cpp`
 - `src/web_server.c` → replaced by `src/web/WebServer.cpp`
 - `src/main.c` → replaced by `src/main.cpp`
 
 ### Test Files (do NOT migrate)
-Test files (`tests/test_crc16.c`, `tests/test_control_logic.c`,
-`tests/test_modbus_frames.c`, `tests/test_spsc_queue.c`) use TEST/PASS/FAIL
-macros as a test harness. This is test output, not application logging.
-They should keep their own output format.
+
+Test files use TEST/PASS/FAIL macros as a test harness. This is test output,
+not application logging. They should keep their own output format.
+
+- `tests/core/test_control_loop.cpp`
+- `tests/core/test_status_monitor.cpp`
+- `tests/modbus/test_modbus_client.cpp`
+- `tests/utils/test_config.cpp`
+- `tests/utils/test_crc16.cpp`
+- `tests/utils/test_json_helpers.cpp`
+- `tests/web/test_http_client.cpp`
+- `tests/web/test_web_server.cpp`
+- `tests/test_control_logic.c`
+- `tests/test_crc16.c`
+- `tests/test_modbus_frames.c`
+- `tests/test_spsc_queue.c`
 
 ---
 
@@ -336,6 +355,8 @@ Need to add `#include <string.h>` for `strerror` if not already present.
 ```cpp
 snprintf(url, sizeof(url), "http://%s:%d", WEB_SERVER_IP, port);  // keep as-is
 snprintf(response, sizeof(response), "...");                        // keep as-is
+snprintf(proc_path, sizeof(proc_path), "/proc/%d/stat", pid);        // keep as-is
+snprintf(pid_buf, sizeof(pid_buf), "%d\n", getpid());               // keep as-is
 ```
 These are string construction, not logging. Keep `<cstdio>` where needed.
 
@@ -359,6 +380,7 @@ These are string construction, not logging. Keep `<cstdio>` where needed.
 ## 9. Build System Updates
 
 ### `src/utils/CMakeLists.txt`
+Add `Logger.cpp` and `LoggerC.cpp` to windmi_utils:
 ```cmake
 add_library(windmi_utils STATIC
     Config.cpp
@@ -372,25 +394,40 @@ target_include_directories(windmi_utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../..
 
 ### Dependency Updates
 `windmi_utils` now contains Logger. Libraries that need logging must link it:
-- `windmi_core` — add `windmi_utils`
-- `windmi_modbus` — add `windmi_utils`
-- `windmi_web` — add `windmi_utils`
-- `windmi_selftest` — add `windmi_utils`
+- `windmi_core` — add `windmi_utils` to `target_link_libraries`
+- `windmi_modbus` — add `windmi_utils` to `target_link_libraries`
+- `windmi_web` — add `windmi_utils` to `target_link_libraries`
+- `windmi_selftest` — add `windmi_utils` to `target_link_libraries`
+
+Current dependency chain:
+```
+windmi-core       → mongoose
+windmi-modbus     → mongoose
+windmi-web        → mongoose
+windmi-utils      → (nothing)
+windmi-selftest   → windmi-modbus
+
+windmi-control    → windmi_core, windmi_modbus, windmi_web, windmi_utils, windmi_selftest, mongoose, Threads
+```
+
+After adding Logger, windmi_utils will also need `<mutex>` and `<atomic>`, which
+are header-only — no additional link dependencies needed.
 
 ---
 
 ## 10. Testing Strategy
 
-### Unit Tests
+### Unit Tests (`tests/utils/test_logger.cpp`)
 - Test log level filtering: set level to WARN, verify INFO messages suppressed
 - Test multiple outputs: console + file both receive same message
 - Test thread safety: two threads logging simultaneously, no garbled output
 - Test C bridge: call `windmi_log()` from C test, verify output
+- Test format: verify log line matches `[YYYY-MM-DD HH:MM:SS.mmm] [LEVEL] [TAG] message (file:line)`
 
 ### Integration Tests
-- Verify log line format matches spec
-- Verify level-based stdout/stderr routing in ConsoleLogOutput
 - Run the full application with `--log-level DEBUG` and verify output
+- Verify `--demo` mode logs use `LOG_TAG_SIMULATOR` tag
+- Run `--selftest` and verify SelfTest tag output
 
 ---
 
@@ -439,11 +476,11 @@ After all replacements:
 - [ ] Update `src/utils/CMakeLists.txt`
 - [ ] Update library dependencies in CMakeLists.txt files
 - [ ] Initialize logger in `main.cpp` + add `--log-level` / `--log-file` args
-- [ ] Migrate `src/core/ControlLoop.cpp` (46 calls)
-- [ ] Migrate `src/web/WebServer.cpp` (11 calls, skip snprintf)
-- [ ] Migrate `src/main.cpp` (43 calls, skip snprintf/string formatting)
-- [ ] Migrate `src/modbus_client.c` (15 calls including 3 perror)
-- [ ] Migrate `src/selftest.c` (30 calls)
+- [ ] Migrate `src/core/ControlLoop.cpp` (46 calls: 28 printf, 18 fprintf)
+- [ ] Migrate `src/main.cpp` (47 calls: 28 printf, 19 fprintf; keep 2 snprintf)
+- [ ] Migrate `src/web/WebServer.cpp` (11 calls: 10 printf, 1 fprintf; keep 2 snprintf)
+- [ ] Migrate `src/modbus_client.c` (15 calls: 3 printf, 9 fprintf, 3 perror)
+- [ ] Migrate `src/selftest.c` (30 calls: 19 printf, 11 fprintf)
 - [ ] Write unit tests for Logger
 - [ ] Remove unnecessary `#include <cstdio>` / `#include <iostream>`
 - [ ] Add CI check to reject new printf/cout/cerr in non-test source
