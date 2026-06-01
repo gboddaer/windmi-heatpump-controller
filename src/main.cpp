@@ -17,9 +17,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/file.h>
-#include <errno.h>
-#include <limits.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <errno.h>
+#include <climits>
 
 #include "config.h"
 #include "core/ControlLoop.hpp"
@@ -103,6 +104,17 @@ static void signal_handler(int sig) {
     g_running = 0;
 }
 
+/**
+ * Check if a process with the given PID is alive.
+ * Uses /proc for Linux; always returns true on other systems.
+ */
+static bool is_pid_alive(pid_t pid) {
+    char proc_path[64];
+    snprintf(proc_path, sizeof(proc_path), "/proc/%d/stat", pid);
+    struct stat st;
+    return (stat(proc_path, &st) == 0);
+}
+
 // Acquire exclusive lock to prevent multiple instances
 static int acquire_lock() {
     g_lock_fd = open(LOCK_FILE, O_CREAT | O_RDWR, 0644);
@@ -111,9 +123,30 @@ static int acquire_lock() {
         return -1;
     }
 
+    // Set close-on-exec so child processes don't inherit the lock
+    int flags = fcntl(g_lock_fd, F_GETFD);
+    if (flags >= 0) {
+        fcntl(g_lock_fd, F_SETFD, flags | FD_CLOEXEC);
+    }
+
     if (flock(g_lock_fd, LOCK_EX | LOCK_NB) < 0) {
         if (errno == EWOULDBLOCK) {
-            fprintf(stderr, "[Main] Another instance is already running (lock held)\n");
+            // Read the PID from the lock file for diagnostics
+            char pid_buf[32] = {};
+            lseek(g_lock_fd, 0, SEEK_SET);
+            ssize_t n = read(g_lock_fd, pid_buf, sizeof(pid_buf) - 1);
+            (void)n;
+            int existing_pid = atoi(pid_buf);
+            if (existing_pid > 0 && is_pid_alive(existing_pid)) {
+                fprintf(stderr, "[Main] Another instance is already running (PID %d)\n",
+                        existing_pid);
+            } else if (existing_pid > 0) {
+                fprintf(stderr, "[Main] Lock held by stale process %d (not running)\n",
+                        existing_pid);
+                fprintf(stderr, "[Main] Remove %s or use --force to override\n", LOCK_FILE);
+            } else {
+                fprintf(stderr, "[Main] Another instance is already running\n");
+            }
         } else {
             fprintf(stderr, "[Main] Failed to acquire lock: %s\n", strerror(errno));
         }
@@ -122,7 +155,7 @@ static int acquire_lock() {
         return -1;
     }
 
-    // Write PID to lock file for debugging
+    // Write PID to lock file for diagnostics
     char pid_buf[32];
     int len = snprintf(pid_buf, sizeof(pid_buf), "%d\n", getpid());
     if (len > 0) {
@@ -144,12 +177,22 @@ static void release_lock() {
     }
 }
 
+// Safety net: release lock on unexpected exit (e.g., unhandled exception)
+static void atexit_release_lock() {
+    if (g_lock_fd >= 0) {
+        flock(g_lock_fd, LOCK_UN);
+        close(g_lock_fd);
+        g_lock_fd = -1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     const char* modbus_ip = MODBUS_GATEWAY_IP;
     int modbus_port = MODBUS_GATEWAY_PORT;
     int web_port = WEB_SERVER_PORT;
     std::string static_dir = "static";
     bool run_selftest = false;
+    bool force_lock = false;
 
     // Parse CLI arguments (long and short forms)
     for (int i = 1; i < argc; i++) {
@@ -160,6 +203,7 @@ int main(int argc, char* argv[]) {
             printf("  -p, --port <port>   Modbus gateway port (default: %d)\n", MODBUS_GATEWAY_PORT);
             printf("  -w, --web <port>    Web server HTTP port (default: %d)\n", WEB_SERVER_PORT);
             printf("  -t, --static-dir <dir>  Static files directory (default: static)\n");
+            printf("  -f, --force         Force start even if lock is held by stale process\n");
             printf("  -s, --selftest      Run self-test and exit\n");
             printf("  -h, --help          Show this help message\n");
             return 0;
@@ -173,6 +217,8 @@ int main(int argc, char* argv[]) {
             static_dir = argv[++i];
         } else if (strcmp(argv[i], "--selftest") == 0 || strcmp(argv[i], "-s") == 0) {
             run_selftest = true;
+        } else if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0) {
+            force_lock = true;
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             fprintf(stderr, "Use --help for usage information.\n");
@@ -181,13 +227,26 @@ int main(int argc, char* argv[]) {
     }
 
     // Acquire exclusive lock before doing anything
+    if (force_lock) {
+        // --force: remove stale lock file and try again
+        // (flock is kernel-managed, but this allows overriding if needed)
+        struct stat st;
+        if (stat(LOCK_FILE, &st) == 0) {
+            fprintf(stderr, "[Main] --force: removing stale lock file %s\n", LOCK_FILE);
+            unlink(LOCK_FILE);
+        }
+    }
     if (acquire_lock() != 0) {
         return 1;
     }
 
-    // Set up signal handler to release lock on exit
+    // Register atexit handler as safety net for lock release
+    atexit(atexit_release_lock);
+
+    // Set up signal handlers
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
+    signal(SIGPIPE, SIG_IGN);  // Ignore SIGPIPE (client disconnects)
 
     printf("[Main] Rotenso Windmi Controller\n");
     printf("[Main] Modbus gateway: %s:%d\n", modbus_ip, modbus_port);
