@@ -4,6 +4,7 @@
  */
 
 #include "utils/Config.hpp"
+#include "config.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -12,9 +13,9 @@ namespace windmi {
 
 Config::Config() {
     // Default configuration
-    set("modbus.host", "192.168.123.10");
-    set("modbus.port", "8899");
-    set("modbus.slave_id", "1");
+    set("modbus.host", MODBUS_GATEWAY_IP);
+    set("modbus.port", std::to_string(MODBUS_GATEWAY_PORT));
+    set("modbus.slave_id", std::to_string(MODBUS_SLAVE_ID));
     set("web.port", "8080");
     set("dhw.target", "45.0");
     set("heating.target", "40.0");

@@ -1,21 +1,27 @@
 /**
  * @file web/WebServer.hpp
  * @brief Web server for heat pump control interface
+ *
+ * Matches master branch web_server.h / web_server.c functionality.
  */
 
 #ifndef WINDMI_WEB_WEB_SERVER_HPP
 #define WINDMI_WEB_WEB_SERVER_HPP
 
+#include "core/ControlLoop.hpp"
+#include <mongoose.h>
 #include <string>
-#include <functional>
-#include <memory>
+#include <atomic>
+#include <csignal>
 
 namespace windmi {
 
 /**
  * @brief Web server class
- * 
- * Manages the HTTP server and API endpoints.
+ *
+ * Manages the HTTP server, API endpoints, and static file serving.
+ * Uses Mongoose embedded web server.
+ * Matches master branch web_server.c functionality.
  */
 class WebServer {
 public:
@@ -23,46 +29,45 @@ public:
      * @brief Constructor
      * @param port Port to listen on
      * @param static_dir Directory for static files
+     * @param cmd_queue Command queue for pushing API commands
+     * @param status_queue Status queue for reading status snapshots
      */
-    WebServer(int port, const std::string& static_dir);
+    WebServer(int port, const std::string& static_dir,
+              CmdQueue* cmd_queue, StatusQueue* status_queue);
 
-    /**
-     * @brief Destructor
-     */
     ~WebServer();
 
     /**
-     * @brief Start the web server
-     * @return true if successful, false otherwise
+     * @brief Run the web server (blocking)
+     *
+     * This call blocks until stop() is called. It runs the
+     * mg_mgr_poll() event loop.
      */
-    bool start();
+    void run();
 
-    /**
-     * @brief Stop the web server
-     */
     void stop();
-
-    /**
-     * @brief Check if server is running
-     * @return true if running, false otherwise
-     */
-    bool isRunning() const;
-
-    /**
-     * @brief Check if server is shutting down
-     * @return true if shutting down, false otherwise
-     */
     bool isShuttingDown() const;
 
-    /**
-     * @brief Set status callback for API endpoints
-     * @param callback Callback function
-     */
-    void setStatusCallback(std::function<void()> callback);
-
 private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
+    static void eventHandler(struct mg_connection* c, int ev, void* ev_data);
+    void handleRequest(struct mg_connection* c, struct mg_http_message* hm);
+
+    static void sendJsonReply(struct mg_connection* c, int status_code,
+                               const char* json);
+
+    void apiStatusHandler(struct mg_connection* c);
+    void apiSetDhwHandler(struct mg_connection* c, struct mg_str* body);
+    void apiSetHeatingHandler(struct mg_connection* c, struct mg_str* body);
+    void apiSetPriorityHandler(struct mg_connection* c, struct mg_str* body);
+    void apiSetModeHandler(struct mg_connection* c, struct mg_str* body);
+
+    struct mg_mgr mgr_;
+    std::string static_dir_;
+    CmdQueue* cmd_queue_;
+    StatusQueue* status_queue_;
+    StatusSnapshot last_status_;
+    std::atomic<bool> running_;
+    volatile sig_atomic_t shutting_down_;
 };
 
 } // namespace windmi

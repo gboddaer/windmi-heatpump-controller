@@ -3,16 +3,17 @@
  * @brief Config unit tests
  */
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 #include "utils/Config.hpp"
+#include "config.h"
 
 using namespace windmi;
 
 TEST(ConfigTest, DefaultValues) {
     Config config;
-    EXPECT_EQ(config.getString("modbus.host", ""), "192.168.123.10");
-    EXPECT_EQ(config.getInt("modbus.port", 0), 8899);
-    EXPECT_EQ(config.getInt("modbus.slave_id", 0), 1);
+    EXPECT_EQ(config.getString("modbus.host", ""), MODBUS_GATEWAY_IP);
+    EXPECT_EQ(config.getInt("modbus.port", 0), MODBUS_GATEWAY_PORT);
+    EXPECT_EQ(config.getInt("modbus.slave_id", 0), MODBUS_SLAVE_ID);
 }
 
 TEST(ConfigTest, SetAndGetString) {
@@ -39,10 +40,10 @@ TEST(ConfigTest, BooleanValues) {
     Config config;
     config.set("test.bool", "true");
     EXPECT_TRUE(config.getBool("test.bool", false));
-    
+
     config.set("test.bool2", "1");
     EXPECT_TRUE(config.getBool("test.bool2", false));
-    
+
     config.set("test.bool3", "false");
     EXPECT_FALSE(config.getBool("test.bool3", true));
 }

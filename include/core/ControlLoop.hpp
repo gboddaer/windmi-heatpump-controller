@@ -1,143 +1,198 @@
 /**
  * @file core/ControlLoop.hpp
  * @brief Control loop for heat pump management
+ *
+ * StatusSnapshot matches master branch status_snapshot_t exactly.
+ * Control loop logic matches master branch control_loop.c.
  */
 
 #ifndef WINDMI_CORE_CONTROL_LOOP_HPP
 #define WINDMI_CORE_CONTROL_LOOP_HPP
 
 #include <cstdint>
-#include <memory>
 #include <thread>
 #include <atomic>
-#include <functional>
 #include <mutex>
+#include <condition_variable>
+#include <functional>
 #include <string>
 
 namespace windmi {
 
+// Forward declarations
+class ModbusClient;
+
 /**
  * @brief Command types for the control loop
+ *
+ * These match the C cmd_type_t enum from spsc_queue.h.
  */
 enum class CommandType : uint8_t {
-    CMD_SET_DHW_TEMP = 1,
-    CMD_SET_HEATING_TEMP,
-    CMD_SET_PRIORITY,
-    CMD_SET_RUNNING_MODE
+    CMD_SET_DHW_TEMP = 0,
+    CMD_SET_HEATING_TEMP = 1,
+    CMD_SET_PRIORITY = 2,
+    CMD_SET_RUNNING_MODE = 3
 };
 
 /**
- * @brief Status snapshot structure
+ * @brief Command structure matching C cmd_t from spsc_queue.h
+ */
+struct Command {
+    CommandType type;
+    float float_val = 0.0f;
+    int int_val = 0;
+};
+
+/**
+ * @brief Status snapshot structure matching C status_snapshot_t from spsc_queue.h
+ *
+ * Field names and types match master branch exactly.
+ * - running_mode: device register value (0=Off, 1=Cool+DHW, 2=Heat+DHW)
+ * - running_status: device register value (0=Off, 1=Cool, 2=Heat, 4=DHW, 7=Defrost, 20=Antifreeze)
+ * - dhw_priority: true=DHW priority, false=heating priority
+ * - is_running: true if device is active (running_status != 0)
+ * - working_mode: application-level (0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating)
  */
 struct StatusSnapshot {
-    float dhw_tank_temp;
-    float dhw_target;
-    float heating_temperature;
-    float heating_target;
-    float outdoor_temp;
-    float leaving_water_temp;
-    int mode;
-    int running_status;
-    int priority;
-    int status;
-    bool device_online;
-    float ac_current;
-    float dc_current;
-    float ac_voltage;
-    float dc_voltage;
-    float ac_power;
-    int working_mode;
+    float outdoor_temp = 0.0f;
+    float indoor_temp = 0.0f;
+    float leaving_water_temp = 0.0f;
+    float dhw_tank_temp = 0.0f;
+    float dhw_target = 0.0f;
+    float heating_target = 0.0f;
+    int running_mode = 0;        // From REG_RUNNING_MODE (0x002C)
+    int running_status = 0;      // From REG_RUNNING_STATUS (0x002D)
+    bool dhw_priority = false;
+    bool is_running = false;
+    bool device_online = false;
+    // Power monitoring
+    float ac_current = 0.0f;     // AC current in Amps (raw * 2)
+    float dc_current = 0.0f;     // DC current in Amps (raw * 4)
+    float ac_voltage = 0.0f;     // AC voltage in Volts (raw)
+    float dc_voltage = 0.0f;     // DC voltage in Volts (raw / 2)
+    float ac_power = 0.0f;       // AC power in Watts (ac_voltage * ac_current)
+    // Working mode (0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating)
+    int working_mode = 0;
+};
+
+/**
+ * @brief Priority mode enum (internal, not a register value)
+ *
+ * Named to avoid collision with config.h PRIORITY_DHW/PRIORITY_AUTO macros.
+ */
+enum class PriorityMode : uint8_t {
+    Dhw,       // DHW priority
+    Heating    // Heating priority
+};
+
+/**
+ * @brief SPSC command queue interface
+ *
+ * Used by WebServer to push commands and by ControlLoop to consume them.
+ * The web server is the single producer; the control loop is the single consumer.
+ */
+class CmdQueue {
+public:
+    static constexpr size_t CAPACITY = 16;
+
+    CmdQueue();
+    bool push(const Command& cmd);
+    bool pop(Command& cmd);
+    bool empty() const;
+
+private:
+    Command buf_[CAPACITY];
+    alignas(64) volatile uint32_t head_;
+    alignas(64) volatile uint32_t tail_;
+};
+
+/**
+ * @brief SPSC status queue interface
+ *
+ * Used by ControlLoop to publish status snapshots and by WebServer to consume them.
+ * The control loop is the single producer; the web server is the single consumer.
+ */
+class StatusQueue {
+public:
+    static constexpr size_t CAPACITY = 32;
+
+    StatusQueue();
+    bool push(const StatusSnapshot& item);
+    bool pop(StatusSnapshot& item);
+    bool latest(StatusSnapshot& item);
+
+private:
+    StatusSnapshot buf_[CAPACITY];
+    alignas(64) volatile uint32_t head_;
+    alignas(64) volatile uint32_t tail_;
 };
 
 /**
  * @brief Control loop class for heat pump management
- * 
- * Manages the control loop thread, processes commands,
- * and maintains status updates.
+ *
+ * Manages the control loop thread, processes commands from the command queue,
+ * reads device status via Modbus, applies control logic, and publishes
+ * status snapshots to the status queue.
+ *
+ * Matches master branch control_loop.c functionality exactly.
  */
 class ControlLoop {
 public:
-    /**
-     * @brief Callback type for status updates
-     */
-    using StatusCallback = std::function<void(const StatusSnapshot&)>;
-
-    /**
-     * @brief Constructor
-     * @param status_cb Optional callback for status updates
-     */
-    explicit ControlLoop(StatusCallback status_cb = nullptr);
-
-    /**
-     * @brief Destructor
-     */
+    ControlLoop();
     ~ControlLoop();
 
     /**
      * @brief Start the control loop thread
+     * @param client ModbusClient to use for device communication
+     * @param cmd_queue Command queue to consume
+     * @param status_queue Status queue to publish to
      * @return true if successful, false otherwise
      */
-    bool start();
+    bool start(ModbusClient* client, CmdQueue* cmd_queue, StatusQueue* status_queue);
 
-    /**
-     * @brief Stop the control loop thread
-     */
     void stop();
-
-    /**
-     * @brief Check if the control loop is running
-     * @return true if running, false otherwise
-     */
     bool isRunning() const;
 
     /**
-     * @brief Get the current status snapshot
-     * @param snapshot Output parameter for status
-     * @return true if snapshot was retrieved, false otherwise
+     * @brief Kick the control loop to wake it immediately
+     *
+     * Called when a command is pushed to the cmd_queue so the
+     * control loop processes it without waiting for the next poll.
      */
-    bool getStatus(StatusSnapshot& snapshot);
-
-    /**
-     * @brief Enqueue a command
-     * @param type Command type
-     * @param float_val Float value for command
-     * @param int_val Integer value for command
-     * @return true if command was enqueued, false otherwise
-     */
-    bool enqueueCommand(CommandType type, float float_val, int int_val);
-
-    /**
-     * @brief Set the Modbus client pointer
-     * @param client_ptr Pointer to Modbus client
-     */
-    void setModbusClient(void* client_ptr);
+    void kick();
 
 private:
-    /**
-     * @brief Thread function for control loop
-     */
     void threadFunc();
+    bool readStatus(StatusSnapshot& status);
+    void processCommands();
+    void applyControlLogic(StatusSnapshot& status);
+    int setRunningMode(int mode);
+    int setDhwTarget(float temp);
+    int setHeatingTarget(float temp);
 
-    /**
-     * @brief Read current status from device
-     * @param snapshot Output parameter for status
-     * @return true if successful, false otherwise
-     */
-    bool readStatus(StatusSnapshot& snapshot);
+    // Modbus and queue pointers (not owned)
+    ModbusClient* modbus_client_;
+    CmdQueue* cmd_queue_;
+    StatusQueue* status_queue_;
 
-    /**
-     * @brief Apply control logic
-     */
-    void applyControlLogic();
-
-    // Member variables
-    StatusCallback status_callback_;
-    void* modbus_client_;
+    // Thread management
     std::unique_ptr<std::thread> thread_;
     std::atomic<bool> running_;
     std::atomic<bool> stop_requested_;
-    StatusSnapshot current_status_;
-    std::mutex status_mutex_;
+
+    // Kick mechanism
+    std::mutex kick_mutex_;
+    std::condition_variable kick_cond_;
+    bool kicked_;
+
+    // Control state (matches master branch)
+    PriorityMode current_priority_;
+    int current_mode_;              // Device mode we last set (0, 1, or 2)
+    int desired_working_mode_;      // Application-level (0-3)
+    float last_heating_target_;
+    float saved_dhw_target_;
+    float saved_heating_target_;
+    bool saved_targets_initialized_;
 };
 
 } // namespace windmi

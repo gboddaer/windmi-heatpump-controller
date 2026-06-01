@@ -3,34 +3,42 @@
  * @brief Modbus Client unit tests
  */
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 #include "modbus/ModbusClient.hpp"
+#include "config.h"
 
 using namespace windmi;
 
 TEST(ModbusClientTest, CreateClient) {
-    ModbusClient client("192.168.123.10", 8899, 1);
+    ModbusClient client(MODBUS_GATEWAY_IP, MODBUS_GATEWAY_PORT, MODBUS_SLAVE_ID);
     // Client should be created but not connected
 }
 
 TEST(ModbusClientTest, NotConnectedInitially) {
-    ModbusClient client("192.168.123.10", 8899, 1);
+    ModbusClient client(MODBUS_GATEWAY_IP, MODBUS_GATEWAY_PORT, MODBUS_SLAVE_ID);
     EXPECT_FALSE(client.isConnected());
 }
 
 TEST(ModbusClientTest, ExceptionOnReadWhenNotConnected) {
-    ModbusClient client("192.168.123.10", 8899, 1);
-    EXPECT_THROW(client.readRegister(0x0012), ModbusException);
+    ModbusClient client(MODBUS_GATEWAY_IP, MODBUS_GATEWAY_PORT, MODBUS_SLAVE_ID);
+    EXPECT_THROW(client.readRegister(REG_RUNNING_MODE), ModbusException);
 }
 
 TEST(ModbusClientTest, ExceptionOnWriteWhenNotConnected) {
-    ModbusClient client("192.168.123.10", 8899, 1);
-    EXPECT_THROW(client.writeRegister(0x0012, 100), ModbusException);
+    ModbusClient client(MODBUS_GATEWAY_IP, MODBUS_GATEWAY_PORT, MODBUS_SLAVE_ID);
+    EXPECT_THROW(client.writeRegister(REG_RUNNING_MODE, 0), ModbusException);
 }
 
 TEST(ModbusClientTest, DestructorDoesNotCrash) {
     {
-        ModbusClient client("192.168.123.10", 8899, 1);
+        ModbusClient client(MODBUS_GATEWAY_IP, MODBUS_GATEWAY_PORT, MODBUS_SLAVE_ID);
     }
     // Should not crash
+}
+
+TEST(ModbusClientTest, GetCClient) {
+    ModbusClient client(MODBUS_GATEWAY_IP, MODBUS_GATEWAY_PORT, MODBUS_SLAVE_ID);
+    void* c_client = client.getCClient();
+    // Should return non-null even when not connected (client struct exists)
+    EXPECT_NE(c_client, nullptr);
 }

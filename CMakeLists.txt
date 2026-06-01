@@ -49,16 +49,28 @@ add_subdirectory(src/utils)
 # Add crc16 to utils library
 target_sources(windmi_utils PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/crc16.cpp)
 
+# Self-test library (C code)
+add_library(windmi_selftest STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/selftest.c
+)
+target_include_directories(windmi_selftest PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(windmi_selftest PUBLIC windmi_modbus)
+
 # Main executable
 add_executable(windmi-control src/main.cpp)
 target_include_directories(windmi-control PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_link_libraries(windmi-control PRIVATE
     windmi_core
     windmi_modbus
     windmi_web
     windmi_utils
+    windmi_selftest
     mongoose
     Threads::Threads
 )

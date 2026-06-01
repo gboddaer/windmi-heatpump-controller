@@ -4,6 +4,10 @@
 #include "modbus_client.h"
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
     const char *name;
     uint16_t address;
@@ -27,5 +31,9 @@ selftest_report_t selftest_run(modbus_client_t *client);
 
 // Print self-test report to stdout
 void selftest_print_report(const selftest_report_t *report);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // SELFTEST_H

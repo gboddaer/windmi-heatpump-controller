@@ -1,6 +1,13 @@
 /**
  * @file src/main.cpp
  * @brief Main entry point for Windmi Controller
+ *
+ * Matches master branch main.c functionality:
+ * - Instance lock via flock()
+ * - CLI: --ip, --port, --web, --selftest, --help
+ * - SPSC queues for thread communication
+ * - Startup: Modbus connect → ControlLoop → WebServer
+ * - Shutdown: WebServer stop → ControlLoop stop → OFF mode write → lock release
  */
 
 #include <csignal>
@@ -8,6 +15,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <errno.h>
 
 #include "config.h"
 #include "core/ControlLoop.hpp"
@@ -16,198 +26,233 @@
 #include "web/WebServer.hpp"
 #include "crc16.h"
 
-// Global variables
-static const char* MODBUS_IP = "192.168.123.10";
-static int MODBUS_PORT = 8899;
-static uint8_t MODBUS_SLAVE_ID = 1;
-static int WEB_PORT = 8080;
-static bool SELF_TEST = false;
+extern "C" {
+#include "selftest.h"
+}
 
-static windmi::ControlLoop* g_control_loop = nullptr;
+// config.h defines (MODBUS_SLAVE_ID etc.) are in the extern "C" block
+// inside config.h itself, so they are available here.
+
+#define LOCK_FILE "/tmp/windmi-controller.lock"
+
+static volatile sig_atomic_t g_running = 1;
+static int g_lock_fd = -1;
+
+// Global objects for signal handler access
 static windmi::WebServer* g_web_server = nullptr;
+static windmi::ControlLoop* g_control_loop = nullptr;
 
 // Signal handler
 static void signal_handler(int sig) {
     (void)sig;
+    g_running = 0;
+    // Wake up the web server poll loop so it exits
     if (g_web_server) {
         g_web_server->stop();
     }
-    if (g_control_loop) {
-        g_control_loop->stop();
-    }
 }
 
-// Parse command line arguments
-static int parse_args(int argc, char* argv[]) {
-    int opt;
-    while ((opt = getopt(argc, argv, "w:s")) != -1) {
-        switch (opt) {
-        case 'w':
-            WEB_PORT = atoi(optarg);
-            break;
-        case 's':
-            SELF_TEST = true;
-            break;
-        default:
-            fprintf(stderr, "Usage: %s [-w port] [-s]\n", argv[0]);
-            return -1;
-        }
-    }
-    return 0;
-}
-
-// Run self-test
-static int run_selftest() {
-    printf("[SelfTest] Starting self-test...\n");
-    
-    // Test basic components
-    printf("[SelfTest] Testing CRC16...\n");
-    uint8_t test_data[] = {0x01, 0x02, 0x03};
-    uint16_t crc = crc16(test_data, sizeof(test_data));
-    printf("[SelfTest] CRC16 result: 0x%04X\n", crc);
-    
-    printf("[SelfTest] Testing ModbusClient...\n");
-    windmi::ModbusClient client(MODBUS_IP, MODBUS_PORT, MODBUS_SLAVE_ID);
-    if (!client.connect()) {
-        printf("[SelfTest] ModbusClient connect failed\n");
+// Acquire exclusive lock to prevent multiple instances
+static int acquire_lock() {
+    g_lock_fd = open(LOCK_FILE, O_CREAT | O_RDWR, 0644);
+    if (g_lock_fd < 0) {
+        fprintf(stderr, "[Main] Failed to open lock file %s: %s\n", LOCK_FILE, strerror(errno));
         return -1;
     }
-    client.disconnect();
-    
-    printf("[SelfTest] All tests passed!\n");
+
+    if (flock(g_lock_fd, LOCK_EX | LOCK_NB) < 0) {
+        if (errno == EWOULDBLOCK) {
+            fprintf(stderr, "[Main] Another instance is already running (lock held)\n");
+        } else {
+            fprintf(stderr, "[Main] Failed to acquire lock: %s\n", strerror(errno));
+        }
+        close(g_lock_fd);
+        g_lock_fd = -1;
+        return -1;
+    }
+
+    // Write PID to lock file for debugging
+    char pid_buf[32];
+    int len = snprintf(pid_buf, sizeof(pid_buf), "%d\n", getpid());
+    if (len > 0) {
+        lseek(g_lock_fd, 0, SEEK_SET);
+        write(g_lock_fd, pid_buf, static_cast<size_t>(len));
+        ftruncate(g_lock_fd, len);
+    }
+
+    printf("[Main] Lock acquired (PID: %d)\n", getpid());
     return 0;
+}
+
+static void release_lock() {
+    if (g_lock_fd >= 0) {
+        flock(g_lock_fd, LOCK_UN);
+        close(g_lock_fd);
+        g_lock_fd = -1;
+        printf("[Main] Lock released\n");
+    }
 }
 
 int main(int argc, char* argv[]) {
-    printf("[Main] Rotenso Windmi Controller\n");
-    
-    // Parse arguments
-    if (parse_args(argc, argv) != 0) {
-        return EXIT_FAILURE;
-    }
-    
-    // Self-test mode
-    if (SELF_TEST) {
-        return run_selftest();
-    }
-    
-    // Install signal handler
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = signal_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-    if (sigaction(SIGINT, &sa, nullptr) != 0) {
-        fprintf(stderr, "[Main] Failed to install signal handler\n");
-        return EXIT_FAILURE;
-    }
-    
-    // Create Modbus client
-    std::unique_ptr<windmi::ModbusClient> modbus_client;
-    try {
-        modbus_client = std::make_unique<windmi::ModbusClient>(
-            MODBUS_IP, MODBUS_PORT, MODBUS_SLAVE_ID);
-        if (!modbus_client->connect()) {
-            fprintf(stderr, "[Main] Failed to connect to Modbus\n");
-            return EXIT_FAILURE;
+    const char* modbus_ip = MODBUS_GATEWAY_IP;
+    int modbus_port = MODBUS_GATEWAY_PORT;
+    int web_port = WEB_SERVER_PORT;
+    bool run_selftest = false;
+
+    // Parse CLI arguments (match master: --ip, --port, --web, --selftest, --help)
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0) {
+            printf("Usage: %s [options]\n", argv[0]);
+            printf("Options:\n");
+            printf("  --ip <address>  Modbus gateway IP (default: %s)\n", MODBUS_GATEWAY_IP);
+            printf("  --port <port>   Modbus gateway port (default: %d)\n", MODBUS_GATEWAY_PORT);
+            printf("  --web <port>    Web server HTTP port (default: %d)\n", WEB_SERVER_PORT);
+            printf("  --selftest      Run self-test and exit\n");
+            printf("  --help          Show this help message\n");
+            return 0;
+        } else if (strcmp(argv[i], "--ip") == 0 && i + 1 < argc) {
+            modbus_ip = argv[++i];
+        } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
+            modbus_port = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--web") == 0 && i + 1 < argc) {
+            web_port = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--selftest") == 0) {
+            run_selftest = true;
         }
-        printf("[Main] Modbus gateway: %s:%d (slave=%d)\n", 
-               MODBUS_IP, MODBUS_PORT, MODBUS_SLAVE_ID);
-    } catch (const std::exception& e) {
-        fprintf(stderr, "[Main] Modbus exception: %s\n", e.what());
-        return EXIT_FAILURE;
     }
-    
-    // Create status monitor and control loop
-    windmi::StatusMonitor status_monitor;
-    
-    g_control_loop = new windmi::ControlLoop([&status_monitor](const windmi::StatusSnapshot& snap) {
-        status_monitor.update(snap);
-    });
-    
-    if (!g_control_loop->start()) {
+
+    // Acquire exclusive lock before doing anything
+    if (acquire_lock() != 0) {
+        return 1;
+    }
+
+    // Set up signal handler to release lock on exit
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    printf("[Main] Rotenso Windmi Controller\n");
+    printf("[Main] Modbus gateway: %s:%d\n", modbus_ip, modbus_port);
+    printf("[Main] Web server: %s:%d\n", WEB_SERVER_IP, web_port);
+
+    // Create SPSC queues
+    windmi::CmdQueue cmd_queue;
+    windmi::StatusQueue status_queue;
+
+    // Create Modbus client
+    windmi::ModbusClient modbus_client(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
+
+    // Self-test mode: run self-test and exit
+    if (run_selftest) {
+        if (!modbus_client.connect()) {
+            fprintf(stderr, "[Main] Failed to connect to Modbus for self-test\n");
+            release_lock();
+            return 1;
+        }
+
+        // Get C client for selftest_run (which takes modbus_client_t*)
+        modbus_client_t* c_client = static_cast<modbus_client_t*>(modbus_client.getCClient());
+        selftest_report_t selftest_result = selftest_run(c_client);
+        selftest_print_report(&selftest_result);
+        printf("Self-test: %d/%d registers passed\n", selftest_result.passed, selftest_result.total);
+        if (selftest_result.all_critical_passed) {
+            printf("Self-test PASSED\n");
+        } else {
+            printf("Self-test FAILED\n");
+        }
+        modbus_client.disconnect();
+        release_lock();
+        return selftest_result.all_critical_passed ? 0 : 1;
+    }
+
+    // Connect to Modbus gateway
+    if (!modbus_client.connect()) {
+        fprintf(stderr, "[Main] Failed to connect to Modbus gateway\n");
+        release_lock();
+        return 1;
+    }
+
+    // Create and start control loop (pass Modbus client + queues)
+    g_control_loop = new windmi::ControlLoop();
+    if (!g_control_loop->start(&modbus_client, &cmd_queue, &status_queue)) {
         fprintf(stderr, "[Main] Failed to start control loop\n");
         delete g_control_loop;
-        return EXIT_FAILURE;
+        g_control_loop = nullptr;
+        release_lock();
+        return 1;
     }
-    printf("[Main] Control loop started\n");
-    
-    // Create web server
-    g_web_server = new windmi::WebServer(WEB_PORT, "static");
-    if (!g_web_server->start()) {
-        fprintf(stderr, "[Main] Failed to start web server\n");
-        delete g_web_server;
+
+    // Create and init web server (pass queues)
+    try {
+        g_web_server = new windmi::WebServer(web_port, "static", &cmd_queue, &status_queue);
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[Main] Failed to initialize web server: %s\n", e.what());
         g_control_loop->stop();
         delete g_control_loop;
-        return EXIT_FAILURE;
+        g_control_loop = nullptr;
+        release_lock();
+        return 1;
     }
-    printf("[Main] Web server: %s:%d\n", WEB_SERVER_IP, WEB_PORT);
-    
+
     printf("[Main] Server started. Press Ctrl+C to stop.\n");
-    
-    // Wait for shutdown
-    while (g_web_server->isRunning()) {
-        usleep(100000);  // 100ms
-    }
-    
-    // Shutdown sequence
+
+    // Run web server (blocking until stop)
+    g_web_server->run();
+
     printf("[Main] Shutting down...\n");
-    
-    // Stop control loop first
+
+    // Stop control loop
     g_control_loop->stop();
     printf("[Shutdown] Control loop stopped\n");
-    
-    // Wait for control loop to join
-    usleep(150000);  // 150ms drain
+
+    // Drain/quiet period
+    usleep(150000);  // 150ms
     printf("[Shutdown] Drain period complete\n");
-    
-    // Write OFF mode via dedicated client
+
+    // Write OFF mode via dedicated shutdown client
     printf("[Shutdown] Writing OFF mode via dedicated client...\n");
-    std::unique_ptr<windmi::ModbusClient> shutdown_client;
     bool off_written = false;
-    
     try {
-        shutdown_client = std::make_unique<windmi::ModbusClient>(
-            MODBUS_IP, MODBUS_PORT, MODBUS_SLAVE_ID);
-        
+        windmi::ModbusClient shutdown_client(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
+
         for (int attempt = 1; attempt <= 3; attempt++) {
-            if (shutdown_client->connect()) {
-                shutdown_client->flushBuffer();
-                
+            if (shutdown_client.connect()) {
+                shutdown_client.flushBuffer();
+
                 try {
-                    shutdown_client->writeRegister(REG_RUNNING_MODE, 0);
+                    shutdown_client.writeRegister(REG_RUNNING_MODE, 0);
                     printf("[Shutdown] OFF write OK (attempt %d)\n", attempt);
                     off_written = true;
-                    shutdown_client->disconnect();
+                    shutdown_client.disconnect();
                     break;
-                } catch (const windmi::ModbusException& e) {
-                    fprintf(stderr, "[Shutdown] Write error (attempt %d): %s\n", 
-                            attempt, e.what());
-                    shutdown_client->disconnect();
+                } catch (const windmi::ModbusException&) {
+                    fprintf(stderr, "[Shutdown] OFF write failed (attempt %d)\n", attempt);
+                    shutdown_client.disconnect();
                 }
             } else {
                 fprintf(stderr, "[Shutdown] Connect failed (attempt %d)\n", attempt);
             }
-            
+
             if (attempt < 3) {
                 usleep(100000);  // 100ms retry delay
             }
         }
     } catch (const std::exception& e) {
-        fprintf(stderr, "[Shutdown] Exception: %s\n", e.what());
+        fprintf(stderr, "[Shutdown] Exception creating shutdown client: %s\n", e.what());
     }
-    
+
     if (!off_written) {
-        fprintf(stderr, "[Shutdown] OFF mode write failed\n");
+        fprintf(stderr, "[Shutdown] OFF mode write failed after 3 attempts\n");
     }
-    
+
+    // Cleanup
     delete g_web_server;
     g_web_server = nullptr;
-    
+
     delete g_control_loop;
     g_control_loop = nullptr;
-    
+
     printf("[Main] Goodbye!\n");
-    
-    return EXIT_SUCCESS;
+
+    release_lock();
+    return 0;
 }
