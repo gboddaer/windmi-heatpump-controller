@@ -18,6 +18,8 @@
 #include <fcntl.h>
 #include <sys/file.h>
 #include <errno.h>
+#include <limits.h>
+#include <sys/stat.h>
 
 #include "config.h"
 #include "core/ControlLoop.hpp"
@@ -41,6 +43,58 @@ static int g_lock_fd = -1;
 // Global objects for signal handler access
 static windmi::WebServer* g_web_server = nullptr;
 static windmi::ControlLoop* g_control_loop = nullptr;
+
+/**
+ * Resolve the static files directory.
+ *
+ * If @p dir exists as-is, return it.
+ * Otherwise, try relative to the executable directory (useful when running
+ * from a build/ subdirectory).
+ */
+static std::string resolve_static_dir(const std::string& dir) {
+    struct stat st;
+    if (stat(dir.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+        // Normalize the path (resolve .., symlinks, etc.)
+        char resolved[PATH_MAX];
+        if (realpath(dir.c_str(), resolved)) {
+            return resolved;
+        }
+        return dir;
+    }
+
+    // Try relative to the executable's directory
+    char exe_path[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len > 0) {
+        exe_path[len] = '\0';
+        // Find last '/' to get directory
+        char* last_slash = strrchr(exe_path, '/');
+        if (last_slash) {
+            *last_slash = '\0';
+            std::string candidate = std::string(exe_path) + "/" + dir;
+            if (stat(candidate.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+                char resolved[PATH_MAX];
+                if (realpath(candidate.c_str(), resolved)) {
+                    return resolved;
+                }
+                return candidate;
+            }
+            // Try one more level up (e.g. build/ -> project root)
+            std::string candidate2 = std::string(exe_path) + "/../" + dir;
+            if (stat(candidate2.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+                char resolved[PATH_MAX];
+                if (realpath(candidate2.c_str(), resolved)) {
+                    return resolved;
+                }
+                return candidate2;
+            }
+        }
+    }
+
+    // Give up — return as-is; Mongoose will serve a directory listing
+    fprintf(stderr, "[Main] Warning: static directory \"%s\" not found\n", dir.c_str());
+    return dir;
+}
 
 // Signal handler
 static void signal_handler(int sig) {
@@ -94,6 +148,7 @@ int main(int argc, char* argv[]) {
     const char* modbus_ip = MODBUS_GATEWAY_IP;
     int modbus_port = MODBUS_GATEWAY_PORT;
     int web_port = WEB_SERVER_PORT;
+    std::string static_dir = "static";
     bool run_selftest = false;
 
     // Parse CLI arguments (long and short forms)
@@ -104,6 +159,7 @@ int main(int argc, char* argv[]) {
             printf("  -i, --ip <address>  Modbus gateway IP (default: %s)\n", MODBUS_GATEWAY_IP);
             printf("  -p, --port <port>   Modbus gateway port (default: %d)\n", MODBUS_GATEWAY_PORT);
             printf("  -w, --web <port>    Web server HTTP port (default: %d)\n", WEB_SERVER_PORT);
+            printf("  -t, --static-dir <dir>  Static files directory (default: static)\n");
             printf("  -s, --selftest      Run self-test and exit\n");
             printf("  -h, --help          Show this help message\n");
             return 0;
@@ -113,6 +169,8 @@ int main(int argc, char* argv[]) {
             modbus_port = atoi(argv[++i]);
         } else if ((strcmp(argv[i], "--web") == 0 || strcmp(argv[i], "-w") == 0) && i + 1 < argc) {
             web_port = atoi(argv[++i]);
+        } else if ((strcmp(argv[i], "--static-dir") == 0 || strcmp(argv[i], "-t") == 0) && i + 1 < argc) {
+            static_dir = argv[++i];
         } else if (strcmp(argv[i], "--selftest") == 0 || strcmp(argv[i], "-s") == 0) {
             run_selftest = true;
         } else {
@@ -134,6 +192,9 @@ int main(int argc, char* argv[]) {
     printf("[Main] Rotenso Windmi Controller\n");
     printf("[Main] Modbus gateway: %s:%d\n", modbus_ip, modbus_port);
     printf("[Main] Web server: %s:%d\n", WEB_SERVER_IP, web_port);
+
+    std::string resolved_static_dir = resolve_static_dir(static_dir);
+    printf("[Main] Static files: %s\n", resolved_static_dir.c_str());
 
     // Create SPSC queues
     windmi::CmdQueue cmd_queue;
@@ -184,7 +245,7 @@ int main(int argc, char* argv[]) {
 
     // Create and init web server (pass queues)
     try {
-        g_web_server = new windmi::WebServer(web_port, "static", &cmd_queue, &status_queue,
+        g_web_server = new windmi::WebServer(web_port, resolved_static_dir, &cmd_queue, &status_queue,
                                              []() {
                                                  if (g_control_loop) {
                                                      g_control_loop->kick();
