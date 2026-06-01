@@ -358,26 +358,18 @@ add_library(windmi_utils STATIC
 target_include_directories(windmi_utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 ```
 
-### Dependency Updates
-`windmi_utils` now contains Logger. Libraries that need logging must link it:
-- `windmi_core` - add `windmi_utils` to `target_link_libraries`
-- `windmi_modbus` - add `windmi_utils` to `target_link_libraries`
-- `windmi_web` - add `windmi_utils` to `target_link_libraries`
-- `windmi_selftest` - add `windmi_utils` to `target_link_libraries`
+### Dependency Updates (implemented)
 
-Current dependency chain:
+Libraries that use Logger now explicitly link `windmi_utils`:
 ```
-windmi-core       → mongoose
-windmi-modbus     → mongoose
-windmi-web        → mongoose
+windmi-core       → mongoose, windmi_utils
+windmi-modbus     → mongoose, windmi_utils
+windmi-web        → mongoose, windmi_utils
 windmi-utils      → (nothing)
-windmi-selftest   → windmi-modbus
+windmi-selftest   → windmi_modbus, windmi_utils
 
 windmi-control    → windmi_core, windmi_modbus, windmi_web, windmi_utils, windmi_selftest, mongoose, Threads
 ```
-
-After adding Logger, windmi_utils will also need `<mutex>` and `<atomic>`, which
-are header-only - no additional link dependencies needed.
 
 ---
 
@@ -446,7 +438,7 @@ After all replacements:
 - [x] Migrate `src/web/WebServer.cpp` (11 calls: 10 printf, 1 fprintf; keep 2 snprintf)
 - [x] Migrate `src/modbus_client.c` (15 calls: 3 printf, 9 fprintf, 3 perror)
 - [x] Migrate `src/selftest.c` (30 calls: 19 printf, 11 fprintf)
-- [ ] Write unit tests for Logger
+- [x] Write unit tests for Logger
 - [x] Remove `#include <cstdio>` where no longer needed (ControlLoop.cpp, WebServer.cpp)
 - [ ] Add CI check to reject new printf/cout/cerr in non-test source
 
@@ -457,17 +449,27 @@ After all replacements:
 ## 15. Implementation Notes
 
 **Commit**: `9715518` on `PR_Cplusplus_conversion`
+**Review fix commit**: `f99fd23`
 
 **Design decisions during implementation**:
-- `##__VA_ARGS__` GNU extension used in macros (pedantic warning suppressed via `#pragma GCC diagnostic`)
+- `##__VA_ARGS__` GNU extension used in macros — `-Wpedantic` removed from
+  CMakeLists.txt; `-Wall -Wextra` kept. GCC <14 cannot suppress this specific
+  warning at call sites via pragma, so the project-wide flag is the cleanest
+  approach.
 - Macros use `windmi::` namespace qualification (not inside namespace block) for cross-file compatibility
 - `formatTimestamp()` and `formatLevel()` made public in Logger class (needed by output implementations)
-- `#include <cstdio>` removed from ControlLoop.cpp and WebServer.cpp (no more printf-family usage)
-- `#include <cstdio>` retained in main.cpp (snprintf + help printf), modbus_client.c, selftest.c
-- `main.cpp` `--log-level` / `--log-file` CLI args not yet added (left as optional future work)
+- `#include <cstdio>` removed from ControlLoop.cpp (no more printf-family usage)
+- `#include <cstdio>` retained in main.cpp (snprintf + help printf), WebServer.cpp (snprintf), modbus_client.c, selftest.c
+- `--log-level` / `--log-file` CLI args implemented in main.cpp
+- `fflush()` added to ConsoleLogOutput::write() to fix log ordering (stderr unbuffered, stdout buffered)
+- CMake dependencies made explicit: windmi_core/modbus/web/selftest all link windmi_utils PUBLIC
+- `src/utils` subdirectory ordered first in root CMakeLists.txt (dependency must be defined before consumers)
+- Logger unit tests added (14 tests in test_logger.cpp)
+- `src/main.c.bak` removed from git tracking
+- Unused includes removed from Logger.cpp (`<algorithm>`, `<array>`, `<sstream>`)
 
 **Remaining `printf`/`fprintf` calls** (intentionally kept):
-- `main.cpp` lines 204-213: `--help` usage text output
-- `main.cpp` lines 116, 163: `snprintf` for /proc stat and PID buffer  
+- `main.cpp` lines 204-214: `--help` usage text output
+- `main.cpp` lines 116, 163: `snprintf` for /proc stat and PID buffer
 - `WebServer.cpp` lines 58, 175: `snprintf` for URL and JSON construction
 - `selftest.c` lines 203-228: Self-test report table formatting (test harness output)
