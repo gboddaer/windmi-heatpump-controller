@@ -429,7 +429,7 @@ Self-test PASSED
 | `/api/set-dhw` | POST | `{"temperature":<float>}` | 202 | 400/422 |
 | `/api/set-heating` | POST | `{"temperature":<float>}` | 202 | 400/422 |
 | `/api/set-priority` | POST | `{"priority":"dhw"\|"heating"}` | 202 | 400/422 |
-| `/api/set-mode` | POST | `{"mode":<0-3>}` | 202 | 400 |
+| `/api/set-mode` | POST | `{"mode":<int>}` | 202 | 400 only when body is empty or mode is missing |
 | `/*` | GET | none | Static file | — |
 
 **`/api/status` JSON format** (verified from master):
@@ -459,7 +459,7 @@ Self-test PASSED
 - `/api/set-dhw`: temperature must be in [DHW_TEMP_MIN, DHW_TEMP_MAX] = [40, 63]
 - `/api/set-heating`: temperature must be in [HEATING_TEMP_MIN, HEATING_TEMP_MAX] = [25, 63]
 - `/api/set-priority`: must be "dhw" or "heating" string
-- `/api/set-mode`: mode must be 0, 1, 2, or 3
+- `/api/set-mode`: master expects working mode values 0, 1, 2, or 3, but only validates that `mode` is present. Out-of-range values are still queued and later handled by the control loop default branch.
 - Empty body → 400
 - During shutdown → 503
 
@@ -484,7 +484,7 @@ Self-test PASSED
 - Wrong methods → 405
 - During shutdown → 503
 - Empty body → 400
-- Out-of-range → 422
+- Temperature out-of-range → 422
 
 ---
 
