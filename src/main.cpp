@@ -96,25 +96,29 @@ int main(int argc, char* argv[]) {
     int web_port = WEB_SERVER_PORT;
     bool run_selftest = false;
 
-    // Parse CLI arguments (match master: --ip, --port, --web, --selftest, --help)
+    // Parse CLI arguments (long and short forms)
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("Usage: %s [options]\n", argv[0]);
             printf("Options:\n");
-            printf("  --ip <address>  Modbus gateway IP (default: %s)\n", MODBUS_GATEWAY_IP);
-            printf("  --port <port>   Modbus gateway port (default: %d)\n", MODBUS_GATEWAY_PORT);
-            printf("  --web <port>    Web server HTTP port (default: %d)\n", WEB_SERVER_PORT);
-            printf("  --selftest      Run self-test and exit\n");
-            printf("  --help          Show this help message\n");
+            printf("  -i, --ip <address>  Modbus gateway IP (default: %s)\n", MODBUS_GATEWAY_IP);
+            printf("  -p, --port <port>   Modbus gateway port (default: %d)\n", MODBUS_GATEWAY_PORT);
+            printf("  -w, --web <port>    Web server HTTP port (default: %d)\n", WEB_SERVER_PORT);
+            printf("  -s, --selftest      Run self-test and exit\n");
+            printf("  -h, --help          Show this help message\n");
             return 0;
-        } else if (strcmp(argv[i], "--ip") == 0 && i + 1 < argc) {
+        } else if ((strcmp(argv[i], "--ip") == 0 || strcmp(argv[i], "-i") == 0) && i + 1 < argc) {
             modbus_ip = argv[++i];
-        } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
+        } else if ((strcmp(argv[i], "--port") == 0 || strcmp(argv[i], "-p") == 0) && i + 1 < argc) {
             modbus_port = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--web") == 0 && i + 1 < argc) {
+        } else if ((strcmp(argv[i], "--web") == 0 || strcmp(argv[i], "-w") == 0) && i + 1 < argc) {
             web_port = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--selftest") == 0) {
+        } else if (strcmp(argv[i], "--selftest") == 0 || strcmp(argv[i], "-s") == 0) {
             run_selftest = true;
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            fprintf(stderr, "Use --help for usage information.\n");
+            return 1;
         }
     }
 
