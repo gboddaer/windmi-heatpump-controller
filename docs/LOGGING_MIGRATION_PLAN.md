@@ -451,6 +451,24 @@ After all replacements:
 **Commit**: `9715518` on `PR_Cplusplus_conversion`
 **Review fix commit**: `f99fd23`
 
+### Review Findings and Resolution
+
+| Finding | Critical assessment | Resolution |
+|---------|---------------------|------------|
+| Missing `--log-level` / `--log-file` CLI support | Feature gap rather than runtime bug, but important because DEBUG/TRACE logging and FileLogOutput were otherwise unusable. | Implemented `-l/--log-level` and `-o/--log-file` in `src/main.cpp`. Invalid levels fail clearly. |
+| Console log ordering incorrect | Real bug: INFO logs went to buffered stdout while WARN+ went to unbuffered stderr, so chronological order could appear wrong. | Added `std::fflush(stream)` after console writes in `ConsoleLogOutput::write()`. |
+| `WebServer.cpp` used `snprintf` without `<cstdio>` | Real include hygiene issue: it only compiled via transitive include from `Logger.hpp`. | Re-added `#include <cstdio>` to `src/web/WebServer.cpp`. |
+| Logger link dependency hidden | Build worked only because final executable/tests linked `windmi_utils`; standalone library consumers would miss Logger symbols. | Added explicit PUBLIC `windmi_utils` dependencies to `windmi_core`, `windmi_modbus`, `windmi_web`, and `windmi_selftest`; reordered root CMake to define utils first. |
+| No Logger unit tests | Real test coverage gap for a core utility. | Added `tests/utils/test_logger.cpp` with 14 tests covering filtering, formatting, outputs, file logging, and concurrency. |
+| `##__VA_ARGS__` pedantic warnings | Build cleanliness issue caused by intentional GCC extension; pragmas in the header did not suppress call-site warnings under GCC 10. | Removed `-Wpedantic`, retained `-Wall -Wextra`, documented rationale. |
+| Legacy `src/main.c.bak` tracked | Not part of logging implementation and not in build; stale tracked backup file could confuse grep/review. | Removed from git tracking. |
+
+Validation after fixes:
+- Clean build with zero project compiler warnings (`cmake .. && make clean && make -j$(nproc)`)
+- All test suites pass: 4/4 via `ctest --output-on-failure`
+- Logger-only tests pass: 14/14 via `test_utils --gtest_filter='LoggerTest.*'`
+- Smoke-tested `--help`, invalid `--log-level`, demo mode with `--log-level DEBUG`, and demo mode with `--log-file`
+
 **Design decisions during implementation**:
 - `##__VA_ARGS__` GNU extension used in macros — `-Wpedantic` removed from
   CMakeLists.txt; `-Wall -Wextra` kept. GCC <14 cannot suppress this specific
