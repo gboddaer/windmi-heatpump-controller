@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/file.h>
@@ -26,6 +27,7 @@
 #include "core/ControlLoop.hpp"
 #include "core/StatusMonitor.hpp"
 #include "modbus/ModbusClient.hpp"
+#include "modbus/SimulatedModbusClient.hpp"
 #include "web/WebServer.hpp"
 #include "crc16.h"
 
@@ -192,6 +194,7 @@ int main(int argc, char* argv[]) {
     int web_port = WEB_SERVER_PORT;
     std::string static_dir = "static";
     bool run_selftest = false;
+    bool demo_mode = false;
     bool force_lock = false;
 
     // Parse CLI arguments (long and short forms)
@@ -205,6 +208,7 @@ int main(int argc, char* argv[]) {
             printf("  -t, --static-dir <dir>  Static files directory (default: static)\n");
             printf("  -f, --force         Force start even if lock is held by stale process\n");
             printf("  -s, --selftest      Run self-test and exit\n");
+            printf("  -d, --demo          Run in demo mode with simulated Windmi device\n");
             printf("  -h, --help          Show this help message\n");
             return 0;
         } else if ((strcmp(argv[i], "--ip") == 0 || strcmp(argv[i], "-i") == 0) && i + 1 < argc) {
@@ -217,6 +221,8 @@ int main(int argc, char* argv[]) {
             static_dir = argv[++i];
         } else if (strcmp(argv[i], "--selftest") == 0 || strcmp(argv[i], "-s") == 0) {
             run_selftest = true;
+        } else if (strcmp(argv[i], "--demo") == 0 || strcmp(argv[i], "-d") == 0) {
+            demo_mode = true;
         } else if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0) {
             force_lock = true;
         } else {
@@ -249,7 +255,9 @@ int main(int argc, char* argv[]) {
     signal(SIGPIPE, SIG_IGN);  // Ignore SIGPIPE (client disconnects)
 
     printf("[Main] Rotenso Windmi Controller\n");
-    printf("[Main] Modbus gateway: %s:%d\n", modbus_ip, modbus_port);
+    if (!demo_mode) {
+        printf("[Main] Modbus gateway: %s:%d\n", modbus_ip, modbus_port);
+    }
     printf("[Main] Web server: %s:%d\n", WEB_SERVER_IP, web_port);
 
     std::string resolved_static_dir = resolve_static_dir(static_dir);
@@ -259,19 +267,34 @@ int main(int argc, char* argv[]) {
     windmi::CmdQueue cmd_queue;
     windmi::StatusQueue status_queue;
 
-    // Create Modbus client
-    windmi::ModbusClient modbus_client(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
+    // Create Modbus client (interface pointer for demo mode support)
+    std::unique_ptr<windmi::IModbusClient> modbus_client;
 
-    // Self-test mode: run self-test and exit
+    // Demo mode: reject --selftest, use simulated client
+    if (demo_mode) {
+        if (run_selftest) {
+            fprintf(stderr, "[Main] --selftest is not supported in demo mode\n");
+            release_lock();
+            return 1;
+        }
+        modbus_client = std::make_unique<windmi::SimulatedModbusClient>();
+        printf("[Main] DEMO MODE: using simulated Windmi device, no Modbus socket will be opened\n");
+    } else {
+        modbus_client = std::make_unique<windmi::ModbusClient>(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
+    }
+
+    // Self-test mode: run self-test and exit (only for non-demo)
     if (run_selftest) {
-        if (!modbus_client.connect()) {
+        // Cast is safe here: we only reach here in non-demo mode
+        auto* real_client = dynamic_cast<windmi::ModbusClient*>(modbus_client.get());
+        if (!real_client || !real_client->connect()) {
             fprintf(stderr, "[Main] Failed to connect to Modbus for self-test\n");
             release_lock();
             return 1;
         }
 
         // Get C client for selftest_run (which takes modbus_client_t*)
-        modbus_client_t* c_client = static_cast<modbus_client_t*>(modbus_client.getCClient());
+        modbus_client_t* c_client = static_cast<modbus_client_t*>(real_client->getCClient());
         selftest_report_t selftest_result = selftest_run(c_client);
         selftest_print_report(&selftest_result);
         printf("Self-test: %d/%d registers passed\n", selftest_result.passed, selftest_result.total);
@@ -280,13 +303,13 @@ int main(int argc, char* argv[]) {
         } else {
             printf("Self-test FAILED\n");
         }
-        modbus_client.disconnect();
+        real_client->disconnect();
         release_lock();
         return selftest_result.all_critical_passed ? 0 : 1;
     }
 
-    // Connect to Modbus gateway
-    if (!modbus_client.connect()) {
+    // Connect to Modbus gateway (no-op for simulated client)
+    if (!modbus_client->connect()) {
         fprintf(stderr, "[Main] Failed to connect to Modbus gateway\n");
         release_lock();
         return 1;
@@ -294,7 +317,7 @@ int main(int argc, char* argv[]) {
 
     // Create and start control loop (pass Modbus client + queues)
     g_control_loop = new windmi::ControlLoop();
-    if (!g_control_loop->start(&modbus_client, &cmd_queue, &status_queue)) {
+    if (!g_control_loop->start(modbus_client.get(), &cmd_queue, &status_queue)) {
         fprintf(stderr, "[Main] Failed to start control loop\n");
         delete g_control_loop;
         g_control_loop = nullptr;
@@ -338,40 +361,44 @@ int main(int argc, char* argv[]) {
     usleep(150000);  // 150ms
     printf("[Shutdown] Drain period complete\n");
 
-    // Write OFF mode via dedicated shutdown client
-    printf("[Shutdown] Writing OFF mode via dedicated client...\n");
-    bool off_written = false;
-    try {
-        windmi::ModbusClient shutdown_client(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
+    // Write OFF mode via dedicated shutdown client (skip in demo mode)
+    if (!demo_mode) {
+        printf("[Shutdown] Writing OFF mode via dedicated client...\n");
+        bool off_written = false;
+        try {
+            windmi::ModbusClient shutdown_client(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
 
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            if (shutdown_client.connect()) {
-                shutdown_client.flushBuffer();
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                if (shutdown_client.connect()) {
+                    shutdown_client.flushBuffer();
 
-                try {
-                    shutdown_client.writeRegister(REG_RUNNING_MODE, 0);
-                    printf("[Shutdown] OFF write OK (attempt %d)\n", attempt);
-                    off_written = true;
-                    shutdown_client.disconnect();
-                    break;
-                } catch (const windmi::ModbusException&) {
-                    fprintf(stderr, "[Shutdown] OFF write failed (attempt %d)\n", attempt);
-                    shutdown_client.disconnect();
+                    try {
+                        shutdown_client.writeRegister(REG_RUNNING_MODE, 0);
+                        printf("[Shutdown] OFF write OK (attempt %d)\n", attempt);
+                        off_written = true;
+                        shutdown_client.disconnect();
+                        break;
+                    } catch (const windmi::ModbusException&) {
+                        fprintf(stderr, "[Shutdown] OFF write failed (attempt %d)\n", attempt);
+                        shutdown_client.disconnect();
+                    }
+                } else {
+                    fprintf(stderr, "[Shutdown] Connect failed (attempt %d)\n", attempt);
                 }
-            } else {
-                fprintf(stderr, "[Shutdown] Connect failed (attempt %d)\n", attempt);
-            }
 
-            if (attempt < 3) {
-                usleep(100000);  // 100ms retry delay
+                if (attempt < 3) {
+                    usleep(100000);  // 100ms retry delay
+                }
             }
+        } catch (const std::exception& e) {
+            fprintf(stderr, "[Shutdown] Exception creating shutdown client: %s\n", e.what());
         }
-    } catch (const std::exception& e) {
-        fprintf(stderr, "[Shutdown] Exception creating shutdown client: %s\n", e.what());
-    }
 
-    if (!off_written) {
-        fprintf(stderr, "[Shutdown] OFF mode write failed after 3 attempts\n");
+        if (!off_written) {
+            fprintf(stderr, "[Shutdown] OFF mode write failed after 3 attempts\n");
+        }
+    } else {
+        printf("[Shutdown] DEMO MODE: skipping real OFF write\n");
     }
 
     // Cleanup

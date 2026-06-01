@@ -20,7 +20,7 @@
 namespace windmi {
 
 // Forward declarations
-class ModbusClient;
+class IModbusClient;
 
 /**
  * @brief Command types for the control loop
@@ -142,12 +142,12 @@ public:
 
     /**
      * @brief Start the control loop thread
-     * @param client ModbusClient to use for device communication
+     * @param client IModbusClient to use for device communication
      * @param cmd_queue Command queue to consume
      * @param status_queue Status queue to publish to
      * @return true if successful, false otherwise
      */
-    bool start(ModbusClient* client, CmdQueue* cmd_queue, StatusQueue* status_queue);
+    bool start(IModbusClient* client, CmdQueue* cmd_queue, StatusQueue* status_queue);
 
     void stop();
     bool isRunning() const;
@@ -170,7 +170,7 @@ private:
     int setHeatingTarget(float temp);
 
     // Modbus and queue pointers (not owned)
-    ModbusClient* modbus_client_;
+    IModbusClient* modbus_client_;
     CmdQueue* cmd_queue_;
     StatusQueue* status_queue_;
 

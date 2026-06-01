@@ -16,16 +16,9 @@ extern "C" {
     #include "modbus_client.h"
 }
 
-namespace windmi {
+#include "modbus/IModbusClient.hpp"
 
-/**
- * @brief Modbus client exception class
- */
-class ModbusException : public std::runtime_error {
-public:
-    explicit ModbusException(const std::string& msg)
-        : std::runtime_error(msg) {}
-};
+namespace windmi {
 
 /**
  * @brief Modbus client class
@@ -33,7 +26,7 @@ public:
  * C++ wrapper around the C Modbus client implementation.
  * Provides RAII pattern and better error handling.
  */
-class ModbusClient {
+class ModbusClient : public IModbusClient {
 public:
     /**
      * @brief Constructor
@@ -58,50 +51,16 @@ public:
      */
     ModbusClient& operator=(const ModbusClient&) = delete;
 
-    /**
-     * @brief Connect to Modbus device
-     * @return true if successful, false otherwise
-     */
-    bool connect();
+    // IModbusClient interface
+    bool connect() override;
+    void disconnect() override;
+    bool isConnected() const override;
 
-    /**
-     * @brief Disconnect from Modbus device
-     */
-    void disconnect();
+    int16_t readRegister(uint16_t address) override;
+    void writeRegister(uint16_t address, uint16_t value) override;
 
-    /**
-     * @brief Check if connected
-     * @return true if connected, false otherwise
-     */
-    bool isConnected() const;
-
-    /**
-     * @brief Read a holding register
-     * @param address Register address
-     * @return Register value
-     * @throws ModbusException on error
-     */
-    int16_t readRegister(uint16_t address);
-
-    /**
-     * @brief Write a holding register
-     * @param address Register address
-     * @param value Value to write
-     * @throws ModbusException on error
-     */
-    void writeRegister(uint16_t address, uint16_t value);
-
-    /**
-     * @brief Flush read buffer
-     * Clears any pending data in the socket read buffer.
-     */
-    void flushBuffer();
-
-    /**
-     * @brief Get last error message
-     * @return Error message
-     */
-    std::string getLastError() const;
+    void flushBuffer() override;
+    std::string getLastError() const override;
 
     /**
      * @brief Get underlying C client pointer

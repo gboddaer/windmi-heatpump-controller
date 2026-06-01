@@ -4,7 +4,7 @@
  */
 
 #include "core/ControlLoop.hpp"
-#include "modbus/ModbusClient.hpp"
+#include "modbus/IModbusClient.hpp"
 #include "config.h"
 
 #include <cstdio>
@@ -105,7 +105,7 @@ ControlLoop::~ControlLoop() {
     stop();
 }
 
-bool ControlLoop::start(ModbusClient* client, CmdQueue* cmd_queue, StatusQueue* status_queue) {
+bool ControlLoop::start(IModbusClient* client, CmdQueue* cmd_queue, StatusQueue* status_queue) {
     if (running_.load()) return true;
 
     modbus_client_ = client;
