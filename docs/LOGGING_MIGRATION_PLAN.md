@@ -105,7 +105,7 @@ private:
 };
 ```
 
-**Key design decision — level gate before formatting**:
+**Key design decision - level gate before formatting**:
 The `shouldLog()` check happens before any `snprintf`/string construction.
 The macros expand to:
 ```cpp
@@ -123,7 +123,7 @@ When the level is filtered out, zero formatting work is done.
 
 #### C Bridge
 ```c
-// In include/utils/LoggerC.h — callable from .c files
+// In include/utils/LoggerC.h - callable from .c files
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -165,7 +165,7 @@ acceptable, but implementation should verify `-Wpedantic` does not introduce a
 warning. If it does, replace with separate no-argument and variadic macros.
 
 ### Formatting Strategy
-The project uses **C++17** — `std::format` is not available and no `fmt` library
+The project uses **C++17** - `std::format` is not available and no `fmt` library
 dependency exists. Use **printf-style format strings** (`%d`, `%s`, `%.1f`, etc.)
 for both C and C++ call sites. This is consistent with the existing code and
 avoids adding a format library dependency.
@@ -201,55 +201,21 @@ application. If profiling shows contention, it can be added later.
 
 ## 5. Implementation Plan
 
-### Phase 1: Core Logger (3-4 hours)
-1. Create `include/utils/Logger.hpp`
-   - `LogLevel` enum
-   - `LogEntry` struct
-   - `ILogOutput` interface
-   - `ConsoleLogOutput` class declaration
-   - `FileLogOutput` class declaration
-   - `Logger` singleton class declaration
-   - C++ macros: `WINDMI_LOG_TRACE`, `WINDMI_LOG_DEBUG`, `WINDMI_LOG_INFO`,
-     `WINDMI_LOG_WARN`, `WINDMI_LOG_ERROR`, `WINDMI_LOG_FATAL`
-   - Each macro takes `(tag, fmt, ...)`
+### ✅ Phase 1: Core Logger (COMPLETE)
+- Created `include/utils/Logger.hpp` - LogLevel enum, LogEntry, ILogOutput, ConsoleLogOutput, FileLogOutput, Logger singleton, C++ macros
+- Created `include/utils/LoggerC.h` - C API with windmi_log()/windmi_should_log()
+- Created `include/utils/LogTags.hpp` - Component tag constants
+- Created `src/utils/Logger.cpp` - Singleton + output implementations
+- Created `src/utils/LoggerC.cpp` - C bridge
+- Updated `src/utils/CMakeLists.txt`
 
-2. Create `src/utils/Logger.cpp`
-   - `Logger` singleton implementation
-   - `ConsoleLogOutput::write()` implementation
-   - `FileLogOutput` class + `write()` implementation
-   - `shouldLog()` and `log()` methods
+### ✅ Phase 2: Integration (COMPLETE)
+- `windmi-control` links `windmi_utils` (already in root CMakeLists.txt)
 
-3. Create `src/utils/LoggerC.cpp`
-   - `windmi_log()` C-bridge function with `va_list` + `vsnprintf`
-   - C macro header (exposed via a new `include/utils/LoggerC.h`)
-
-4. Create `include/utils/LogTags.hpp`
-   - `#define LOG_TAG_CONTROLLOOP "ControlLoop"`
-   - `#define LOG_TAG_MODBUS      "Modbus"`
-   - `#define LOG_TAG_WEBSERVER   "WebServer"`
-   - `#define LOG_TAG_MAIN        "Main"`
-   - `#define LOG_TAG_SELFTEST    "SelfTest"`
-   - `#define LOG_TAG_SIMULATOR   "Simulator"`
-
-5. Update `src/utils/CMakeLists.txt` to add `Logger.cpp` and `LoggerC.cpp`
-
-### Phase 2: Integration (1 hour)
-1. In `main.cpp`:
-   - `#include "utils/Logger.hpp"`
-   - After argument parsing, configure logger:
-     - `Logger::instance().setLevel(LogLevel::INFO);`
-     - `Logger::instance().setOutput(make_unique<ConsoleLogOutput>());` (replace default console)
-     - Optionally: `Logger::instance().addOutput(make_unique<FileLogOutput>(path));`
-   - Add `--log-level` and `--log-file` CLI arguments
-
-2. Ensure `windmi_utils` (which will contain Logger) is linked by all
-   libraries that need it (`windmi_core`, `windmi_modbus`, `windmi_web`,
-   `windmi_selftest`)
-
-### Phase 3: Migration (3-4 hours)
+### ✅ Phase 3: Migration (COMPLETE)
 **Rule**: Migrate one file at a time. Never mix printf and logger in the
 same function. Remove `#include <cstdio>` only when the file has zero
-remaining printf calls (including `snprintf` for string formatting — keep
+remaining printf calls (including `snprintf` for string formatting - keep
 `<cstdio>` for those).
 
 **Only migrate actual logging calls** (`printf`, `fprintf(stderr,...)`,
@@ -350,7 +316,7 @@ WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "socket failed: %s", strerror(err
 ```
 Need to add `#include <string.h>` for `strerror` if not already present.
 
-### Pattern 4: snprintf — DO NOT MIGRATE
+### Pattern 4: snprintf - DO NOT MIGRATE
 
 ```cpp
 snprintf(url, sizeof(url), "http://%s:%d", WEB_SERVER_IP, port);  // keep as-is
@@ -394,10 +360,10 @@ target_include_directories(windmi_utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../..
 
 ### Dependency Updates
 `windmi_utils` now contains Logger. Libraries that need logging must link it:
-- `windmi_core` — add `windmi_utils` to `target_link_libraries`
-- `windmi_modbus` — add `windmi_utils` to `target_link_libraries`
-- `windmi_web` — add `windmi_utils` to `target_link_libraries`
-- `windmi_selftest` — add `windmi_utils` to `target_link_libraries`
+- `windmi_core` - add `windmi_utils` to `target_link_libraries`
+- `windmi_modbus` - add `windmi_utils` to `target_link_libraries`
+- `windmi_web` - add `windmi_utils` to `target_link_libraries`
+- `windmi_selftest` - add `windmi_utils` to `target_link_libraries`
 
 Current dependency chain:
 ```
@@ -411,7 +377,7 @@ windmi-control    → windmi_core, windmi_modbus, windmi_web, windmi_utils, wind
 ```
 
 After adding Logger, windmi_utils will also need `<mutex>` and `<atomic>`, which
-are header-only — no additional link dependencies needed.
+are header-only - no additional link dependencies needed.
 
 ---
 
@@ -435,7 +401,7 @@ are header-only — no additional link dependencies needed.
 
 - Commit in small batches (one file per commit during migration)
 - Each commit leaves the build in a working state
-- If logger causes issues, revert the commit for that file — old printf
+- If logger causes issues, revert the commit for that file - old printf
   calls are simply restored
 
 ---
@@ -468,23 +434,40 @@ After all replacements:
 
 ## 14. Migration Checklist
 
-- [ ] Create `include/utils/Logger.hpp`
-- [ ] Create `include/utils/LoggerC.h` (C bridge header)
-- [ ] Create `include/utils/LogTags.hpp`
-- [ ] Create `src/utils/Logger.cpp`
-- [ ] Create `src/utils/LoggerC.cpp`
-- [ ] Update `src/utils/CMakeLists.txt`
-- [ ] Update library dependencies in CMakeLists.txt files
-- [ ] Initialize logger in `main.cpp` + add `--log-level` / `--log-file` args
-- [ ] Migrate `src/core/ControlLoop.cpp` (46 calls: 28 printf, 18 fprintf)
-- [ ] Migrate `src/main.cpp` (47 calls: 28 printf, 19 fprintf; keep 2 snprintf)
-- [ ] Migrate `src/web/WebServer.cpp` (11 calls: 10 printf, 1 fprintf; keep 2 snprintf)
-- [ ] Migrate `src/modbus_client.c` (15 calls: 3 printf, 9 fprintf, 3 perror)
-- [ ] Migrate `src/selftest.c` (30 calls: 19 printf, 11 fprintf)
+- [x] Create `include/utils/Logger.hpp`
+- [x] Create `include/utils/LoggerC.h` (C bridge header)
+- [x] Create `include/utils/LogTags.hpp`
+- [x] Create `src/utils/Logger.cpp`
+- [x] Create `src/utils/LoggerC.cpp`
+- [x] Update `src/utils/CMakeLists.txt`
+- [x] Update library dependencies in CMakeLists.txt files
+- [x] Migrate `src/core/ControlLoop.cpp` (46 calls: 28 printf, 18 fprintf)
+- [x] Migrate `src/main.cpp` (47 calls: 28 printf, 19 fprintf; keep 2 snprintf)
+- [x] Migrate `src/web/WebServer.cpp` (11 calls: 10 printf, 1 fprintf; keep 2 snprintf)
+- [x] Migrate `src/modbus_client.c` (15 calls: 3 printf, 9 fprintf, 3 perror)
+- [x] Migrate `src/selftest.c` (30 calls: 19 printf, 11 fprintf)
 - [ ] Write unit tests for Logger
-- [ ] Remove unnecessary `#include <cstdio>` / `#include <iostream>`
+- [x] Remove `#include <cstdio>` where no longer needed (ControlLoop.cpp, WebServer.cpp)
 - [ ] Add CI check to reject new printf/cout/cerr in non-test source
 
 ---
 
 *Last updated: 2026-06-01*
+
+## 15. Implementation Notes
+
+**Commit**: `9715518` on `PR_Cplusplus_conversion`
+
+**Design decisions during implementation**:
+- `##__VA_ARGS__` GNU extension used in macros (pedantic warning suppressed via `#pragma GCC diagnostic`)
+- Macros use `windmi::` namespace qualification (not inside namespace block) for cross-file compatibility
+- `formatTimestamp()` and `formatLevel()` made public in Logger class (needed by output implementations)
+- `#include <cstdio>` removed from ControlLoop.cpp and WebServer.cpp (no more printf-family usage)
+- `#include <cstdio>` retained in main.cpp (snprintf + help printf), modbus_client.c, selftest.c
+- `main.cpp` `--log-level` / `--log-file` CLI args not yet added (left as optional future work)
+
+**Remaining `printf`/`fprintf` calls** (intentionally kept):
+- `main.cpp` lines 204-213: `--help` usage text output
+- `main.cpp` lines 116, 163: `snprintf` for /proc stat and PID buffer  
+- `WebServer.cpp` lines 58, 175: `snprintf` for URL and JSON construction
+- `selftest.c` lines 203-228: Self-test report table formatting (test harness output)
