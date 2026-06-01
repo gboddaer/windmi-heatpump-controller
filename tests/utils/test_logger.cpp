@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "utils/Logger.hpp"
+#include "utils/LoggerC.h"
 #include "utils/LogTags.hpp"
 
 #include <cstdio>
@@ -144,6 +145,23 @@ TEST_F(LoggerTest, EmptyMessage) {
 TEST_F(LoggerTest, MultipleArgs) {
     WINDMI_LOG_INFO(LOG_TAG_MAIN, "Connected to %s:%d (mode %d)", "192.168.1.1", 502, 3);
     EXPECT_EQ(test_output_->lastMessage(), "Connected to 192.168.1.1:502 (mode 3)");
+}
+
+TEST_F(LoggerTest, CBridgeLogsFormattedMessage) {
+    Logger::instance().setLevel(LogLevel::INFO);
+
+    EXPECT_TRUE(windmi_should_log(WINDMI_LOG_INFO));
+    EXPECT_FALSE(windmi_should_log(WINDMI_LOG_DEBUG));
+
+    windmi_log(WINDMI_LOG_INFO, LOG_TAG_MODBUS, "test.c", 123, "func",
+               "C bridge value %d", 17);
+
+    ASSERT_EQ(test_output_->entries.size(), 1u);
+    EXPECT_EQ(test_output_->entries[0].level, LogLevel::INFO);
+    EXPECT_EQ(test_output_->entries[0].tag, std::string(LOG_TAG_MODBUS));
+    EXPECT_EQ(test_output_->entries[0].message, "C bridge value 17");
+    EXPECT_EQ(test_output_->entries[0].file, std::string("test.c"));
+    EXPECT_EQ(test_output_->entries[0].line, 123);
 }
 
 // ─────────────────────────────────────────────────────────────────────────

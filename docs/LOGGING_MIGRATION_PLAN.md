@@ -459,14 +459,14 @@ After all replacements:
 | Console log ordering incorrect | Real bug: INFO logs went to buffered stdout while WARN+ went to unbuffered stderr, so chronological order could appear wrong. | Added `std::fflush(stream)` after console writes in `ConsoleLogOutput::write()`. |
 | `WebServer.cpp` used `snprintf` without `<cstdio>` | Real include hygiene issue: it only compiled via transitive include from `Logger.hpp`. | Re-added `#include <cstdio>` to `src/web/WebServer.cpp`. |
 | Logger link dependency hidden | Build worked only because final executable/tests linked `windmi_utils`; standalone library consumers would miss Logger symbols. | Added explicit PUBLIC `windmi_utils` dependencies to `windmi_core`, `windmi_modbus`, `windmi_web`, and `windmi_selftest`; reordered root CMake to define utils first. |
-| No Logger unit tests | Real test coverage gap for a core utility. | Added `tests/utils/test_logger.cpp` with 14 tests covering filtering, formatting, outputs, file logging, and concurrency. |
+| No Logger unit tests | Real test coverage gap for a core utility. | Added `tests/utils/test_logger.cpp` with 15 tests covering filtering, formatting, outputs, file logging, C bridge, and concurrency. |
 | `##__VA_ARGS__` pedantic warnings | Build cleanliness issue caused by intentional GCC extension; pragmas in the header did not suppress call-site warnings under GCC 10. | Removed `-Wpedantic`, retained `-Wall -Wextra`, documented rationale. |
 | Legacy `src/main.c.bak` tracked | Not part of logging implementation and not in build; stale tracked backup file could confuse grep/review. | Removed from git tracking. |
 
 Validation after fixes:
 - Clean build with zero project compiler warnings (`cmake .. && make clean && make -j$(nproc)`)
 - All test suites pass: 4/4 via `ctest --output-on-failure`
-- Logger-only tests pass: 14/14 via `test_utils --gtest_filter='LoggerTest.*'`
+- Logger-only tests pass: 15/15 via `test_utils --gtest_filter='LoggerTest.*'`
 - Smoke-tested `--help`, invalid `--log-level`, demo mode with `--log-level DEBUG`, and demo mode with `--log-file`
 
 **Design decisions during implementation**:
@@ -482,7 +482,7 @@ Validation after fixes:
 - `fflush()` added to ConsoleLogOutput::write() to fix log ordering (stderr unbuffered, stdout buffered)
 - CMake dependencies made explicit: windmi_core/modbus/web/selftest all link windmi_utils PUBLIC
 - `src/utils` subdirectory ordered first in root CMakeLists.txt (dependency must be defined before consumers)
-- Logger unit tests added (14 tests in test_logger.cpp)
+- Logger unit tests added (15 tests in test_logger.cpp, including C bridge coverage)
 - `src/main.c.bak` removed from git tracking
 - Unused includes removed from Logger.cpp (`<algorithm>`, `<array>`, `<sstream>`)
 
