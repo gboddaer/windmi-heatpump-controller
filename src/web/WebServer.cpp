@@ -4,10 +4,12 @@
  */
 
 #include "web/WebServer.hpp"
+#include "utils/Logger.hpp"
+#include "utils/LogTags.hpp"
 #include "config.h"
 
 #include <mongoose.h>
-#include <cstdio>
+
 #include <cstring>
 #include <cstdlib>
 #include <utility>
@@ -58,14 +60,14 @@ WebServer::WebServer(int port, const std::string& static_dir,
 
     struct mg_connection* conn = mg_http_listen(&mgr_, url, WebServer::eventHandler, this);
     if (!conn) {
-        fprintf(stderr, "Failed to start server on %s\n", url);
+        WINDMI_LOG_ERROR(LOG_TAG_WEBSERVER, "Failed to start server on %s", url);
         mg_mgr_free(&mgr_);
         mgr_freed_ = true;
         throw std::runtime_error("Failed to start web server");
     }
 
-    printf("Web server started on %s\n", url);
-    printf("Static files served from: %s\n", static_dir_.c_str());
+    WINDMI_LOG_INFO(LOG_TAG_WEBSERVER, "Started on %s", url);
+    WINDMI_LOG_INFO(LOG_TAG_WEBSERVER, "Static files served from: %s", static_dir_.c_str());
 
     running_.store(true);
 }
@@ -233,7 +235,7 @@ void WebServer::apiSetDhwHandler(struct mg_connection* c, struct mg_str* body) {
         return;
     }
 
-    printf("Web server: Received DHW set request - temperature=%.1f C (range: %.0f-%.0f)\n",
+    WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Received DHW set request - temperature=%.1f C (range: %.0f-%.0f)",
            temperature, static_cast<double>(DHW_TEMP_MIN), static_cast<double>(DHW_TEMP_MAX));
 
     Command cmd;
@@ -242,7 +244,7 @@ void WebServer::apiSetDhwHandler(struct mg_connection* c, struct mg_str* body) {
     cmd.int_val = 0;
     bool pushed = cmd_queue_ ? cmd_queue_->push(cmd) : false;
     if (pushed && wake_callback_) wake_callback_();
-    printf("Web server: DHW command pushed to queue (temp=%.1f, pushed=%d)\n",
+    WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "DHW command pushed to queue (temp=%.1f, pushed=%d)",
            temperature, pushed);
     sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
 }
@@ -269,7 +271,7 @@ void WebServer::apiSetHeatingHandler(struct mg_connection* c, struct mg_str* bod
         return;
     }
 
-    printf("Web server: Received heating set request - temperature=%.1f C (range: %.0f-%.0f)\n",
+    WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Received heating set request - temperature=%.1f C (range: %.0f-%.0f)",
            temperature, static_cast<double>(HEATING_TEMP_MIN), static_cast<double>(HEATING_TEMP_MAX));
 
     Command cmd;
@@ -278,7 +280,7 @@ void WebServer::apiSetHeatingHandler(struct mg_connection* c, struct mg_str* bod
     cmd.int_val = 0;
     bool pushed = cmd_queue_ ? cmd_queue_->push(cmd) : false;
     if (pushed && wake_callback_) wake_callback_();
-    printf("Web server: Heating command pushed to queue (temp=%.1f, pushed=%d)\n",
+    WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Heating command pushed to queue (temp=%.1f, pushed=%d)",
            temperature, pushed);
     sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
 }
@@ -311,7 +313,7 @@ void WebServer::apiSetPriorityHandler(struct mg_connection* c, struct mg_str* bo
         return;
     }
 
-    printf("Web server: Received priority set request - priority=%s (pri_val=%d)\n",
+    WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Received priority set request - priority=%s (pri_val=%d)",
            priority, pri_val);
     free(priority);
 
@@ -321,7 +323,7 @@ void WebServer::apiSetPriorityHandler(struct mg_connection* c, struct mg_str* bo
     cmd.int_val = pri_val;
     bool pushed = cmd_queue_ ? cmd_queue_->push(cmd) : false;
     if (pushed && wake_callback_) wake_callback_();
-    printf("Web server: Priority command pushed to queue (pri_val=%d, pushed=%d)\n",
+    WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Priority command pushed to queue (pri_val=%d, pushed=%d)",
            pri_val, pushed);
     sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
 }
@@ -348,7 +350,7 @@ void WebServer::apiSetModeHandler(struct mg_connection* c, struct mg_str* body) 
     // but doesn't use it separately—it's handled by control_loop
     long priority = mg_json_get_long(*body, "$.priority", 1);
 
-    printf("Web server: Received mode set request - mode=%ld, priority=%ld\n", mode, priority);
+    WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Received mode set request - mode=%ld, priority=%ld", mode, priority);
 
     Command mode_cmd;
     mode_cmd.type = CommandType::CMD_SET_RUNNING_MODE;
@@ -357,7 +359,7 @@ void WebServer::apiSetModeHandler(struct mg_connection* c, struct mg_str* body) 
 
     bool pushed = cmd_queue_ ? cmd_queue_->push(mode_cmd) : false;
     if (pushed && wake_callback_) wake_callback_();
-    printf("Web server: Mode command pushed to queue (mode=%ld, pushed=%d)\n", mode, pushed);
+    WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Mode command pushed to queue (mode=%ld, pushed=%d)", mode, pushed);
 
     sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
 }

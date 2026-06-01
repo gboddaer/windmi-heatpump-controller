@@ -1,6 +1,8 @@
 #include "selftest.h"
 #include "crc16.h"
 #include "config.h"
+#include "utils/LogTags.hpp"
+#include "utils/LoggerC.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -37,13 +39,13 @@ selftest_report_t selftest_run(modbus_client_t *client) {
         if (modbus_read_register(client, REG_DEVICE_TYPE, &device_type) == 0) {
             r->read_ok = true;
             r->read_value = device_type;
-            printf("Self-test: Device type = %d\n", device_type);
+            WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_SELFTEST, "Device type = %d", device_type);
             if (device_type != 8) {
-                fprintf(stderr, "Self-test: Unexpected device type: %d (expected 8 for Windmi 8kW)\n", device_type);
+                WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_SELFTEST, "Unexpected device type: %d (expected 8 for Windmi 8kW)", device_type);
                 report.all_critical_passed = false;
             }
         } else {
-            fprintf(stderr, "Self-test: Failed to read device type\n");
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_SELFTEST, "Failed to read device type");
             report.all_critical_passed = false;
         }
     }
@@ -61,9 +63,9 @@ selftest_report_t selftest_run(modbus_client_t *client) {
         if (modbus_read_register(client, REG_HEATING_TARGET, &heating_setpoint) == 0) {
             r->read_ok = true;
             r->read_value = heating_setpoint;
-            printf("Self-test: Heating setpoint = %.1f C\n", raw_to_temp(heating_setpoint));
+            WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_SELFTEST, "Heating setpoint = %.1f C", raw_to_temp(heating_setpoint));
         } else {
-            fprintf(stderr, "Self-test: Failed to read heating setpoint\n");
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_SELFTEST, "Failed to read heating setpoint");
             report.all_critical_passed = false;
         }
     }
@@ -81,9 +83,9 @@ selftest_report_t selftest_run(modbus_client_t *client) {
         if (modbus_read_register(client, REG_DHW_TARGET, &dhw_setpoint) == 0) {
             r->read_ok = true;
             r->read_value = dhw_setpoint;
-            printf("Self-test: DHW setpoint = %.1f C\n", raw_to_temp(dhw_setpoint));
+            WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_SELFTEST, "DHW setpoint = %.1f C", raw_to_temp(dhw_setpoint));
         } else {
-            fprintf(stderr, "Self-test: Failed to read DHW setpoint\n");
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_SELFTEST, "Failed to read DHW setpoint");
             report.all_critical_passed = false;
         }
     }
@@ -101,9 +103,9 @@ selftest_report_t selftest_run(modbus_client_t *client) {
         if (modbus_read_register(client, REG_OUTDOOR_TEMP, &outdoor_temp) == 0) {
             r->read_ok = true;
             r->read_value = outdoor_temp;
-            printf("Self-test: Outdoor temp = %.1f C\n", raw_to_temp(outdoor_temp));
+            WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_SELFTEST, "Outdoor temp = %.1f C", raw_to_temp(outdoor_temp));
         } else {
-            fprintf(stderr, "Self-test: Failed to read outdoor temp\n");
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_SELFTEST, "Failed to read outdoor temp");
             report.all_critical_passed = false;
         }
     }
@@ -121,9 +123,9 @@ selftest_report_t selftest_run(modbus_client_t *client) {
         if (modbus_read_register(client, REG_DHW_TANK_TEMP, &dhw_temp) == 0) {
             r->read_ok = true;
             r->read_value = dhw_temp;
-            printf("Self-test: DHW tank temp = %.1f C\n", raw_to_temp(dhw_temp));
+            WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_SELFTEST, "DHW tank temp = %.1f C", raw_to_temp(dhw_temp));
         } else {
-            fprintf(stderr, "Self-test: Failed to read DHW tank temp\n");
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_SELFTEST, "Failed to read DHW tank temp");
             report.all_critical_passed = false;
         }
     }
@@ -141,7 +143,7 @@ selftest_report_t selftest_run(modbus_client_t *client) {
         // Save original heating setpoint
         int16_t original_heating;
         if (modbus_read_register(client, REG_HEATING_TARGET, &original_heating) != 0) {
-            fprintf(stderr, "Self-test: Failed to read original heating setpoint\n");
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_SELFTEST, "Failed to read original heating setpoint");
             report.all_critical_passed = false;
             r->write_ok = false;
         } else {
@@ -155,26 +157,26 @@ selftest_report_t selftest_run(modbus_client_t *client) {
                 if (modbus_read_register(client, REG_HEATING_TARGET, &verify_value) == 0) {
                     if (verify_value == test_value) {
                         r->verify_ok = true;
-                        printf("Self-test: Write verify passed (heating setpoint = %.1f C)\n", raw_to_temp(verify_value));
+                        WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_SELFTEST, "Write verify passed (heating setpoint = %.1f C)", raw_to_temp(verify_value));
                     } else {
-                        fprintf(stderr, "Self-test: Write verify failed (wrote %.1f, read %.1f)\n", 
+                        WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_SELFTEST, "Write verify failed (wrote %.1f, read %.1f)", 
                                 raw_to_temp(test_value), raw_to_temp(verify_value));
                         report.all_critical_passed = false;
                     }
                 } else {
-                    fprintf(stderr, "Self-test: Failed to verify heating setpoint\n");
+                    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_SELFTEST, "Failed to verify heating setpoint");
                     report.all_critical_passed = false;
                 }
                 
                 // Restore original heating setpoint
                 if (modbus_write_register(client, REG_HEATING_TARGET, (uint16_t)original_heating) != 0) {
-                    fprintf(stderr, "Self-test: Failed to restore original heating setpoint\n");
+                    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_SELFTEST, "Failed to restore original heating setpoint");
                     report.all_critical_passed = false;
                 } else {
-                    printf("Self-test: Restored heating setpoint to %.1f C\n", raw_to_temp(original_heating));
+                    WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_SELFTEST, "Restored heating setpoint to %.1f C", raw_to_temp(original_heating));
                 }
             } else {
-                fprintf(stderr, "Self-test: Failed to write heating setpoint\n");
+                WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_SELFTEST, "Failed to write heating setpoint");
                 report.all_critical_passed = false;
             }
         }
@@ -198,6 +200,8 @@ void selftest_print_report(const selftest_report_t *report) {
         return;
     }
     
+    // Self-test report output uses raw printf for table formatting
+    // (selftest.c has its own test harness output)
     printf("\n========== Self-Test Report ==========\n");
     printf("\nTest Results:\n");
     printf("%-20s  %8s  %6s  %6s  %6s  %10s\n", 

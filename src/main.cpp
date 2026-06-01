@@ -28,6 +28,8 @@
 #include "core/StatusMonitor.hpp"
 #include "modbus/ModbusClient.hpp"
 #include "modbus/SimulatedModbusClient.hpp"
+#include "utils/Logger.hpp"
+#include "utils/LogTags.hpp"
 #include "web/WebServer.hpp"
 #include "crc16.h"
 
@@ -95,7 +97,7 @@ static std::string resolve_static_dir(const std::string& dir) {
     }
 
     // Give up — return as-is; Mongoose will serve a directory listing
-    fprintf(stderr, "[Main] Warning: static directory \"%s\" not found\n", dir.c_str());
+    WINDMI_LOG_WARN(LOG_TAG_MAIN, "Static directory not found: %s", dir.c_str());
     return dir;
 }
 
@@ -121,7 +123,7 @@ static bool is_pid_alive(pid_t pid) {
 static int acquire_lock() {
     g_lock_fd = open(LOCK_FILE, O_CREAT | O_RDWR, 0644);
     if (g_lock_fd < 0) {
-        fprintf(stderr, "[Main] Failed to open lock file %s: %s\n", LOCK_FILE, strerror(errno));
+        WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to open lock file %s: %s", LOCK_FILE, strerror(errno));
         return -1;
     }
 
@@ -140,17 +142,17 @@ static int acquire_lock() {
             (void)n;
             int existing_pid = atoi(pid_buf);
             if (existing_pid > 0 && is_pid_alive(existing_pid)) {
-                fprintf(stderr, "[Main] Another instance is already running (PID %d)\n",
+                WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Another instance is already running (PID %d)",
                         existing_pid);
             } else if (existing_pid > 0) {
-                fprintf(stderr, "[Main] Lock held by stale process %d (not running)\n",
+                WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Lock held by stale process %d (not running)",
                         existing_pid);
-                fprintf(stderr, "[Main] Remove %s or use --force to override\n", LOCK_FILE);
+                WINDMI_LOG_WARN(LOG_TAG_MAIN, "Remove %s or use --force to override", LOCK_FILE);
             } else {
-                fprintf(stderr, "[Main] Another instance is already running\n");
+                WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Another instance is already running");
             }
         } else {
-            fprintf(stderr, "[Main] Failed to acquire lock: %s\n", strerror(errno));
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to acquire lock: %s", strerror(errno));
         }
         close(g_lock_fd);
         g_lock_fd = -1;
@@ -166,7 +168,7 @@ static int acquire_lock() {
         ftruncate(g_lock_fd, len);
     }
 
-    printf("[Main] Lock acquired (PID: %d)\n", getpid());
+    WINDMI_LOG_INFO(LOG_TAG_MAIN, "Lock acquired (PID: %d)", getpid());
     return 0;
 }
 
@@ -175,7 +177,7 @@ static void release_lock() {
         flock(g_lock_fd, LOCK_UN);
         close(g_lock_fd);
         g_lock_fd = -1;
-        printf("[Main] Lock released\n");
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "Lock released");
     }
 }
 
@@ -226,8 +228,8 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0) {
             force_lock = true;
         } else {
-            fprintf(stderr, "Unknown option: %s\n", argv[i]);
-            fprintf(stderr, "Use --help for usage information.\n");
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Unknown option: %s", argv[i]);
+            WINDMI_LOG_INFO(LOG_TAG_MAIN, "Use --help for usage information");
             return 1;
         }
     }
@@ -238,7 +240,7 @@ int main(int argc, char* argv[]) {
         // (flock is kernel-managed, but this allows overriding if needed)
         struct stat st;
         if (stat(LOCK_FILE, &st) == 0) {
-            fprintf(stderr, "[Main] --force: removing stale lock file %s\n", LOCK_FILE);
+            WINDMI_LOG_INFO(LOG_TAG_MAIN, "--force: removing stale lock file %s", LOCK_FILE);
             unlink(LOCK_FILE);
         }
     }
@@ -254,14 +256,14 @@ int main(int argc, char* argv[]) {
     signal(SIGTERM, signal_handler);
     signal(SIGPIPE, SIG_IGN);  // Ignore SIGPIPE (client disconnects)
 
-    printf("[Main] Rotenso Windmi Controller\n");
+    WINDMI_LOG_INFO(LOG_TAG_MAIN, "Rotenso Windmi Controller");
     if (!demo_mode) {
-        printf("[Main] Modbus gateway: %s:%d\n", modbus_ip, modbus_port);
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "Modbus gateway: %s:%d", modbus_ip, modbus_port);
     }
-    printf("[Main] Web server: %s:%d\n", WEB_SERVER_IP, web_port);
+    WINDMI_LOG_INFO(LOG_TAG_MAIN, "Web server: %s:%d", WEB_SERVER_IP, web_port);
 
     std::string resolved_static_dir = resolve_static_dir(static_dir);
-    printf("[Main] Static files: %s\n", resolved_static_dir.c_str());
+    WINDMI_LOG_INFO(LOG_TAG_MAIN, "Static files: %s", resolved_static_dir.c_str());
 
     // Create SPSC queues
     windmi::CmdQueue cmd_queue;
@@ -273,12 +275,12 @@ int main(int argc, char* argv[]) {
     // Demo mode: reject --selftest, use simulated client
     if (demo_mode) {
         if (run_selftest) {
-            fprintf(stderr, "[Main] --selftest is not supported in demo mode\n");
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "--selftest is not supported in demo mode");
             release_lock();
             return 1;
         }
         modbus_client = std::make_unique<windmi::SimulatedModbusClient>();
-        printf("[Main] DEMO MODE: using simulated Windmi device, no Modbus socket will be opened\n");
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "DEMO MODE: using simulated Windmi device, no Modbus socket will be opened");
     } else {
         modbus_client = std::make_unique<windmi::ModbusClient>(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
     }
@@ -288,7 +290,7 @@ int main(int argc, char* argv[]) {
         // Cast is safe here: we only reach here in non-demo mode
         auto* real_client = dynamic_cast<windmi::ModbusClient*>(modbus_client.get());
         if (!real_client || !real_client->connect()) {
-            fprintf(stderr, "[Main] Failed to connect to Modbus for self-test\n");
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to connect to Modbus for self-test");
             release_lock();
             return 1;
         }
@@ -297,11 +299,11 @@ int main(int argc, char* argv[]) {
         modbus_client_t* c_client = static_cast<modbus_client_t*>(real_client->getCClient());
         selftest_report_t selftest_result = selftest_run(c_client);
         selftest_print_report(&selftest_result);
-        printf("Self-test: %d/%d registers passed\n", selftest_result.passed, selftest_result.total);
+        WINDMI_LOG_INFO(LOG_TAG_SELFTEST, "%d/%d registers passed", selftest_result.passed, selftest_result.total);
         if (selftest_result.all_critical_passed) {
-            printf("Self-test PASSED\n");
+            WINDMI_LOG_INFO(LOG_TAG_SELFTEST, "Self-test PASSED");
         } else {
-            printf("Self-test FAILED\n");
+            WINDMI_LOG_WARN(LOG_TAG_SELFTEST, "Self-test FAILED");
         }
         real_client->disconnect();
         release_lock();
@@ -310,7 +312,7 @@ int main(int argc, char* argv[]) {
 
     // Connect to Modbus gateway (no-op for simulated client)
     if (!modbus_client->connect()) {
-        fprintf(stderr, "[Main] Failed to connect to Modbus gateway\n");
+        WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to connect to Modbus gateway");
         release_lock();
         return 1;
     }
@@ -318,7 +320,7 @@ int main(int argc, char* argv[]) {
     // Create and start control loop (pass Modbus client + queues)
     g_control_loop = new windmi::ControlLoop();
     if (!g_control_loop->start(modbus_client.get(), &cmd_queue, &status_queue)) {
-        fprintf(stderr, "[Main] Failed to start control loop\n");
+        WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to start control loop");
         delete g_control_loop;
         g_control_loop = nullptr;
         release_lock();
@@ -334,7 +336,7 @@ int main(int argc, char* argv[]) {
                                                  }
                                              });
     } catch (const std::exception& e) {
-        fprintf(stderr, "[Main] Failed to initialize web server: %s\n", e.what());
+        WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to initialize web server: %s", e.what());
         g_control_loop->stop();
         delete g_control_loop;
         g_control_loop = nullptr;
@@ -342,7 +344,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    printf("[Main] Server started. Press Ctrl+C to stop.\n");
+    WINDMI_LOG_INFO(LOG_TAG_MAIN, "Server started. Press Ctrl+C to stop.");
 
     // Poll web server until a signal requests shutdown. The signal handler only
     // flips g_running; all C++ calls happen here outside signal context.
@@ -351,19 +353,19 @@ int main(int argc, char* argv[]) {
     }
     g_web_server->stop();
 
-    printf("[Main] Shutting down...\n");
+    WINDMI_LOG_INFO(LOG_TAG_MAIN, "Shutting down...");
 
     // Stop control loop
     g_control_loop->stop();
-    printf("[Shutdown] Control loop stopped\n");
+    WINDMI_LOG_INFO(LOG_TAG_MAIN, "Control loop stopped");
 
     // Drain/quiet period
     usleep(150000);  // 150ms
-    printf("[Shutdown] Drain period complete\n");
+    WINDMI_LOG_INFO(LOG_TAG_MAIN, "Drain period complete");
 
     // Write OFF mode via dedicated shutdown client (skip in demo mode)
     if (!demo_mode) {
-        printf("[Shutdown] Writing OFF mode via dedicated client...\n");
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "Writing OFF mode via dedicated client...");
         bool off_written = false;
         try {
             windmi::ModbusClient shutdown_client(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
@@ -374,16 +376,16 @@ int main(int argc, char* argv[]) {
 
                     try {
                         shutdown_client.writeRegister(REG_RUNNING_MODE, 0);
-                        printf("[Shutdown] OFF write OK (attempt %d)\n", attempt);
+                        WINDMI_LOG_INFO(LOG_TAG_MAIN, "OFF write OK (attempt %d)", attempt);
                         off_written = true;
                         shutdown_client.disconnect();
                         break;
                     } catch (const windmi::ModbusException&) {
-                        fprintf(stderr, "[Shutdown] OFF write failed (attempt %d)\n", attempt);
+                        WINDMI_LOG_ERROR(LOG_TAG_MAIN, "OFF write failed (attempt %d)", attempt);
                         shutdown_client.disconnect();
                     }
                 } else {
-                    fprintf(stderr, "[Shutdown] Connect failed (attempt %d)\n", attempt);
+                    WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Connect failed (attempt %d)", attempt);
                 }
 
                 if (attempt < 3) {
@@ -391,14 +393,14 @@ int main(int argc, char* argv[]) {
                 }
             }
         } catch (const std::exception& e) {
-            fprintf(stderr, "[Shutdown] Exception creating shutdown client: %s\n", e.what());
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Exception creating shutdown client: %s", e.what());
         }
 
         if (!off_written) {
-            fprintf(stderr, "[Shutdown] OFF mode write failed after 3 attempts\n");
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "OFF mode write failed after 3 attempts");
         }
     } else {
-        printf("[Shutdown] DEMO MODE: skipping real OFF write\n");
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "DEMO MODE: skipping real OFF write");
     }
 
     // Cleanup
@@ -408,7 +410,7 @@ int main(int argc, char* argv[]) {
     delete g_control_loop;
     g_control_loop = nullptr;
 
-    printf("[Main] Goodbye!\n");
+    WINDMI_LOG_INFO(LOG_TAG_MAIN, "Goodbye!");
 
     release_lock();
     return 0;

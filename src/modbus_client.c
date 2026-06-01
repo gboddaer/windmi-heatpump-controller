@@ -1,5 +1,7 @@
 #include "modbus_client.h"
 #include "crc16.h"
+#include "utils/LogTags.hpp"
+#include "utils/LoggerC.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -103,7 +105,7 @@ bool modbus_client_connect(modbus_client_t *client) {
     
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
-        perror("socket failed");
+        WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "socket failed: %s", strerror(errno));
         return false;
     }
     
@@ -113,13 +115,13 @@ bool modbus_client_connect(modbus_client_t *client) {
     server_addr.sin_port = htons(client->port);
     
     if (inet_pton(AF_INET, client->ip, &server_addr.sin_addr) <= 0) {
-        perror("Invalid address");
+        WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Invalid address");
         close(sock);
         return false;
     }
     
     if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("connect failed");
+        WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %s", strerror(errno));
         close(sock);
         return false;
     }
@@ -163,7 +165,7 @@ static int flush_read_buffer(modbus_client_t *client) {
     }
     
     if (flushed > 0) {
-        printf("Modbus: Flushed %d bytes of stale data from socket\n", flushed);
+        WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_MODBUS, "Flushed %d bytes of stale data from socket", flushed);
     }
     return flushed;
 }
@@ -196,7 +198,7 @@ static int receive_exact(modbus_client_t *client, uint8_t *buffer, size_t expect
         int ready = select(client->socket_fd + 1, &fds, NULL, NULL, &tv);
         if (ready <= 0) {
             if (ready == 0) {
-                fprintf(stderr, "Modbus receive timeout (got %zu/%zu bytes)\n", 
+                WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Receive timeout (got %zu/%zu bytes)",
                         total_received, expected_len);
             }
             return -1;
@@ -251,14 +253,14 @@ static int modbus_read_write_registers_internal(modbus_client_t *client,
         // is actually the exception code. Read the remaining 2 CRC bytes.
         uint8_t exc_crc[2];
         receive_exact(client, exc_crc, 2);
-        fprintf(stderr, "Modbus exception: slave=%d func=0x%02X code=%d\n",
+        WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Modbus exception: slave=%d func=0x%02X code=%d",
                 header[0], header[1], header[2]);
         return -1;
     }
     
     uint8_t byte_count = header[2];
     if (byte_count != read_count * 2) {
-        fprintf(stderr, "Unexpected byte count: %d (expected %d)\n",
+        WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Unexpected byte count: %d (expected %d)",
                 byte_count, read_count * 2);
         return -1;
     }
@@ -284,7 +286,7 @@ static int modbus_read_write_registers_internal(modbus_client_t *client,
     uint16_t crc_calculated = crc16(full_frame, total_len - 2);
     
     if (crc_received != crc_calculated) {
-        fprintf(stderr, "CRC error in read response\n");
+        WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "CRC error in read response");
         return -1;
     }
     
@@ -313,7 +315,7 @@ int modbus_write_register(modbus_client_t *client, uint16_t address, uint16_t va
     int retry;
     for (retry = 0; retry < MODBUS_WRITE_MAX_RETRIES; retry++) {
         if (retry > 0) {
-            printf("Modbus write retry %d/%d for address 0x%04X\n", 
+            WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_MODBUS, "Write retry %d/%d for address 0x%04X",
                    retry, MODBUS_WRITE_MAX_RETRIES, address);
             usleep(MODBUS_RETRY_DELAY_MS * 1000);
         }
@@ -332,14 +334,14 @@ int modbus_write_register(modbus_client_t *client, uint16_t address, uint16_t va
         
         // Check for exception response first (func code with MSB set)
         if (response[1] & 0x80) {
-            fprintf(stderr, "Modbus exception on write: slave=%d func=0x%02X exception_code=%d (attempt %d/%d)\n", 
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Modbus exception on write: slave=%d func=0x%02X exception_code=%d (attempt %d/%d)", 
                     response[0], response[1] & 0x7F, response[2], retry + 1, MODBUS_WRITE_MAX_RETRIES);
             continue; // Retry on exception
         }
         
         // Check for normal response mismatch
         if (response[0] != client->slave_id || response[1] != 0x06) {
-            fprintf(stderr, "Write response mismatch: slave=%d func=0x%02X (attempt %d/%d)\n",
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Write response mismatch: slave=%d func=0x%02X (attempt %d/%d)",
                     response[0], response[1], retry + 1, MODBUS_WRITE_MAX_RETRIES);
             continue; // Retry on response mismatch
         }
@@ -347,7 +349,7 @@ int modbus_write_register(modbus_client_t *client, uint16_t address, uint16_t va
         uint16_t crc_received = response[6] | (response[7] << 8);
         uint16_t crc_calculated = crc16(response, 6);
         if (crc_received != crc_calculated) {
-            fprintf(stderr, "Modbus CRC error on write (attempt %d/%d)\n", 
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Modbus CRC error on write (attempt %d/%d)", 
                     retry + 1, MODBUS_WRITE_MAX_RETRIES);
             continue; // Retry on CRC error
         }
@@ -358,20 +360,20 @@ int modbus_write_register(modbus_client_t *client, uint16_t address, uint16_t va
         }
         
         if ((uint16_t)read_value != value) {
-            fprintf(stderr, "Modbus write verify failed: wrote %u, read %d (attempt %d/%d)\n",
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Modbus write verify failed: wrote %u, read %d (attempt %d/%d)",
                     value, read_value, retry + 1, MODBUS_WRITE_MAX_RETRIES);
             continue; // Retry on verify failure
         }
         
         // Success
         if (retry > 0) {
-            printf("Modbus write succeeded after %d retry(ies)\n", retry);
+            WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_MODBUS, "Write succeeded after %d retry(ies)", retry);
         }
         return 0;
     }
     
     // All retries exhausted
-    fprintf(stderr, "Modbus write failed after %d attempts\n", MODBUS_WRITE_MAX_RETRIES);
+    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Write failed after %d attempts", MODBUS_WRITE_MAX_RETRIES);
     return -1;
 }
 

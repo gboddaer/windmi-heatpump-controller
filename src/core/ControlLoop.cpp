@@ -5,10 +5,10 @@
 
 #include "core/ControlLoop.hpp"
 #include "modbus/IModbusClient.hpp"
+#include "utils/Logger.hpp"
+#include "utils/LogTags.hpp"
 #include "config.h"
 
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <chrono>
@@ -147,16 +147,16 @@ int ControlLoop::setRunningMode(int mode) {
 
     // Validate: only 0, 1, 2 are valid device modes
     if (mode < 0 || mode > 2) {
-        fprintf(stderr, "Invalid device mode %d: only 0 (Off), 1 (Cool+DHW), 2 (Heat+DHW) supported\n", mode);
+        WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Invalid device mode %d: only 0 (Off), 1 (Cool+DHW), 2 (Heat+DHW) supported", mode);
         return -1;
     }
 
     try {
         modbus_client_->writeRegister(REG_RUNNING_MODE, static_cast<uint16_t>(mode));
-        printf("Control loop: Set running mode to %d\n", mode);
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set running mode to %d", mode);
         return 0;
     } catch (const ModbusException& e) {
-        fprintf(stderr, "Failed to set running mode to %d: %s\n", mode, e.what());
+        WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set running mode to %d: %s", mode, e.what());
         return -1;
     }
 }
@@ -167,10 +167,10 @@ int ControlLoop::setDhwTarget(float temp) {
     int16_t raw_temp = temp_to_raw(temp);
     try {
         modbus_client_->writeRegister(REG_DHW_TARGET, static_cast<uint16_t>(raw_temp));
-        printf("Control loop: Set DHW target to %.1f C\n", temp);
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set DHW target to %.1f C", temp);
         return 0;
     } catch (const ModbusException& e) {
-        fprintf(stderr, "Failed to set DHW target to %.1f: %s\n", temp, e.what());
+        WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set DHW target to %.1f: %s", temp, e.what());
         return -1;
     }
 }
@@ -181,10 +181,10 @@ int ControlLoop::setHeatingTarget(float temp) {
     int16_t raw_temp = temp_to_raw(temp);
     try {
         modbus_client_->writeRegister(REG_HEATING_TARGET, static_cast<uint16_t>(raw_temp));
-        printf("Control loop: Set heating target to %.1f C\n", temp);
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set heating target to %.1f C", temp);
         return 0;
     } catch (const ModbusException& e) {
-        fprintf(stderr, "Failed to set heating target to %.1f: %s\n", temp, e.what());
+        WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set heating target to %.1f: %s", temp, e.what());
         return -1;
     }
 }
@@ -224,7 +224,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         raw = modbus_client_->readRegister(REG_DHW_TANK_TEMP);
         status.dhw_tank_temp = raw_to_temp(raw);
     } catch (const ModbusException&) {
-        fprintf(stderr, "Failed to read DHW tank temp\n");
+        WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to read DHW tank temp");
         ok = false;
     }
 
@@ -316,37 +316,37 @@ void ControlLoop::processCommands() {
     int cmd_count = 0;
     while (cmd_queue_->pop(cmd)) {
         cmd_count++;
-        printf("Control loop: Processing command #%d - type=%d", cmd_count,
+        WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "Processing command #%d - type=%d", cmd_count,
                static_cast<int>(cmd.type));
 
         switch (cmd.type) {
             case CommandType::CMD_SET_DHW_TEMP:
-                printf(" (CMD_SET_DHW_TEMP, temp=%.1f C)\n", cmd.float_val);
+                WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_DHW_TEMP, temp=%.1f C", cmd.float_val);
                 setDhwTarget(cmd.float_val);
                 saved_dhw_target_ = cmd.float_val;
                 break;
 
             case CommandType::CMD_SET_HEATING_TEMP:
-                printf(" (CMD_SET_HEATING_TEMP, temp=%.1f C)\n", cmd.float_val);
+                WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_HEATING_TEMP, temp=%.1f C", cmd.float_val);
                 setHeatingTarget(cmd.float_val);
                 last_heating_target_ = cmd.float_val;
                 saved_heating_target_ = cmd.float_val;
                 break;
 
             case CommandType::CMD_SET_PRIORITY:
-                printf(" (CMD_SET_PRIORITY, pri_val=%d)\n", cmd.int_val);
+                WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_PRIORITY, pri_val=%d", cmd.int_val);
                 try {
                     modbus_client_->writeRegister(REG_DHW_PRIORITY, static_cast<uint16_t>(cmd.int_val));
                     current_priority_ = (cmd.int_val == 1) ? PriorityMode::Dhw : PriorityMode::Heating;
-                    printf("Control loop: Priority set to %s\n",
+                    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Priority set to %s",
                            cmd.int_val == 1 ? "DHW" : "Heating");
                 } catch (const ModbusException& e) {
-                    fprintf(stderr, "Control loop: Failed to set priority register: %s\n", e.what());
+                    WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set priority register: %s", e.what());
                 }
                 break;
 
             case CommandType::CMD_SET_RUNNING_MODE:
-                printf(" (CMD_SET_RUNNING_MODE, mode=%d)\n", cmd.int_val);
+                WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_RUNNING_MODE, mode=%d", cmd.int_val);
                 desired_working_mode_ = cmd.int_val;
 
                 {
@@ -361,50 +361,50 @@ void ControlLoop::processCommands() {
 
                     if (setRunningMode(target_device_mode) == 0) {
                         current_mode_ = target_device_mode;
-                        printf("Control loop: Working mode set to %d (device mode=%d)\n",
+                        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Working mode set to %d (device mode=%d)",
                                cmd.int_val, target_device_mode);
                     } else {
-                        fprintf(stderr, "Control loop: Failed to set running mode\n");
+                        WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set running mode");
                         break;
                     }
 
                     // Override target temperatures and priority based on working mode
                     switch (cmd.int_val) {
                         case 1:  // DHW-only
-                            printf("Control loop: DHW-only mode, setting heating target to min (%.1f)\n",
+                            WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW-only mode, setting heating target to min (%.1f)",
                                    static_cast<float>(HEATING_TARGET_MIN));
                             setHeatingTarget(HEATING_TARGET_MIN);
                             try {
                                 modbus_client_->writeRegister(REG_DHW_PRIORITY, 1);
                                 current_priority_ = PriorityMode::Dhw;
-                                printf("Control loop: DHW-only mode, set DHW priority\n");
+                                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW-only mode, set DHW priority");
                             } catch (const ModbusException& e) {
-                                fprintf(stderr, "Control loop: Failed to set DHW priority: %s\n", e.what());
+                                WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set DHW priority: %s", e.what());
                             }
                             break;
                         case 2:  // Heating-only
-                            printf("Control loop: Heating-only mode, setting DHW target to min (%.1f)\n",
+                            WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Heating-only mode, setting DHW target to min (%.1f)",
                                    static_cast<float>(DHW_TARGET_MIN));
                             setDhwTarget(DHW_TARGET_MIN);
                             try {
                                 modbus_client_->writeRegister(REG_DHW_PRIORITY, 0);
                                 current_priority_ = PriorityMode::Heating;
-                                printf("Control loop: Heating-only mode, cleared DHW priority\n");
+                                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Heating-only mode, cleared DHW priority");
                             } catch (const ModbusException& e) {
-                                fprintf(stderr, "Control loop: Failed to clear DHW priority: %s\n", e.what());
+                                WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to clear DHW priority: %s", e.what());
                             }
                             break;
                         case 3:  // DHW+Heating
-                            printf("Control loop: DHW+Heating mode, restoring targets (DHW=%.1f, Heating=%.1f)\n",
+                            WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW+Heating mode, restoring targets (DHW=%.1f, Heating=%.1f)",
                                    saved_dhw_target_, saved_heating_target_);
                             setDhwTarget(saved_dhw_target_);
                             setHeatingTarget(saved_heating_target_);
                             try {
                                 modbus_client_->writeRegister(REG_DHW_PRIORITY, 1);
                                 current_priority_ = PriorityMode::Dhw;
-                                printf("Control loop: DHW+Heating mode, set DHW priority\n");
+                                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW+Heating mode, set DHW priority");
                             } catch (const ModbusException& e) {
-                                fprintf(stderr, "Control loop: Failed to set DHW priority: %s\n", e.what());
+                                WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set DHW priority: %s", e.what());
                             }
                             break;
                         case 0:  // Off: no target or priority changes needed
@@ -414,13 +414,13 @@ void ControlLoop::processCommands() {
                 break;
 
             default:
-                fprintf(stderr, "Control loop: Unknown command type: %d\n",
+                WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Unknown command type: %d",
                        static_cast<int>(cmd.type));
                 break;
         }
     }
     if (cmd_count > 0) {
-        printf("Control loop: Batch complete - processed %d command(s)\n", cmd_count);
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Batch complete - processed %d command(s)", cmd_count);
     }
 }
 
@@ -437,7 +437,7 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
 
     // Only change mode if it doesn't match
     if (current_mode_ != desired_device_mode) {
-        printf("Control loop: Correcting device mode from %d to %d (desired working mode=%d)\n",
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Correcting device mode from %d to %d (desired working mode=%d)",
                current_mode_, desired_device_mode, desired_working_mode_);
         if (setRunningMode(desired_device_mode) == 0) {
             current_mode_ = desired_device_mode;
@@ -448,26 +448,26 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
     switch (desired_working_mode_) {
         case 1:  // DHW-only: keep heating target at minimum
             if (status.heating_target > HEATING_TARGET_MIN + 0.5f) {
-                printf("Control loop: DHW-only enforcing heating target min (%.1f, was %.1f)\n",
+                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW-only enforcing heating target min (%.1f, was %.1f)",
                        static_cast<float>(HEATING_TARGET_MIN), status.heating_target);
                 setHeatingTarget(HEATING_TARGET_MIN);
             }
             break;
         case 2:  // Heating-only: keep DHW target at minimum
             if (status.dhw_target > DHW_TARGET_MIN + 0.5f) {
-                printf("Control loop: Heating-only enforcing DHW target min (%.1f, was %.1f)\n",
+                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Heating-only enforcing DHW target min (%.1f, was %.1f)",
                        static_cast<float>(DHW_TARGET_MIN), status.dhw_target);
                 setDhwTarget(DHW_TARGET_MIN);
             }
             break;
         case 3:  // DHW+Heating: ensure user's saved targets are active
             if (fabsf(status.dhw_target - saved_dhw_target_) > 0.5f) {
-                printf("Control loop: Restoring DHW target (%.1f, was %.1f)\n",
+                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Restoring DHW target (%.1f, was %.1f)",
                        saved_dhw_target_, status.dhw_target);
                 setDhwTarget(saved_dhw_target_);
             }
             if (fabsf(status.heating_target - saved_heating_target_) > 0.5f) {
-                printf("Control loop: Restoring heating target (%.1f, was %.1f)\n",
+                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Restoring heating target (%.1f, was %.1f)",
                        saved_heating_target_, status.heating_target);
                 setHeatingTarget(saved_heating_target_);
             }
@@ -479,23 +479,23 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
         case 1:  // DHW-only: must have DHW priority
         case 3:  // DHW+Heating: must have DHW priority
             if (current_priority_ != PriorityMode::Dhw) {
-                printf("Control loop: Mode %d enforcing DHW priority\n", desired_working_mode_);
+                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Mode %d enforcing DHW priority", desired_working_mode_);
                 try {
                     modbus_client_->writeRegister(REG_DHW_PRIORITY, 1);
                     current_priority_ = PriorityMode::Dhw;
                 } catch (const ModbusException& e) {
-                    fprintf(stderr, "Control loop: Failed to set DHW priority: %s\n", e.what());
+                    WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set DHW priority: %s", e.what());
                 }
             }
             break;
         case 2:  // Heating-only: must have no DHW priority
             if (current_priority_ != PriorityMode::Heating) {
-                printf("Control loop: Heating-only mode clearing DHW priority\n");
+                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Heating-only mode clearing DHW priority");
                 try {
                     modbus_client_->writeRegister(REG_DHW_PRIORITY, 0);
                     current_priority_ = PriorityMode::Heating;
                 } catch (const ModbusException& e) {
-                    fprintf(stderr, "Control loop: Failed to clear DHW priority: %s\n", e.what());
+                    WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to clear DHW priority: %s", e.what());
                 }
             }
             break;
@@ -503,7 +503,7 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
 }
 
 void ControlLoop::threadFunc() {
-    printf("Control loop thread started\n");
+    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Thread started");
 
     // Publish initial status snapshot immediately so web server has data
     {
@@ -513,7 +513,7 @@ void ControlLoop::threadFunc() {
             initial_status.working_mode = desired_working_mode_;
             if (status_queue_) {
                 if (!status_queue_->push(initial_status)) {
-                    fprintf(stderr, "Control loop: Status queue full, dropping snapshot\n");
+                    WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Status queue full, dropping snapshot");
                 }
             }
         }
@@ -525,12 +525,12 @@ void ControlLoop::threadFunc() {
 
         // Check connection and reconnect if needed
         if (!modbus_client_ || !modbus_client_->isConnected()) {
-            printf("Control loop: Not connected, attempting to reconnect...\n");
+            WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Not connected, attempting to reconnect...");
 
             int retries = 0;
             while (!stop_requested_.load() && retries < MODBUS_MAX_RETRIES) {
                 if (modbus_client_->connect()) {
-                    printf("Control loop: Reconnected successfully\n");
+                    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Reconnected successfully");
                     break;
                 }
                 retries++;
@@ -540,7 +540,7 @@ void ControlLoop::threadFunc() {
             }
 
             if (retries >= MODBUS_MAX_RETRIES) {
-                fprintf(stderr, "Control loop: Failed to reconnect after %d attempts\n", retries);
+                WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to reconnect after %d attempts", retries);
                 std::unique_lock<std::mutex> lock(kick_mutex_);
                 kick_cond_.wait_for(lock, std::chrono::seconds(MODBUS_RECONNECT_INTERVAL_S),
                                     [this]() { return stop_requested_.load(); });
@@ -563,17 +563,17 @@ void ControlLoop::threadFunc() {
             // Publish status to queue
             if (status_queue_) {
                 if (!status_queue_->push(status)) {
-                    fprintf(stderr, "Control loop: Status queue full, dropping snapshot\n");
+                    WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Status queue full, dropping snapshot");
                 }
             }
         } else {
-            fprintf(stderr, "Control loop: Failed to read status\n");
+            WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to read status");
             // Publish offline status
             status.device_online = false;
             status.working_mode = desired_working_mode_;
             if (status_queue_) {
                 if (!status_queue_->push(status)) {
-                    fprintf(stderr, "Control loop: Status queue full, dropping snapshot\n");
+                    WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Status queue full, dropping snapshot");
                 }
             }
         }
@@ -601,7 +601,7 @@ void ControlLoop::threadFunc() {
         modbus_client_->disconnect();
     }
 
-    printf("Control loop thread stopped\n");
+    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Thread stopped");
     running_.store(false);
 }
 
