@@ -439,7 +439,7 @@ After all replacements:
 - [x] Migrate `src/modbus_client.c` (15 calls: 3 printf, 9 fprintf, 3 perror)
 - [x] Migrate `src/selftest.c` (30 calls: 19 printf, 11 fprintf)
 - [x] Write unit tests for Logger
-- [x] Remove `#include <cstdio>` where no longer needed (ControlLoop.cpp, WebServer.cpp)
+- [x] Remove `#include <cstdio>` where no longer needed (ControlLoop.cpp); retain where still needed (main.cpp, WebServer.cpp, Logger.cpp/LoggerC.cpp, modbus files, selftest.c)
 - [ ] Add CI check to reject new printf/cout/cerr in non-test source
 
 ---
