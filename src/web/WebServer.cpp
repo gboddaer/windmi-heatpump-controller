@@ -9,6 +9,7 @@
 #include "config.h"
 
 #include <mongoose.h>
+#include <cstdio>
 
 #include <cstring>
 #include <cstdlib>

@@ -4,7 +4,7 @@
  *
  * Matches master branch main.c functionality:
  * - Instance lock via flock()
- * - CLI: --ip, --port, --web, --selftest, --help
+ * - CLI: --ip, --port, --web, --log-level, --log-file, --selftest, --help
  * - SPSC queues for thread communication
  * - Startup: Modbus connect → ControlLoop → WebServer
  * - Shutdown: WebServer stop → ControlLoop stop → OFF mode write → lock release
@@ -195,6 +195,7 @@ int main(int argc, char* argv[]) {
     int modbus_port = MODBUS_GATEWAY_PORT;
     int web_port = WEB_SERVER_PORT;
     std::string static_dir = "static";
+    std::string log_file_path;
     bool run_selftest = false;
     bool demo_mode = false;
     bool force_lock = false;
@@ -208,10 +209,12 @@ int main(int argc, char* argv[]) {
             printf("  -p, --port <port>   Modbus gateway port (default: %d)\n", MODBUS_GATEWAY_PORT);
             printf("  -w, --web <port>    Web server HTTP port (default: %d)\n", WEB_SERVER_PORT);
             printf("  -t, --static-dir <dir>  Static files directory (default: static)\n");
-            printf("  -f, --force         Force start even if lock is held by stale process\n");
-            printf("  -s, --selftest      Run self-test and exit\n");
-            printf("  -d, --demo          Run in demo mode with simulated Windmi device\n");
-            printf("  -h, --help          Show this help message\n");
+            printf("  -l, --log-level <lvl>  Log level: TRACE,DEBUG,INFO,WARN,ERROR,FATAL (default: INFO)\n");
+            printf("  -o, --log-file <path>  Log to file (in addition to console)\n");
+            printf("  -f, --force          Force start even if lock is held by stale process\n");
+            printf("  -s, --selftest       Run self-test and exit\n");
+            printf("  -d, --demo           Run in demo mode with simulated Windmi device\n");
+            printf("  -h, --help           Show this help message\n");
             return 0;
         } else if ((strcmp(argv[i], "--ip") == 0 || strcmp(argv[i], "-i") == 0) && i + 1 < argc) {
             modbus_ip = argv[++i];
@@ -221,6 +224,26 @@ int main(int argc, char* argv[]) {
             web_port = atoi(argv[++i]);
         } else if ((strcmp(argv[i], "--static-dir") == 0 || strcmp(argv[i], "-t") == 0) && i + 1 < argc) {
             static_dir = argv[++i];
+        } else if ((strcmp(argv[i], "--log-level") == 0 || strcmp(argv[i], "-l") == 0) && i + 1 < argc) {
+            const char* level_str = argv[++i];
+            if (strcmp(level_str, "TRACE") == 0) {
+                windmi::Logger::instance().setLevel(windmi::LogLevel::TRACE);
+            } else if (strcmp(level_str, "DEBUG") == 0) {
+                windmi::Logger::instance().setLevel(windmi::LogLevel::DEBUG);
+            } else if (strcmp(level_str, "INFO") == 0) {
+                windmi::Logger::instance().setLevel(windmi::LogLevel::INFO);
+            } else if (strcmp(level_str, "WARN") == 0) {
+                windmi::Logger::instance().setLevel(windmi::LogLevel::WARN);
+            } else if (strcmp(level_str, "ERROR") == 0) {
+                windmi::Logger::instance().setLevel(windmi::LogLevel::ERROR);
+            } else if (strcmp(level_str, "FATAL") == 0) {
+                windmi::Logger::instance().setLevel(windmi::LogLevel::FATAL);
+            } else {
+                fprintf(stderr, "Unknown log level: %s (use TRACE,DEBUG,INFO,WARN,ERROR,FATAL)\n", level_str);
+                return 1;
+            }
+        } else if ((strcmp(argv[i], "--log-file") == 0 || strcmp(argv[i], "-o") == 0) && i + 1 < argc) {
+            log_file_path = argv[++i];
         } else if (strcmp(argv[i], "--selftest") == 0 || strcmp(argv[i], "-s") == 0) {
             run_selftest = true;
         } else if (strcmp(argv[i], "--demo") == 0 || strcmp(argv[i], "-d") == 0) {
@@ -232,6 +255,12 @@ int main(int argc, char* argv[]) {
             WINDMI_LOG_INFO(LOG_TAG_MAIN, "Use --help for usage information");
             return 1;
         }
+    }
+
+    // Apply --log-file: add file output alongside console
+    if (!log_file_path.empty()) {
+        windmi::Logger::instance().addOutput(
+            std::make_unique<windmi::FileLogOutput>(log_file_path));
     }
 
     // Acquire exclusive lock before doing anything

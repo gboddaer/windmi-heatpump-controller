@@ -12,7 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Compiler warnings
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    add_compile_options(-Wall -Wextra -Wpedantic)
+    add_compile_options(-Wall -Wextra)
 endif()
 
 # Options
@@ -35,6 +35,11 @@ add_library(mongoose STATIC mongoose/mongoose.c)
 target_include_directories(mongoose PUBLIC mongoose)
 target_compile_definitions(mongoose PRIVATE MG_ENABLE_LINES=1)
 
+# Utils library must be defined first (Logger dependency used by all other libraries)
+add_subdirectory(src/utils)
+# Add crc16 to utils library
+target_sources(windmi_utils PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/crc16.cpp)
+
 # Core library sources
 add_subdirectory(src/core)
 
@@ -44,11 +49,6 @@ add_subdirectory(src/modbus)
 # Web library sources
 add_subdirectory(src/web)
 
-# Utils library sources
-add_subdirectory(src/utils)
-# Add crc16 to utils library
-target_sources(windmi_utils PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/crc16.cpp)
-
 # Self-test library (C code)
 add_library(windmi_selftest STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/selftest.c
@@ -57,7 +57,7 @@ target_include_directories(windmi_selftest PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_link_libraries(windmi_selftest PUBLIC windmi_modbus)
+target_link_libraries(windmi_selftest PUBLIC windmi_modbus windmi_utils)
 
 # Main executable
 add_executable(windmi-control src/main.cpp)

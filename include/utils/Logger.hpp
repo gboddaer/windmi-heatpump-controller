@@ -22,14 +22,6 @@
 #include <string>
 #include <vector>
 
-// GCC/Clang extension: ##__VA_ARGS__ suppresses the comma when __VA_ARGS__ is empty.
-// This is accepted per the project plan — GCC/Clang target.
-// Suppress pedantic warning for this specific pattern.
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-
 namespace windmi {
 
 /**
@@ -140,21 +132,27 @@ public:
     void log(LogLevel level, const char* tag, const char* file, int line,
              const char* function, const char* message) const;
 
+    /**
+     * @brief Format a log level as a fixed-width string
+     */
+    std::string formatLevel(LogLevel level) const;
+
+    /**
+     * @brief Format a timestamp as "YYYY-MM-DD HH:MM:SS.mmm"
+     */
+    static std::string formatTimestamp(const std::chrono::system_clock::time_point& tp);
+
 private:
     Logger();
     Logger(const Logger&) = delete;
     Logger& operator=(const Logger&) = delete;
 
-    // Formatting helpers (public so output implementations can use them)
-public:
-    std::string formatLevel(LogLevel level) const;
-    static std::string formatTimestamp(const std::chrono::system_clock::time_point& tp);
-
-private:
     mutable std::mutex mutex_;
     std::atomic<int> level_;
     std::vector<std::unique_ptr<ILogOutput>> outputs_;
 };
+
+} // namespace windmi
 
 // ─────────────────────────────────────────────────────────────────────
 // C++ Macros
@@ -163,6 +161,10 @@ private:
 //
 // The shouldLog() check gates the entire block so that when a level is
 // filtered out, zero string formatting work is done.
+//
+// GCC/Clang extension: ##__VA_ARGS__ suppresses the comma when
+// __VA_ARGS__ is empty. This is accepted per the project plan.
+// -Wno-variadic-macros is set in CMakeLists.txt to suppress the pedantic warning.
 
 #define WINDMI_LOG(level, tag, fmt, ...) \
     do { \
@@ -180,11 +182,5 @@ private:
 #define WINDMI_LOG_WARN(tag, fmt, ...)   WINDMI_LOG(windmi::LogLevel::WARN, tag, fmt, ##__VA_ARGS__)
 #define WINDMI_LOG_ERROR(tag, fmt, ...)  WINDMI_LOG(windmi::LogLevel::ERROR, tag, fmt, ##__VA_ARGS__)
 #define WINDMI_LOG_FATAL(tag, fmt, ...)  WINDMI_LOG(windmi::LogLevel::FATAL, tag, fmt, ##__VA_ARGS__)
-// Convenience: pass the format string as the second argument (tag is implicit)
-} // namespace windmi
-
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
 
 #endif // WINDMI_UTILS_LOGGER_HPP

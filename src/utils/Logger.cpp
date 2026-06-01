@@ -5,8 +5,6 @@
 
 #include "utils/Logger.hpp"
 
-#include <algorithm>
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -14,7 +12,6 @@
 #include <ctime>
 #include <memory>
 #include <mutex>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -119,6 +116,7 @@ void ConsoleLogOutput::write(const LogEntry& entry) {
     fprintf(stream, "[%s] [%-5s] [%-9s] %s (%s:%d)\n",
             ts.c_str(), lvl.c_str(), entry.tag,
             entry.message.c_str(), entry.file, entry.line);
+    std::fflush(stream);
 }
 
 // ──────────────────────────────────────────────────────────────────
