@@ -78,7 +78,6 @@ struct StatusSnapshot {
 /**
  * @brief Priority mode enum (internal, not a register value)
  *
- * Named to avoid collision with config.h PRIORITY_DHW/PRIORITY_AUTO macros.
  */
 enum class PriorityMode : uint8_t {
     Dhw,       // DHW priority
@@ -102,8 +101,8 @@ public:
 
 private:
     Command buf_[CAPACITY];
-    alignas(64) volatile uint32_t head_;
-    alignas(64) volatile uint32_t tail_;
+    alignas(64) std::atomic<uint32_t> head_;
+    alignas(64) std::atomic<uint32_t> tail_;
 };
 
 /**
@@ -123,8 +122,8 @@ public:
 
 private:
     StatusSnapshot buf_[CAPACITY];
-    alignas(64) volatile uint32_t head_;
-    alignas(64) volatile uint32_t tail_;
+    alignas(64) std::atomic<uint32_t> head_;
+    alignas(64) std::atomic<uint32_t> tail_;
 };
 
 /**
@@ -183,7 +182,7 @@ private:
     // Kick mechanism
     std::mutex kick_mutex_;
     std::condition_variable kick_cond_;
-    bool kicked_;
+    uint64_t kick_generation_;
 
     // Control state (matches master branch)
     PriorityMode current_priority_;

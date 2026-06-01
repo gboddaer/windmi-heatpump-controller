@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include "../src/crc16.h"
+#include "../include/crc16.h"
 
 static int test_count = 0;
 static int pass_count = 0;

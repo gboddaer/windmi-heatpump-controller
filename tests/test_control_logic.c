@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include "../src/config.h"
+#include "../include/config.h"
 
 static int test_count = 0;
 static int pass_count = 0;
@@ -27,8 +27,8 @@ static void test_dhw_min(void) { TEST(dhw_min_40); if (DHW_TEMP_MIN == 40.0f) PA
 static void test_dhw_max(void) { TEST(dhw_max_63); if (DHW_TEMP_MAX == 63.0f) PASS(); else FAIL(""); }
 static void test_heat_min(void) { TEST(heat_min_25); if (HEATING_TEMP_MIN == 25.0f) PASS(); else FAIL(""); }
 static void test_heat_max(void) { TEST(heat_max_63); if (HEATING_TEMP_MAX == 63.0f) PASS(); else FAIL(""); }
-static void test_modes(void) { TEST(mode_values); if (MODE_OFF==0&&MODE_COOL==1&&MODE_HEAT==2&&MODE_DHW==4&&MODE_DEFROST==7&&MODE_HOME_ANTIFREEZE==20) PASS(); else FAIL(""); }
-static void test_no_mode3(void) { TEST(no_mode_3); if (MODE_OFF!=3&&MODE_COOL!=3&&MODE_HEAT!=3&&MODE_DHW!=3) PASS(); else FAIL(""); }
+static void test_modes(void) { TEST(mode_values); if (MODE_STATUS_OFF==0&&MODE_STATUS_COOL==1&&MODE_STATUS_HEAT==2&&MODE_STATUS_DHW==4&&MODE_STATUS_DEFROST==7&&MODE_STATUS_ANTIFREEZE==20) PASS(); else FAIL(""); }
+static void test_no_mode3(void) { TEST(no_mode_3); if (MODE_SET_OFF!=3&&MODE_SET_COOL_DHW!=3&&MODE_SET_HEAT_DHW!=3&&MODE_STATUS_DHW!=3) PASS(); else FAIL(""); }
 static void test_heat_cold(void) { TEST(heat_needed_cold); if (heating_is_needed(45.0f,30.0f,HEATING_HYSTERESIS_C)) PASS(); else FAIL(""); }
 static void test_heat_warm(void) { TEST(heat_not_needed_warm); if (!heating_is_needed(45.0f,44.5f,HEATING_HYSTERESIS_C)) PASS(); else FAIL(""); }
 static void test_port(void) { TEST(port_8899); if (MODBUS_GATEWAY_PORT==8899) PASS(); else FAIL(""); }

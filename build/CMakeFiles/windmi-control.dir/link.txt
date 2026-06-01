@@ -1,1 +1,0 @@
-/usr/bin/c++ "CMakeFiles/windmi-control.dir/src/main.cpp.o" -o windmi-control  src/core/libwindmi_core.a src/modbus/libwindmi_modbus.a src/web/libwindmi_web.a src/utils/libwindmi_utils.a libmongoose.a -lpthread

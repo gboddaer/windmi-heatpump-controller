@@ -1,6 +1,6 @@
 #include "crc16.h"
 
-uint16_t crc16_modbus(const uint8_t *data, size_t len) {
+uint16_t crc16(const uint8_t *data, size_t len) {
     uint16_t crc = 0xFFFF;
 
     for (size_t i = 0; i < len; i++) {
@@ -17,4 +17,8 @@ uint16_t crc16_modbus(const uint8_t *data, size_t len) {
     }
 
     return crc;
+}
+
+uint16_t crc16_modbus(const uint8_t *data, size_t len) {
+    return crc16(data, len);
 }

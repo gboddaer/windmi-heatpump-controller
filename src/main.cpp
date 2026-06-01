@@ -45,11 +45,8 @@ static windmi::ControlLoop* g_control_loop = nullptr;
 // Signal handler
 static void signal_handler(int sig) {
     (void)sig;
+    // Async-signal-safe: only update sig_atomic_t state here.
     g_running = 0;
-    // Wake up the web server poll loop so it exits
-    if (g_web_server) {
-        g_web_server->stop();
-    }
 }
 
 // Acquire exclusive lock to prevent multiple instances
@@ -183,7 +180,12 @@ int main(int argc, char* argv[]) {
 
     // Create and init web server (pass queues)
     try {
-        g_web_server = new windmi::WebServer(web_port, "static", &cmd_queue, &status_queue);
+        g_web_server = new windmi::WebServer(web_port, "static", &cmd_queue, &status_queue,
+                                             []() {
+                                                 if (g_control_loop) {
+                                                     g_control_loop->kick();
+                                                 }
+                                             });
     } catch (const std::exception& e) {
         fprintf(stderr, "[Main] Failed to initialize web server: %s\n", e.what());
         g_control_loop->stop();
@@ -195,8 +197,12 @@ int main(int argc, char* argv[]) {
 
     printf("[Main] Server started. Press Ctrl+C to stop.\n");
 
-    // Run web server (blocking until stop)
-    g_web_server->run();
+    // Poll web server until a signal requests shutdown. The signal handler only
+    // flips g_running; all C++ calls happen here outside signal context.
+    while (g_running) {
+        g_web_server->poll(100);
+    }
+    g_web_server->stop();
 
     printf("[Main] Shutting down...\n");
 

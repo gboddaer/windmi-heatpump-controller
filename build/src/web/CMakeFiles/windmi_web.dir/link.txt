@@ -1,2 +1,0 @@
-/usr/bin/ar qc libwindmi_web.a CMakeFiles/windmi_web.dir/WebServer.cpp.o
-/usr/bin/ranlib libwindmi_web.a

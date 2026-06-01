@@ -30,7 +30,7 @@ $(TARGET): $(OBJECTS) $(MONGOOSE_OBJ)
 	$(CC) $(OBJECTS) $(MONGOOSE_OBJ) $(LDFLAGS) -o $(TARGET)
 
 $(SRC_DIR)/%.o: $(SRC_DIR)/%.c
-	$(CC) $(CFLAGS) -I$(MONGOOSE_INC) -I$(SRC_DIR) -c $< -o $@
+	$(CC) $(CFLAGS) -I$(MONGOOSE_INC) -Iinclude -I$(SRC_DIR) -c $< -o $@
 
 mongoose/mongoose.o: mongoose/mongoose.c
 	$(CC) $(CFLAGS) -I$(MONGOOSE_INC) -c $< -o $@
@@ -52,25 +52,25 @@ setup: mongoose
 # --- Unit Tests ---
 # Build modbus_client without static functions for frame testing
 $(TEST_DIR)/modbus_client_test.o: $(SRC_DIR)/modbus_client.c
-	$(CC) $(CFLAGS) -I$(MONGOOSE_INC) -I$(SRC_DIR) -DTEST_BUILD -c $< -o $@
+	$(CC) $(CFLAGS) -I$(MONGOOSE_INC) -Iinclude -I$(SRC_DIR) -DTEST_BUILD -c $< -o $@
 
 test_crc16: $(SRC_DIR)/crc16.c $(TEST_DIR)/test_crc16.c
-	$(CC) $(CFLAGS) -I$(SRC_DIR) $(SRC_DIR)/crc16.c $(TEST_DIR)/test_crc16.c -o $(TEST_DIR)/test_crc16
+	$(CC) $(CFLAGS) -Iinclude -I$(SRC_DIR) $(SRC_DIR)/crc16.c $(TEST_DIR)/test_crc16.c -o $(TEST_DIR)/test_crc16
 	@echo "Running test_crc16..."
 	@$(TEST_DIR)/test_crc16
 
 test_modbus_frames: $(SRC_DIR)/crc16.c $(TEST_DIR)/modbus_client_test.o $(TEST_DIR)/test_modbus_frames.c
-	$(CC) $(CFLAGS) -I$(SRC_DIR) $(SRC_DIR)/crc16.c $(TEST_DIR)/modbus_client_test.o $(TEST_DIR)/test_modbus_frames.c -o $(TEST_DIR)/test_modbus_frames
+	$(CC) $(CFLAGS) -Iinclude -I$(SRC_DIR) $(SRC_DIR)/crc16.c $(TEST_DIR)/modbus_client_test.o $(TEST_DIR)/test_modbus_frames.c -o $(TEST_DIR)/test_modbus_frames
 	@echo "Running test_modbus_frames..."
 	@$(TEST_DIR)/test_modbus_frames
 
 test_control: $(SRC_DIR)/crc16.o $(TEST_DIR)/test_control_logic.c
-	$(CC) $(CFLAGS) -I$(SRC_DIR) $(TEST_DIR)/test_control_logic.c -o $(TEST_DIR)/test_control
+	$(CC) $(CFLAGS) -Iinclude -I$(SRC_DIR) $(TEST_DIR)/test_control_logic.c -o $(TEST_DIR)/test_control
 	@echo "Running test_control..."
 	@$(TEST_DIR)/test_control
 
 test_spsc: $(TEST_DIR)/test_spsc_queue.c
-	$(CC) $(CFLAGS) -I$(SRC_DIR) $(TEST_DIR)/test_spsc_queue.c -o $(TEST_DIR)/test_spsc
+	$(CC) $(CFLAGS) -Iinclude -I$(SRC_DIR) $(TEST_DIR)/test_spsc_queue.c -o $(TEST_DIR)/test_spsc
 	@echo "Running test_spsc..."
 	@$(TEST_DIR)/test_spsc
 

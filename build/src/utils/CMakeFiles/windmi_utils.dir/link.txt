@@ -1,2 +1,0 @@
-/usr/bin/ar qc libwindmi_utils.a CMakeFiles/windmi_utils.dir/Config.cpp.o CMakeFiles/windmi_utils.dir/JsonHelpers.cpp.o CMakeFiles/windmi_utils.dir/SpscQueue.cpp.o CMakeFiles/windmi_utils.dir/__/crc16.cpp.o
-/usr/bin/ranlib libwindmi_utils.a

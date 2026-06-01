@@ -21,22 +21,24 @@ namespace windmi {
 CmdQueue::CmdQueue() : head_(0), tail_(0) {}
 
 bool CmdQueue::push(const Command& cmd) {
-    uint32_t next_tail = (tail_ + 1) % CAPACITY;
-    if (next_tail == head_) return false;  // Full
-    buf_[tail_] = cmd;
-    tail_ = next_tail;
+    const uint32_t current_tail = tail_.load(std::memory_order_relaxed);
+    const uint32_t next_tail = (current_tail + 1) % CAPACITY;
+    if (next_tail == head_.load(std::memory_order_acquire)) return false;  // Full
+    buf_[current_tail] = cmd;
+    tail_.store(next_tail, std::memory_order_release);
     return true;
 }
 
 bool CmdQueue::pop(Command& cmd) {
-    if (head_ == tail_) return false;  // Empty
-    cmd = buf_[head_];
-    head_ = (head_ + 1) % CAPACITY;
+    const uint32_t current_head = head_.load(std::memory_order_relaxed);
+    if (current_head == tail_.load(std::memory_order_acquire)) return false;  // Empty
+    cmd = buf_[current_head];
+    head_.store((current_head + 1) % CAPACITY, std::memory_order_release);
     return true;
 }
 
 bool CmdQueue::empty() const {
-    return head_ == tail_;
+    return head_.load(std::memory_order_acquire) == tail_.load(std::memory_order_acquire);
 }
 
 // ---- StatusQueue implementation ----
@@ -44,17 +46,19 @@ bool CmdQueue::empty() const {
 StatusQueue::StatusQueue() : head_(0), tail_(0) {}
 
 bool StatusQueue::push(const StatusSnapshot& item) {
-    uint32_t next_tail = (tail_ + 1) % CAPACITY;
-    if (next_tail == head_) return false;  // Full
-    buf_[tail_] = item;
-    tail_ = next_tail;
+    const uint32_t current_tail = tail_.load(std::memory_order_relaxed);
+    const uint32_t next_tail = (current_tail + 1) % CAPACITY;
+    if (next_tail == head_.load(std::memory_order_acquire)) return false;  // Full
+    buf_[current_tail] = item;
+    tail_.store(next_tail, std::memory_order_release);
     return true;
 }
 
 bool StatusQueue::pop(StatusSnapshot& item) {
-    if (head_ == tail_) return false;  // Empty
-    item = buf_[head_];
-    head_ = (head_ + 1) % CAPACITY;
+    const uint32_t current_head = head_.load(std::memory_order_relaxed);
+    if (current_head == tail_.load(std::memory_order_acquire)) return false;  // Empty
+    item = buf_[current_head];
+    head_.store((current_head + 1) % CAPACITY, std::memory_order_release);
     return true;
 }
 
@@ -86,7 +90,7 @@ ControlLoop::ControlLoop()
     , status_queue_(nullptr)
     , running_(false)
     , stop_requested_(false)
-    , kicked_(false)
+    , kick_generation_(0)
     , current_priority_(PriorityMode::Dhw)
     , current_mode_(MODE_SET_HEAT_DHW)
     , desired_working_mode_(3)
@@ -134,7 +138,7 @@ bool ControlLoop::isRunning() const {
 
 void ControlLoop::kick() {
     std::lock_guard<std::mutex> lock(kick_mutex_);
-    kicked_ = true;
+    ++kick_generation_;
     kick_cond_.notify_one();
 }
 
@@ -530,12 +534,16 @@ void ControlLoop::threadFunc() {
                     break;
                 }
                 retries++;
-                std::this_thread::sleep_for(std::chrono::seconds(MODBUS_RECONNECT_INTERVAL_S));
+                std::unique_lock<std::mutex> lock(kick_mutex_);
+                kick_cond_.wait_for(lock, std::chrono::seconds(MODBUS_RECONNECT_INTERVAL_S),
+                                    [this]() { return stop_requested_.load(); });
             }
 
             if (retries >= MODBUS_MAX_RETRIES) {
                 fprintf(stderr, "Control loop: Failed to reconnect after %d attempts\n", retries);
-                std::this_thread::sleep_for(std::chrono::seconds(MODBUS_RECONNECT_INTERVAL_S));
+                std::unique_lock<std::mutex> lock(kick_mutex_);
+                kick_cond_.wait_for(lock, std::chrono::seconds(MODBUS_RECONNECT_INTERVAL_S),
+                                    [this]() { return stop_requested_.load(); });
                 continue;
             }
         }
@@ -578,9 +586,13 @@ void ControlLoop::threadFunc() {
 
         if (sleep_ms > 0) {
             std::unique_lock<std::mutex> lock(kick_mutex_);
-            kicked_ = false;
+            const uint64_t observed_generation = kick_generation_;
             kick_cond_.wait_for(lock, std::chrono::milliseconds(sleep_ms),
-                                [this]() { return kicked_ || stop_requested_.load(); });
+                                [this, observed_generation]() {
+                                    return stop_requested_.load()
+                                        || kick_generation_ != observed_generation
+                                        || (cmd_queue_ && !cmd_queue_->empty());
+                                });
         }
     }
 

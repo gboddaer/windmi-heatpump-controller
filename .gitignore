@@ -1,0 +1,15 @@
+# Build output
+build/
+
+# Legacy Makefile build artifacts
+windmi-control
+src/*.o
+mongoose/*.o
+mongoose/*.a
+tests/test_crc16
+tests/test_modbus_frames
+tests/test_control
+tests/test_spsc
+
+# Runtime files
+/tmp/windmi-controller.lock

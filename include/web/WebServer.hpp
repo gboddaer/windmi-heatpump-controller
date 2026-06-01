@@ -13,6 +13,7 @@
 #include <string>
 #include <atomic>
 #include <csignal>
+#include <functional>
 
 namespace windmi {
 
@@ -33,7 +34,8 @@ public:
      * @param status_queue Status queue for reading status snapshots
      */
     WebServer(int port, const std::string& static_dir,
-              CmdQueue* cmd_queue, StatusQueue* status_queue);
+              CmdQueue* cmd_queue, StatusQueue* status_queue,
+              std::function<void()> wake_callback = nullptr);
 
     ~WebServer();
 
@@ -44,6 +46,12 @@ public:
      * mg_mgr_poll() event loop.
      */
     void run();
+
+    /**
+     * @brief Poll the web server once.
+     * @param timeout_ms Poll timeout in milliseconds.
+     */
+    void poll(int timeout_ms = 100);
 
     void stop();
     bool isShuttingDown() const;
@@ -68,6 +76,8 @@ private:
     StatusSnapshot last_status_;
     std::atomic<bool> running_;
     volatile sig_atomic_t shutting_down_;
+    bool mgr_freed_;
+    std::function<void()> wake_callback_;
 };
 
 } // namespace windmi

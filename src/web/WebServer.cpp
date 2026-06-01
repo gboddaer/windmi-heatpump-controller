@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <utility>
 
 namespace windmi {
 
@@ -39,13 +40,16 @@ static const char* status_to_string(int status) {
 // ---- WebServer implementation ----
 
 WebServer::WebServer(int port, const std::string& static_dir,
-                     CmdQueue* cmd_queue, StatusQueue* status_queue)
+                     CmdQueue* cmd_queue, StatusQueue* status_queue,
+                     std::function<void()> wake_callback)
     : static_dir_(static_dir)
     , cmd_queue_(cmd_queue)
     , status_queue_(status_queue)
     , last_status_{}
     , running_(false)
     , shutting_down_(0)
+    , mgr_freed_(false)
+    , wake_callback_(std::move(wake_callback))
 {
     mg_mgr_init(&mgr_);
 
@@ -55,6 +59,8 @@ WebServer::WebServer(int port, const std::string& static_dir,
     struct mg_connection* conn = mg_http_listen(&mgr_, url, WebServer::eventHandler, this);
     if (!conn) {
         fprintf(stderr, "Failed to start server on %s\n", url);
+        mg_mgr_free(&mgr_);
+        mgr_freed_ = true;
         throw std::runtime_error("Failed to start web server");
     }
 
@@ -66,14 +72,22 @@ WebServer::WebServer(int port, const std::string& static_dir,
 
 WebServer::~WebServer() {
     stop();
-    mg_mgr_free(&mgr_);
+    if (!mgr_freed_) {
+        mg_mgr_free(&mgr_);
+        mgr_freed_ = true;
+    }
 }
 
 void WebServer::run() {
     while (running_.load()) {
-        mg_mgr_poll(&mgr_, 100);
+        poll(100);
     }
-    mg_mgr_free(&mgr_);
+}
+
+void WebServer::poll(int timeout_ms) {
+    if (running_.load()) {
+        mg_mgr_poll(&mgr_, timeout_ms);
+    }
 }
 
 void WebServer::stop() {
@@ -227,6 +241,7 @@ void WebServer::apiSetDhwHandler(struct mg_connection* c, struct mg_str* body) {
     cmd.float_val = static_cast<float>(temperature);
     cmd.int_val = 0;
     bool pushed = cmd_queue_ ? cmd_queue_->push(cmd) : false;
+    if (pushed && wake_callback_) wake_callback_();
     printf("Web server: DHW command pushed to queue (temp=%.1f, pushed=%d)\n",
            temperature, pushed);
     sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
@@ -262,6 +277,7 @@ void WebServer::apiSetHeatingHandler(struct mg_connection* c, struct mg_str* bod
     cmd.float_val = static_cast<float>(temperature);
     cmd.int_val = 0;
     bool pushed = cmd_queue_ ? cmd_queue_->push(cmd) : false;
+    if (pushed && wake_callback_) wake_callback_();
     printf("Web server: Heating command pushed to queue (temp=%.1f, pushed=%d)\n",
            temperature, pushed);
     sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
@@ -304,6 +320,7 @@ void WebServer::apiSetPriorityHandler(struct mg_connection* c, struct mg_str* bo
     cmd.float_val = 0.0f;
     cmd.int_val = pri_val;
     bool pushed = cmd_queue_ ? cmd_queue_->push(cmd) : false;
+    if (pushed && wake_callback_) wake_callback_();
     printf("Web server: Priority command pushed to queue (pri_val=%d, pushed=%d)\n",
            pri_val, pushed);
     sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
@@ -339,6 +356,7 @@ void WebServer::apiSetModeHandler(struct mg_connection* c, struct mg_str* body) 
     mode_cmd.int_val = static_cast<int>(mode);
 
     bool pushed = cmd_queue_ ? cmd_queue_->push(mode_cmd) : false;
+    if (pushed && wake_callback_) wake_callback_();
     printf("Web server: Mode command pushed to queue (mode=%ld, pushed=%d)\n", mode, pushed);
 
     sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");

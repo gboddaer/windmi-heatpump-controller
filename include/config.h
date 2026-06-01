@@ -91,10 +91,6 @@ extern "C" {
 // Self-test configuration
 #define SELFTEST_DHW_TARGET_TEMP  45.0f
 
-// Priority modes (used internally, not device register values)
-#define PRIORITY_AUTO               0
-#define PRIORITY_DHW                1
-
 // Temperature minimums for single-purpose modes (used in control logic)
 #define DHW_TARGET_MIN              40.0f
 #define HEATING_TARGET_MIN          25.0f
