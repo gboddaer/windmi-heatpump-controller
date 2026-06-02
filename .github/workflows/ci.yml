@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, dev ]
+  pull_request:
+    branches: [ master, dev ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake
+
+    - name: Configure build
+      run: |
+        mkdir build
+        cd build
+        cmake ..
+
+    - name: Build project
+      run: |
+        cd build
+        make -j$(nproc)
+
+    - name: Run tests
+      run: |
+        cd build
+        ctest --output-on-failure
+
+    - name: Build documentation
+      if: false  # Enable when Doxygen is configured
+      run: |
+        sudo apt-get install -y doxygen
+        cd build
+        make docs
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run clang-tidy
+      uses: reviewdog/action-clang-tidy@v1
+      with:
+        clang_tidy_flags: '-p=build'
+
+    - name: Run shellcheck
+      if: false  # Enable if there are shell scripts
+      uses: reviewdog/action-shellcheck@v1

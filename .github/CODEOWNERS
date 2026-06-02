@@ -1,0 +1,31 @@
+# CODEOWNERS for windmi-controller
+# This file defines who owns the various parts of the codebase.
+
+* @your-org/maintainers
+
+# Documentation
+docs/ @your-org/docs-team
+README.md @your-org/maintainers
+
+# Core C++ code
+src/core/ @your-org/core-team
+include/core/ @your-org/core-team
+
+# Modbus implementation
+src/modbus/ @your-org/embedded-team
+include/modbus/ @your-org/embedded-team
+
+# Web server
+src/web/ @your-org/web-team
+include/web/ @your-org/web-team
+
+# Utilities
+src/utils/ @your-org/core-team
+include/utils/ @your-org/core-team
+
+# Tests
+tests/ @your-org/test-team
+
+# Build system
+CMakeLists.txt @your-org/build-team
+Makefile @your-org/build-team
