@@ -64,11 +64,9 @@ jobs:
     - name: Run clang-tidy
       run: |
         mkdir -p build
-        cd build
-        cmake ..
-        make -j$(nproc)
-        cd build
-        clang-tidy -p=. src/*.cpp src/*/*.cpp -header-filter='include/*' 2>&1 || true
+        cmake -B build -S .
+        cmake --build build -j$(nproc)
+        clang-tidy build/src/*.cpp build/tests/*/*.cpp -p=build -header-filter='include/*' 2>&1 || true
 
     - name: Shellcheck
       run: |
