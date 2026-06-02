@@ -43,7 +43,9 @@ extern "C" {
 
 // Serial Port Configuration
 #define SERIAL_DEFAULT_BAUD      9600
+#define SERIAL_DEFAULT_PARITY    'N'  // 'N' = none, 'E' = even, 'O' = odd
 #define SERIAL_DEFAULT_STOP_BITS 1
+#define MODBUS_SERIAL_TIMEOUT_MS 2000
 
 // Running Mode Values for SETTING (register 0x002C - writable)
 // Only modes 0, 1, 2 should be SET on this register

@@ -38,12 +38,6 @@ struct modbus_client {
     bool connected;
 };
 
-#ifdef TEST_BUILD
-#define STATIC_FOR_TEST
-#else
-#define STATIC_FOR_TEST static
-#endif
-
 static uint16_t bytes_to_uint16(const uint8_t *bytes) {
     return (uint16_t)((bytes[0] << 8) | bytes[1]);
 }

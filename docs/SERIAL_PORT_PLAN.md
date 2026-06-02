@@ -840,26 +840,31 @@ curl -X POST http://localhost:10000/api/set-mode -d '{"mode": 2}'
 | File | Description |
 |------|-------------|
 | `include/modbus_rtu_frame.h` | Shared RTU frame-building functions header |
-| `src/modbus_rtu_frame.c` | Shared RTU frame-building implementation |
+| `src/modbus/modbus_rtu_frame.c` | Shared RTU frame-building implementation |
 | `include/modbus_serial_client.h` | C serial client header (mirrors `modbus_client.h`) |
-| `src/modbus_serial_client.c` | C serial client implementation |
+| `src/modbus/modbus_serial_client.c` | C serial client implementation |
 | `include/modbus/ModbusSerialClient.hpp` | C++ wrapper header |
 | `src/modbus/ModbusSerialClient.cpp` | C++ wrapper implementation |
-| `tests/modbus/test_modbus_serial.cpp` | Unit tests for serial client |
 | `tests/modbus/test_modbus_rtu_frame.cpp` | Unit tests for shared frame functions |
+| `tests/modbus/test_modbus_serial_client.cpp` | Unit tests for serial client |
+
+**Note:** `tests/test_modbus_frames.c` was removed - it was a stale legacy test file referencing extracted functions.
 
 ### Modified Files
 | File | Changes |
 |------|---------|
-| `include/config.h` | Add `SERIAL_DEFAULT_BAUD 9600`, `SERIAL_DEFAULT_PARITY 'N'`, `SERIAL_DEFAULT_STOP_BITS 1`, `MODBUS_SERIAL_TIMEOUT_MS 2000` |
-| `src/modbus_client.c` | Remove `static` `build_read_frame` / `build_write_frame`, call `modbus_rtu_build_*` from shared header |
-| `src/main.cpp` | Add `--serial`, `--baud`, `--parity`, `--stop-bits`, `--rs485` CLI; update client creation; update shutdown client; update selftest to use `IModbusClient*` |
+| `include/config.h` | Add `SERIAL_DEFAULT_BAUD`, `SERIAL_DEFAULT_PARITY`, `SERIAL_DEFAULT_STOP_BITS`, `MODBUS_SERIAL_TIMEOUT_MS` |
+| `src/modbus_client.c` | Remove `STATIC_FOR_TEST` macro (dead code); remove `build_read_frame`/`build_write_frame` (extracted); use `modbus_rtu_build_*` |
+| `src/main.cpp` | Add `--serial`, `--baud`, `--parity`, `--stop-bits`, `--rs485` CLI; update client creation; update shutdown client |
 | `src/selftest.c` → `src/selftest.cpp` | Rewrite to use `windmi::IModbusClient*` instead of `modbus_client_t*`; eliminate `getCClient()` dependency |
 | `src/selftest.h` → `include/selftest.hpp` | Move selftest header out of `src/`; project headers belong in `include/` |
-| `src/modbus/CMakeLists.txt` | Add new source files to `windmi_modbus` |
-| `tests/modbus/CMakeLists.txt` | Add `test_modbus_serial`, `test_modbus_rtu_frame` |
-| `CMakeLists.txt` | Update the existing top-level `windmi_selftest` target from `src/selftest.c` to `src/selftest.cpp`; do not add selftest to `windmi_modbus` |
+| `src/modbus/CMakeLists.txt` | Add `ModbusSerialClient.cpp`, `modbus_rtu_frame.c`, `modbus_serial_client.c` |
+| `tests/modbus/CMakeLists.txt` | Add `test_modbus_rtu_frame.cpp`, `test_modbus_serial_client.cpp` |
+| `CMakeLists.txt` | Update the existing top-level `windmi_selftest` target from `src/selftest.c` to `src/selftest.cpp` |
 | `README.md` | Add "Serial Port Connection" section |
+
+**Removed:**
+- `tests/test_modbus_frames.c` — stale legacy test file referencing extracted functions
 
 ### Removed
 | File | Reason |

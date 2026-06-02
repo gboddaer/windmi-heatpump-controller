@@ -328,6 +328,7 @@ bool modbus_serial_client_is_connected(modbus_serial_client_t *client) {
 
 /**
  * Flush any pending data in the serial read buffer
+ * Uses select() with zero timeout for non-blocking read
  */
 static int serial_flush_buffer(int fd) {
     if (fd < 0) return 0;
@@ -335,7 +336,16 @@ static int serial_flush_buffer(int fd) {
     uint8_t dummy[128];
     int flushed = 0;
     
+    // Use select() with zero timeout to check for available data without blocking
     while (1) {
+        fd_set fds;
+        struct timeval tv = {0, 0};  // Zero timeout = non-blocking
+        FD_ZERO(&fds);
+        FD_SET(fd, &fds);
+        
+        int ready = select(fd + 1, &fds, NULL, NULL, &tv);
+        if (ready <= 0) break;  // No data available or error
+        
         ssize_t n = read(fd, dummy, sizeof(dummy));
         if (n <= 0) break;
         flushed += n;
@@ -506,6 +516,10 @@ int modbus_serial_write_register(modbus_serial_client_t *client, uint16_t addres
             WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Modbus CRC error on write");
             continue;
         }
+        
+        // Inter-frame delay before read-back (≥4ms for safety at 9600 baud)
+        // Modbus RTU requires ≥3.5 character times between frames
+        usleep(MODBUS_SERIAL_INTER_FRAME_DELAY_US);
         
         // Read-back verification
         int16_t read_value;
