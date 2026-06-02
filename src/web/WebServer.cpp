@@ -13,6 +13,7 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <stdexcept>
 #include <utility>
 
 namespace windmi {
