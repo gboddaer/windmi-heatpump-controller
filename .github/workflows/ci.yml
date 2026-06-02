@@ -13,6 +13,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      env:
+        ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
       with:
         submodules: recursive
         fetch-depth: 0
@@ -55,6 +57,8 @@ jobs:
       with:
         submodules: recursive
         fetch-depth: 0
+      env:
+        ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
 
     - name: Install dependencies
       run: |
