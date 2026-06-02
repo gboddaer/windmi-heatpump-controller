@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <ctype.h>
 #include <sys/select.h>
 #include <sys/ioctl.h>
 #include <linux/serial.h>
@@ -82,11 +83,14 @@ modbus_serial_client_t *modbus_serial_client_create(
         return NULL;
     }
     
-    // Validate parity
-    if (parity != 'N' && parity != 'E' && parity != 'O') {
+    // Validate parity (accept both uppercase and lowercase)
+    if ((parity != 'N' && parity != 'E' && parity != 'O') &&
+        (parity != 'n' && parity != 'e' && parity != 'o')) {
         WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Serial client: invalid parity '%c'", parity);
         return NULL;
     }
+    // Normalize to uppercase
+    parity = toupper((unsigned char)parity);
     
     // Validate stop bits
     if (stop_bits != 1 && stop_bits != 2) {
@@ -545,7 +549,7 @@ int modbus_serial_write_register(modbus_serial_client_t *client, uint16_t addres
  */
 int modbus_serial_read_registers(modbus_serial_client_t *client, uint16_t address,
                                   int16_t *values, uint16_t count) {
-    if (!client || !client->connected || !values || count <= 0) {
+    if (!client || !client->connected || !values || count == 0) {
         return -1;
     }
     

@@ -36,12 +36,15 @@ ModbusSerialClient::ModbusSerialClient(const std::string& device, int baud, char
         throw ModbusException(oss.str());
     }
     
-    // Validate parity
-    if (parity != 'N' && parity != 'E' && parity != 'O') {
+    // Validate parity (accept both uppercase and lowercase)
+    if ((parity != 'N' && parity != 'E' && parity != 'O') &&
+        (parity != 'n' && parity != 'e' && parity != 'o')) {
         std::ostringstream oss;
-        oss << "Invalid parity: '" << parity << "' (must be 'N', 'E', or 'O')";
+        oss << "Invalid parity: '" << parity << "' (must be N, E, or O)";
         throw ModbusException(oss.str());
     }
+    // Normalize to uppercase
+    parity = toupper((unsigned char)parity);
     
     // Validate stop bits
     if (stop_bits != 1 && stop_bits != 2) {

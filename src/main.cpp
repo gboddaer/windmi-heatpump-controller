@@ -199,6 +199,7 @@ int main(int argc, char* argv[]) {
     char parity = SERIAL_DEFAULT_PARITY;
     int stop_bits = SERIAL_DEFAULT_STOP_BITS;
     bool rs485_enabled = false;
+    bool serial_config_specified = false;
     int web_port = WEB_SERVER_PORT;
     std::string static_dir = "static";
     std::string log_file_path;
@@ -269,23 +270,30 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--serial") == 0 && i + 1 < argc) {
             serial_device = argv[++i];
             serial_specified = true;
+            serial_config_specified = true;
         } else if (strcmp(argv[i], "--baud") == 0 && i + 1 < argc) {
             baud_rate = atoi(argv[++i]);
+            serial_config_specified = true;
         } else if (strcmp(argv[i], "--parity") == 0 && i + 1 < argc) {
             const char* p = argv[++i];
-            if (strlen(p) != 1 || (p[0] != 'N' && p[0] != 'E' && p[0] != 'O')) {
+            if (strlen(p) != 1 || (p[0] != 'N' && p[0] != 'E' && p[0] != 'O' &&
+                                   p[0] != 'n' && p[0] != 'e' && p[0] != 'o')) {
                 fprintf(stderr, "Invalid parity: %s (must be N, E, or O)\n", p);
                 return 1;
             }
-            parity = p[0];
+            // Accept lowercase with toupper()
+            parity = toupper((unsigned char)p[0]);
+            serial_config_specified = true;
         } else if (strcmp(argv[i], "--stop-bits") == 0 && i + 1 < argc) {
             stop_bits = atoi(argv[++i]);
             if (stop_bits != 1 && stop_bits != 2) {
                 fprintf(stderr, "Invalid stop bits: %d (must be 1 or 2)\n", stop_bits);
                 return 1;
             }
+            serial_config_specified = true;
         } else if (strcmp(argv[i], "--rs485") == 0) {
             rs485_enabled = true;
+            serial_config_specified = true;
         } else {
             WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Unknown option: %s", argv[i]);
             WINDMI_LOG_INFO(LOG_TAG_MAIN, "Use --help for usage information");
@@ -350,6 +358,14 @@ int main(int argc, char* argv[]) {
             release_lock();
             return 1;
         }
+    }
+    
+    // Validate serial-specific options require --serial
+    if (serial_config_specified && !serial_specified) {
+        WINDMI_LOG_ERROR(LOG_TAG_MAIN,
+            "--baud, --parity, --stop-bits, and --rs485 require --serial to be specified");
+        release_lock();
+        return 1;
     }
 
     // Demo mode: reject --selftest, use simulated client
@@ -461,22 +477,34 @@ int main(int argc, char* argv[]) {
     if (!demo_mode) {
         WINDMI_LOG_INFO(LOG_TAG_MAIN, "Writing OFF mode via dedicated client...");
         bool off_written = false;
+        
         try {
-            windmi::ModbusClient shutdown_client(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
+            std::unique_ptr<windmi::IModbusClient> shutdown_client;
+            
+            if (!serial_device.empty()) {
+                // Serial mode: use ModbusSerialClient
+                shutdown_client = std::make_unique<windmi::ModbusSerialClient>(
+                    serial_device, baud_rate, parity, stop_bits, rs485_enabled, MODBUS_SLAVE_ID);
+                WINDMI_LOG_INFO(LOG_TAG_MAIN, "Shutdown: using serial client on %s", serial_device.c_str());
+            } else {
+                // TCP mode: use ModbusClient
+                shutdown_client = std::make_unique<windmi::ModbusClient>(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
+                WINDMI_LOG_INFO(LOG_TAG_MAIN, "Shutdown: using TCP client on %s:%d", modbus_ip, modbus_port);
+            }
 
             for (int attempt = 1; attempt <= 3; attempt++) {
-                if (shutdown_client.connect()) {
-                    shutdown_client.flushBuffer();
+                if (shutdown_client->connect()) {
+                    shutdown_client->flushBuffer();
 
                     try {
-                        shutdown_client.writeRegister(REG_RUNNING_MODE, 0);
+                        shutdown_client->writeRegister(REG_RUNNING_MODE, 0);
                         WINDMI_LOG_INFO(LOG_TAG_MAIN, "OFF write OK (attempt %d)", attempt);
                         off_written = true;
-                        shutdown_client.disconnect();
+                        shutdown_client->disconnect();
                         break;
                     } catch (const windmi::ModbusException&) {
                         WINDMI_LOG_ERROR(LOG_TAG_MAIN, "OFF write failed (attempt %d)", attempt);
-                        shutdown_client.disconnect();
+                        shutdown_client->disconnect();
                     }
                 } else {
                     WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Connect failed (attempt %d)", attempt);

@@ -191,7 +191,7 @@ static int modbus_read_write_registers_internal(modbus_client_t *client,
                                                  int16_t *values, 
                                                  uint16_t count,
                                                  bool single) {
-    if (!client || !client->connected || !values || count <= 0) {
+    if (!client || !client->connected || !values || count == 0) {
         return -1;
     }
     
@@ -348,7 +348,7 @@ int modbus_write_register(modbus_client_t *client, uint16_t address, uint16_t va
 
 int modbus_read_registers(modbus_client_t *client, uint16_t address,
                           int16_t *values, uint16_t count) {
-    if (!values || count <= 0) {
+    if (!values || count == 0) {
         return -1;
     }
     
