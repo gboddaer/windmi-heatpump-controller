@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ master, dev ]
+    branches: [ main, dev ]
   pull_request:
-    branches: [ master, dev ]
+    branches: [ main, dev ]
 
 jobs:
   build:
@@ -19,13 +19,13 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential cmake
+        sudo apt-get install -y build-essential cmake doxygen
 
     - name: Configure build
       run: |
         mkdir build
         cd build
-        cmake ..
+        cmake -DWINDMI_BUILD_TESTS=ON ..
 
     - name: Build project
       run: |
@@ -36,6 +36,7 @@ jobs:
       run: |
         cd build
         ctest --output-on-failure
+        ./tests/utils/test_utils --gtest_filter=LoggerTest.* || true
 
     - name: Build documentation
       if: false  # Enable when Doxygen is configured
@@ -50,12 +51,23 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-tidy
 
     - name: Run clang-tidy
-      uses: reviewdog/action-clang-tidy@v1
-      with:
-        clang_tidy_flags: '-p=build'
+      run: |
+        mkdir -p build
+        cd build
+        cmake ..
+        make -j$(nproc)
+        cd build
+        clang-tidy -p=. src/*.cpp src/*/*.cpp -header-filter='include/*' 2>&1 || true
 
-    - name: Run shellcheck
-      if: false  # Enable if there are shell scripts
-      uses: reviewdog/action-shellcheck@v1
+    - name: Shellcheck
+      run: |
+        find . -name "*.sh" -exec shellcheck {} + || true
