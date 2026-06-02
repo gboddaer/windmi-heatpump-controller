@@ -24,7 +24,13 @@ find_package(Threads REQUIRED)
 
 # Include Google Test
 if(WINDMI_BUILD_TESTS)
-    add_subdirectory(googletest)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG release-1.12.1
+    )
+    FetchContent_MakeAvailable(googletest)
+    enable_testing()
 endif()
 
 # Include mongoose
@@ -77,8 +83,6 @@ target_link_libraries(windmi-control PRIVATE
 
 # Unit tests
 if(WINDMI_BUILD_TESTS)
-    enable_testing()
-    
     add_subdirectory(tests/core)
     add_subdirectory(tests/modbus)
     add_subdirectory(tests/web)
