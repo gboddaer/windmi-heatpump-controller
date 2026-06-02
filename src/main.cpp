@@ -358,6 +358,11 @@ int main(int argc, char* argv[]) {
             release_lock();
             return 1;
         }
+        if (demo_mode) {
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "--serial is mutually exclusive with --demo");
+            release_lock();
+            return 1;
+        }
     }
     
     // Validate serial-specific options require --serial
