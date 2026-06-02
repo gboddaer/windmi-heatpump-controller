@@ -207,7 +207,7 @@ int main(int argc, char* argv[]) {
             printf("Options:\n");
             printf("  -i, --ip <address>  Modbus gateway IP (default: %s)\n", MODBUS_GATEWAY_IP);
             printf("  -p, --port <port>   Modbus gateway port (default: %d)\n", MODBUS_GATEWAY_PORT);
-            printf("  -w, --web <port>    Web server HTTP port (default: %d)\n", WEB_SERVER_PORT);
+            printf("  -w, --web <port>    Web server HTTP port (default: %d, demo: 10000)\n", WEB_SERVER_PORT);
             printf("  -t, --static-dir <dir>  Static files directory (default: static)\n");
             printf("  -l, --log-level <lvl>  Log level: TRACE,DEBUG,INFO,WARN,ERROR,FATAL (default: INFO)\n");
             printf("  -o, --log-file <path>  Log to file (in addition to console)\n");
@@ -310,6 +310,10 @@ int main(int argc, char* argv[]) {
         }
         modbus_client = std::make_unique<windmi::SimulatedModbusClient>();
         WINDMI_LOG_INFO(LOG_TAG_MAIN, "DEMO MODE: using simulated Windmi device, no Modbus socket will be opened");
+        // Use different default port for demo mode to avoid conflicts
+        if (web_port == WEB_SERVER_PORT) {
+            web_port = 10000;
+        }
     } else {
         modbus_client = std::make_unique<windmi::ModbusClient>(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
     }
