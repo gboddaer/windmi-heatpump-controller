@@ -1,10 +1,12 @@
-# Rotenso Windmi Heat Pump Controller
+# Windmi Heat Pump Controller
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0)
 [![C++ Standard](https://img.shields.io/badge/C%2B%2B-17-orange.svg)](https://en.cppreference.com/w/cpp/language/history)
 [![C Standard](https://img.shields.io/badge/C-99-blue.svg)](https://en.cppreference.com/w/c/language/history)
 
-Embedded web server for controlling Rotenso Windmi heat pumps via Modbus TCP.
+Embedded web server for controlling Windmi heat pumps via Modbus TCP.
+
+> **Disclaimer:** This is a hobby project not affiliated with, endorsed by, or connected to Rotenso or any of its affiliates. This software is provided "as-is" without any warranty. Users bear full responsibility for the use of this program. The author is not liable for any damages, losses, or incorrect operation resulting from the use of this software.
 
 ## Overview
 
@@ -377,7 +379,7 @@ This project is licensed under the GNU General Public License v2.0 - see the [LI
 
 ## Author
 
-Developed for Rotenso Windmi heat pump integration.
+This project was developed for Windmi heat pump integration.
 
 ---
 
