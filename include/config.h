@@ -41,6 +41,10 @@ extern "C" {
 #define MODBUS_MAX_RETRIES     3
 #define MODBUS_RECONNECT_INTERVAL_S 10
 
+// Serial Port Configuration
+#define SERIAL_DEFAULT_BAUD      9600
+#define SERIAL_DEFAULT_STOP_BITS 1
+
 // Running Mode Values for SETTING (register 0x002C - writable)
 // Only modes 0, 1, 2 should be SET on this register
 #define MODE_SET_OFF              0      // Off
