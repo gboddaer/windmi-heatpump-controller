@@ -14,17 +14,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        submodules: false
+        submodules: recursive
+        fetch-depth: 0
 
-    - name: Install CMake 3.28+
+    - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential
-        # Download and install CMake 3.28+
-        wget -q https://github.com/Kitware/CMake/releases/download/v3.28.0/cmake-3.28.0-linux-x86_64.tar.gz
-        sudo tar -xzf cmake-3.28.0-linux-x86_64.tar.gz -C /opt
-        sudo ln -sf /opt/cmake-3.28.0-linux-x86_64/bin/* /usr/local/bin/
-        cmake --version
+        sudo apt-get install -y build-essential cmake doxygen
 
     - name: Configure build
       run: |
@@ -57,7 +53,8 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        submodules: false
+        submodules: recursive
+        fetch-depth: 0
 
     - name: Install dependencies
       run: |
