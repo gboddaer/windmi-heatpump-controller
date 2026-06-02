@@ -82,7 +82,7 @@ TEST(ModbusSerialClientTest, ValidStopBits) {
 /**
  * Test constructor with RS-485 enabled
  */
-TEST(ModbusSerialClientTest, RSD85Enabled) {
+TEST(ModbusSerialClientTest, RS485Enabled) {
     EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'N', 1, true, 1));
 }
 
@@ -130,4 +130,49 @@ TEST(ModbusSerialClientTest, NonCopyable) {
     // Test compilation - these should not compile if copyable:
     // ModbusSerialClient client2 = client;
     // ModbusSerialClient client3(client);
+}
+
+// ============= C API Tests =============
+
+extern "C" {
+#include "modbus/modbus_serial_client.h"
+}
+
+/**
+ * Test C API: create and destroy serial client
+ */
+TEST(ModbusSerialClientTest, CClientCreateDestroy) {
+    modbus_serial_client_t *client = modbus_serial_client_create("/dev/ttyUSB0", 9600, 'N', 1, false, 1);
+    ASSERT_NE(nullptr, client);
+    EXPECT_FALSE(modbus_serial_client_is_connected(client));
+    modbus_serial_client_destroy(client);
+}
+
+/**
+ * Test C API: invalid baud rate returns NULL
+ */
+TEST(ModbusSerialClientTest, CClientInvalidBaud) {
+    EXPECT_EQ(nullptr, modbus_serial_client_create("/dev/ttyUSB0", 0, 'N', 1, false, 1));
+    EXPECT_EQ(nullptr, modbus_serial_client_create("/dev/ttyUSB0", -1, 'N', 1, false, 1));
+    EXPECT_EQ(nullptr, modbus_serial_client_create("/dev/ttyUSB0", 99999, 'N', 1, false, 1));
+    EXPECT_EQ(nullptr, modbus_serial_client_create("/dev/ttyUSB0", 4800, 'N', 1, false, 1));
+    EXPECT_EQ(nullptr, modbus_serial_client_create("/dev/ttyUSB0", 7200, 'N', 1, false, 1));
+}
+
+/**
+ * Test C API: invalid parity returns NULL
+ */
+TEST(ModbusSerialClientTest, CClientInvalidParity) {
+    EXPECT_EQ(nullptr, modbus_serial_client_create("/dev/ttyUSB0", 9600, 'X', 1, false, 1));
+    EXPECT_EQ(nullptr, modbus_serial_client_create("/dev/ttyUSB0", 9600, 'M', 1, false, 1));
+    EXPECT_EQ(nullptr, modbus_serial_client_create("/dev/ttyUSB0", 9600, 'S', 1, false, 1));
+}
+
+/**
+ * Test C API: invalid stop bits returns NULL
+ */
+TEST(ModbusSerialClientTest, CClientInvalidStopBits) {
+    EXPECT_EQ(nullptr, modbus_serial_client_create("/dev/ttyUSB0", 9600, 'N', 0, false, 1));
+    EXPECT_EQ(nullptr, modbus_serial_client_create("/dev/ttyUSB0", 9600, 'N', 3, false, 1));
+    EXPECT_EQ(nullptr, modbus_serial_client_create("/dev/ttyUSB0", 9600, 'N', -1, false, 1));
 }

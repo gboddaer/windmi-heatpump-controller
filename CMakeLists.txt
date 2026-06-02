@@ -91,6 +91,11 @@ if(WINDMI_BUILD_TESTS)
     
     # Add CRC16 to utils tests
     target_link_libraries(test_utils PRIVATE windmi_utils GTest::gtest_main)
+    
+    # Register all test executables
+    add_test(NAME test_modbus_client COMMAND test_modbus_client)
+    add_test(NAME test_modbus_rtu_frame COMMAND test_modbus_rtu_frame)
+    add_test(NAME test_modbus_serial_client COMMAND test_modbus_serial_client)
 endif()
 
 # Documentation

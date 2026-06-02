@@ -134,4 +134,11 @@ std::string ModbusSerialClient::getLastError() const {
     return "Client is not initialized";
 }
 
+void* ModbusSerialClient::getCClient() const {
+    if (impl_ && impl_->c_client) {
+        return impl_->c_client;
+    }
+    return nullptr;
+}
+
 } // namespace windmi

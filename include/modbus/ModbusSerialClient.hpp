@@ -69,6 +69,12 @@ public:
     void flushBuffer() override;
     std::string getLastError() const override;
 
+    /**
+     * @brief Get underlying C client pointer (for selftest)
+     * @return Pointer to C modbus_serial_client structure
+     */
+    void* getCClient() const;
+
 private:
     struct Impl;
     Impl* impl_;

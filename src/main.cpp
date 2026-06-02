@@ -27,6 +27,7 @@
 #include "core/ControlLoop.hpp"
 #include "core/StatusMonitor.hpp"
 #include "modbus/ModbusClient.hpp"
+#include "modbus/ModbusSerialClient.hpp"
 #include "modbus/SimulatedModbusClient.hpp"
 #include "utils/Logger.hpp"
 #include "utils/LogTags.hpp"
@@ -193,12 +194,20 @@ static void atexit_release_lock() {
 int main(int argc, char* argv[]) {
     const char* modbus_ip = MODBUS_GATEWAY_IP;
     int modbus_port = MODBUS_GATEWAY_PORT;
+    std::string serial_device;
+    int baud_rate = SERIAL_DEFAULT_BAUD;
+    char parity = SERIAL_DEFAULT_PARITY;
+    int stop_bits = SERIAL_DEFAULT_STOP_BITS;
+    bool rs485_enabled = false;
     int web_port = WEB_SERVER_PORT;
     std::string static_dir = "static";
     std::string log_file_path;
     bool run_selftest = false;
     bool demo_mode = false;
     bool force_lock = false;
+    bool ip_specified = false;
+    bool port_specified = false;
+    bool serial_specified = false;
 
     // Parse CLI arguments (long and short forms)
     for (int i = 1; i < argc; i++) {
@@ -214,12 +223,19 @@ int main(int argc, char* argv[]) {
             printf("  -f, --force          Force start even if lock is held by stale process\n");
             printf("  -s, --selftest       Run self-test and exit\n");
             printf("  -d, --demo           Run in demo mode with simulated Windmi device\n");
+            printf("  --serial <device>    Serial device for Modbus RTU (e.g., /dev/ttyUSB0)\n");
+            printf("  --baud <rate>        Baud rate (default: %d)\n", SERIAL_DEFAULT_BAUD);
+            printf("  --parity <N|E|O>     Parity: N(none), E(even), O(odd) (default: N)\n");
+            printf("  --stop-bits <1|2>    Stop bits: 1 or 2 (default: 1)\n");
+            printf("  --rs485              Enable RS-485 direction control\n");
             printf("  -h, --help           Show this help message\n");
             return 0;
         } else if ((strcmp(argv[i], "--ip") == 0 || strcmp(argv[i], "-i") == 0) && i + 1 < argc) {
             modbus_ip = argv[++i];
+            ip_specified = true;
         } else if ((strcmp(argv[i], "--port") == 0 || strcmp(argv[i], "-p") == 0) && i + 1 < argc) {
             modbus_port = atoi(argv[++i]);
+            port_specified = true;
         } else if ((strcmp(argv[i], "--web") == 0 || strcmp(argv[i], "-w") == 0) && i + 1 < argc) {
             web_port = atoi(argv[++i]);
         } else if ((strcmp(argv[i], "--static-dir") == 0 || strcmp(argv[i], "-t") == 0) && i + 1 < argc) {
@@ -250,6 +266,26 @@ int main(int argc, char* argv[]) {
             demo_mode = true;
         } else if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0) {
             force_lock = true;
+        } else if (strcmp(argv[i], "--serial") == 0 && i + 1 < argc) {
+            serial_device = argv[++i];
+            serial_specified = true;
+        } else if (strcmp(argv[i], "--baud") == 0 && i + 1 < argc) {
+            baud_rate = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--parity") == 0 && i + 1 < argc) {
+            const char* p = argv[++i];
+            if (strlen(p) != 1 || (p[0] != 'N' && p[0] != 'E' && p[0] != 'O')) {
+                fprintf(stderr, "Invalid parity: %s (must be N, E, or O)\n", p);
+                return 1;
+            }
+            parity = p[0];
+        } else if (strcmp(argv[i], "--stop-bits") == 0 && i + 1 < argc) {
+            stop_bits = atoi(argv[++i]);
+            if (stop_bits != 1 && stop_bits != 2) {
+                fprintf(stderr, "Invalid stop bits: %d (must be 1 or 2)\n", stop_bits);
+                return 1;
+            }
+        } else if (strcmp(argv[i], "--rs485") == 0) {
+            rs485_enabled = true;
         } else {
             WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Unknown option: %s", argv[i]);
             WINDMI_LOG_INFO(LOG_TAG_MAIN, "Use --help for usage information");
@@ -301,6 +337,21 @@ int main(int argc, char* argv[]) {
     // Create Modbus client (interface pointer for demo mode support)
     std::unique_ptr<windmi::IModbusClient> modbus_client;
 
+    // Validate CLI options: mutual exclusion between TCP/IP and serial
+    if (serial_specified) {
+        // Serial mode: --serial implies no --ip or --port
+        if (ip_specified || port_specified) {
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "--serial is mutually exclusive with --ip and --port");
+            release_lock();
+            return 1;
+        }
+        if (run_selftest) {
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "--selftest is not supported in serial mode");
+            release_lock();
+            return 1;
+        }
+    }
+
     // Demo mode: reject --selftest, use simulated client
     if (demo_mode) {
         if (run_selftest) {
@@ -314,7 +365,17 @@ int main(int argc, char* argv[]) {
         if (web_port == WEB_SERVER_PORT) {
             web_port = 10000;
         }
+    } else if (!serial_device.empty()) {
+        // Serial mode: use ModbusSerialClient
+        modbus_client = std::make_unique<windmi::ModbusSerialClient>(
+            serial_device, baud_rate, parity, stop_bits, rs485_enabled, MODBUS_SLAVE_ID);
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "Serial Modbus RTU: %s @ %d %c%d", 
+            serial_device.c_str(), baud_rate, parity, stop_bits);
+        if (rs485_enabled) {
+            WINDMI_LOG_INFO(LOG_TAG_MAIN, "RS-485 direction control enabled");
+        }
     } else {
+        // TCP mode: use ModbusClient
         modbus_client = std::make_unique<windmi::ModbusClient>(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
     }
 

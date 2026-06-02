@@ -18,10 +18,9 @@
 #include <sys/select.h>
 #include <sys/ioctl.h>
 #include <linux/serial.h>
+#include <termios.h>
 
-#define MODBUS_SERIAL_RECV_TIMEOUT_MS 2000
 #define MODBUS_SERIAL_WRITE_MAX_RETRIES 3
-#define MODBUS_SERIAL_RETRY_DELAY_MS 100
 
 // Inter-frame delay in microseconds (≥4ms for safety at 9600 baud)
 // This ensures compliance with Modbus RTU timing requirements
@@ -328,33 +327,20 @@ bool modbus_serial_client_is_connected(modbus_serial_client_t *client) {
 
 /**
  * Flush any pending data in the serial read buffer
- * Uses select() with zero timeout for non-blocking read
+ * Uses tcflush() to discard data received but not read
  */
 static int serial_flush_buffer(int fd) {
     if (fd < 0) return 0;
     
-    uint8_t dummy[128];
-    int flushed = 0;
-    
-    // Use select() with zero timeout to check for available data without blocking
-    while (1) {
-        fd_set fds;
-        struct timeval tv = {0, 0};  // Zero timeout = non-blocking
-        FD_ZERO(&fds);
-        FD_SET(fd, &fds);
-        
-        int ready = select(fd + 1, &fds, NULL, NULL, &tv);
-        if (ready <= 0) break;  // No data available or error
-        
-        ssize_t n = read(fd, dummy, sizeof(dummy));
-        if (n <= 0) break;
-        flushed += n;
+    // tcflush discards data received but not read
+    int rc = tcflush(fd, TCIFLUSH);
+    if (rc != 0) {
+        WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_MODBUS, "tcflush failed: %s", strerror(errno));
+        return 0;
     }
     
-    if (flushed > 0) {
-        WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_MODBUS, "Flushed %d bytes of stale data from serial port", flushed);
-    }
-    return flushed;
+    WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_MODBUS, "Flushed serial input buffer with tcflush");
+    return 0;
 }
 
 /**
@@ -418,7 +404,15 @@ static int serial_receive_exact(int fd, uint8_t *buffer, size_t expected_len, in
         tv.tv_sec = timeout_ms / 1000;
         tv.tv_usec = (timeout_ms % 1000) * 1000;
         
-        int ready = select(fd + 1, &fds, NULL, NULL, &tv);
+        int ready;
+        do {
+            ready = select(fd + 1, &fds, NULL, NULL, &tv);
+            if (ready < 0 && errno == EINTR) {
+                continue;  // Interrupted by signal, retry
+            }
+            break;
+        } while (1);
+        
         if (ready <= 0) {
             if (ready == 0) {
                 WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS,
@@ -429,12 +423,12 @@ static int serial_receive_exact(int fd, uint8_t *buffer, size_t expected_len, in
             return -1;
         }
         
-        ssize_t received = read(fd, buffer + total_received, expected_len - total_received);
+        ssize_t received;
+        do {
+            received = read(fd, buffer + total_received, expected_len - total_received);
+        } while (received < 0 && errno == EINTR);  // Retry on EINTR
         
         if (received < 0) {
-            if (errno == EINTR) {
-                continue;  // Interrupted, retry
-            }
             return -1;
         }
         
@@ -618,10 +612,10 @@ int modbus_serial_read_registers(modbus_serial_client_t *client, uint16_t addres
         return -1;
     }
     
-    // Step 4: Extract values
+    // Step 4: Extract values (Modbus is big-endian)
     for (uint16_t i = 0; i < count; i++) {
-        uint16_t raw_value = (uint16_t)data_and_crc[i * 2] |
-                            ((uint16_t)data_and_crc[i * 2 + 1] << 8);
+        uint16_t raw_value = ((uint16_t)data_and_crc[i * 2] << 8) |
+                            (uint16_t)data_and_crc[i * 2 + 1];
         values[i] = (int16_t)raw_value;
     }
     

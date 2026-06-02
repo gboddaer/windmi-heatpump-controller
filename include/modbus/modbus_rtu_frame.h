@@ -26,6 +26,7 @@ extern "C" {
  * @param slave_id Modbus slave ID (0-255)
  * @param address Starting register address (0-65535)
  * @param count Number of registers to read (1-125)
+ * @note Frame length is always 8 bytes for Modbus RTU read frames
  */
 void modbus_rtu_build_read_frame(uint8_t *frame, uint8_t slave_id, uint16_t address, uint16_t count);
 
@@ -38,6 +39,7 @@ void modbus_rtu_build_read_frame(uint8_t *frame, uint8_t slave_id, uint16_t addr
  * @param slave_id Modbus slave ID (0-255)
  * @param address Starting register address (0-65535)
  * @param value Value to write (0-65535)
+ * @note Frame length is always 8 bytes for Modbus RTU write frames
  */
 void modbus_rtu_build_write_frame(uint8_t *frame, uint8_t slave_id, uint16_t address, uint16_t value);
 
