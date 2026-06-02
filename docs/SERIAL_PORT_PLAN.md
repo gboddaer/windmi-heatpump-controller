@@ -202,30 +202,120 @@ Serial Options:
 
 ## Testing Strategy
 
-1. **Unit Tests**
-   ```cpp
-   TEST(ModbusSerialClient, CalculateCRC16) {
-       // Test CRC calculation with known values
-   }
-   
-   TEST(ModbusSerialClient, FrameEncoding) {
-       // Test Modbus RTU frame format
-   }
-   ```
+### 3.1 Unit Tests (test_modbus_serial.cpp)
+Location: `tests/test_modbus_serial.cpp`
 
-2. **Integration Tests**
-   - Use USB-to-Serial adapter connected to real Windmi
-   - Or use serial loopback with socat
-   ```bash
-   # Create loopback for testing
-   socat -d -d pty,raw,echo=0 pty,raw,echo=0
-   ```
+```cpp
+// CRC16 Calculation Tests
+TEST(ModbusSerialClientTest, CRC16_Calculator) {
+    // Test with known Modbus RTU CRC values
+    // Example: 0x01 0x03 0x00 0x00 0x00 0x01 should have CRC 0x68 0x3B
+    uint8_t frame[] = {0x01, 0x03, 0x00, 0x00, 0x00, 0x01};
+    uint16_t crc = ModbusSerialClient::calculateCRC16(frame, 6);
+    EXPECT_EQ(crc, 0x3B68);  // Low byte first: 0x68, 0x3B
+}
 
-3. **Manual Testing**
-   ```bash
-   # Connect to real device
-   ./windmi-control --device /dev/ttyUSB0 --baud 9600
-   ```
+TEST(ModbusSerialClientTest, CRC16_EmptyBuffer) {
+    uint8_t frame[] = {};
+    uint16_t crc = ModbusSerialClient::calculateCRC16(frame, 0);
+    EXPECT_EQ(crc, 0xFFFF);  // Initial CRC value
+}
+
+TEST(ModbusSerialClientTest, CRC16_SingleByte) {
+    uint8_t frame[] = {0x01};
+    uint16_t crc = ModbusSerialClient::calculateCRC16(frame, 1);
+    // Verify CRC is calculated correctly
+}
+
+// Frame Encoding Tests
+TEST(ModbusSerialClientTest, EncodeReadRegister) {
+    // Encode: Slave 1, Read Register 0x02BF (DHW Target)
+    uint8_t frame[8];
+    size_t len = ModbusSerialClient::encodeReadRegister(1, 0x02BF, frame);
+    EXPECT_EQ(len, 6);
+    // Verify frame: [0x01][0x03][0x02][0xBF][CRC_H][CRC_L]
+}
+
+TEST(ModbusSerialClientTest, EncodeWriteRegister) {
+    // Encode: Slave 1, Write 0x01 to Register 0x02BF
+    uint8_t frame[8];
+    size_t len = ModbusSerialClient::encodeWriteRegister(1, 0x02BF, 0x01, frame);
+    EXPECT_EQ(len, 8);
+    // Verify frame format
+}
+
+// Frame Decoding Tests
+TEST(ModbusSerialClientTest, DecodeReadResponse) {
+    // Simulate valid response: [0x01][0x03][0x02][0x00][0x2E][CRC_H][CRC_L]
+    uint8_t frame[] = {0x01, 0x03, 0x02, 0x00, 0x2E, 0x9F, 0x3D};
+    uint16_t value;
+    bool ok = ModbusSerialClient::decodeReadResponse(frame, 7, value);
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(value, 0x002E);
+}
+
+TEST(ModbusSerialClientTest, DecodeResponse_InvalidCRC) {
+    // Response with corrupted CRC
+    uint8_t frame[] = {0x01, 0x03, 0x02, 0x00, 0x2E, 0x00, 0x00};
+    uint16_t value;
+    bool ok = ModbusSerialClient::decodeReadResponse(frame, 7, value);
+    EXPECT_FALSE(ok);
+}
+
+TEST(ModbusSerialClientTest, DecodeErrorResponse) {
+    // Modbus error response: [0x01][0x83][0x02][CRC_H][CRC_L]
+    uint8_t frame[] = {0x01, 0x83, 0x02, 0x5E, 0x49};
+    bool ok = ModbusSerialClient::isErrorResponse(frame, 5);
+    EXPECT_TRUE(ok);
+}
+
+// Error Handling Tests
+TEST(ModbusSerialClientTest, TimeoutDetection) {
+    // Test that timeout exceptions are thrown correctly
+    // when no response is received within expected time
+}
+
+TEST(ModbusSerialClientTest, InvalidSlaveAddress) {
+    // Test handling of invalid slave address (0 or > 247)
+}
+
+TEST(ModbusSerialClientTest, RegisterAddressBounds) {
+    // Test handling of register addresses outside valid range
+}
+```
+
+### 3.2 Integration Tests
+```bash
+# Create loopback for testing
+socat -d -d pty,raw,echo=0 pty,raw,echo=0
+
+# Or connect to real device
+./windmi-control --device /dev/ttyUSB0 --baud 9600
+```
+
+### 3.3 Test Scenarios
+1. Valid serial connection
+2. Invalid device path
+3. Invalid baud rate
+4. Connection timeout
+5. CRC mismatch (corrupted data)
+6. Timeout waiting for response
+7. Partial/buffer overflow responses
+8. Multiple sequential requests
+9. Rapid consecutive requests
+10. Error recovery after CRC failure
+
+### 3.4 Manual Testing
+```bash
+# Connect to real device
+./windmi-control --device /dev/ttyUSB0 --baud 9600
+
+# Test different baud rates
+./windmi-control --device /dev/ttyUSB0 --baud 19200
+
+# Test with parity
+./windmi-control --device /dev/ttyUSB0 --baud 9600 --parity even
+```
 
 ## Rollout Strategy
 
