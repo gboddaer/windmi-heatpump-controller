@@ -24,13 +24,19 @@ find_package(Threads REQUIRED)
 
 # Include Google Test
 if(WINDMI_BUILD_TESTS)
-    include(FetchContent)
-    FetchContent_Declare(
-        googletest
+    include(ExternalProject)
+    ExternalProject_Add(googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
         GIT_TAG release-1.12.1
+        SOURCE_DIR "${CMAKE_BINARY_DIR}/googletest-src"
+        BINARY_DIR "${CMAKE_BINARY_DIR}/googletest-build"
+        INSTALL_COMMAND ""
+        TEST_COMMAND ""
     )
-    FetchContent_MakeAvailable(googletest)
+    ExternalProject_Get_property(googletest source_dir binary_dir)
+    include_directories(${source_dir}/googletest/include)
+    include_directories(${source_dir}/googlemock/include)
+    link_directories(${binary_dir}/googlemock/gtest)
     enable_testing()
 endif()
 
