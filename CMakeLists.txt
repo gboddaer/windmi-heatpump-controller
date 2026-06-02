@@ -34,12 +34,23 @@ if(WINDMI_BUILD_TESTS)
     enable_testing()
 endif()
 
-# Include mongoose
-include_directories(mongoose)
+# Download mongoose source during configure
+include(ExternalProject)
+ExternalProject_Add(mongoose
+    GIT_REPOSITORY https://github.com/cesanta/mongoose.git
+    GIT_TAG 7.17
+    SOURCE_DIR "${CMAKE_BINARY_DIR}/mongoose-src"
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    TEST_COMMAND ""
+)
 
-# Add mongoose library
-add_library(mongoose STATIC mongoose/mongoose.c)
-target_include_directories(mongoose PUBLIC mongoose)
+# Add mongoose library from downloaded source
+add_library(mongoose STATIC
+    ${CMAKE_BINARY_DIR}/mongoose-src/mongoose.c
+)
+target_include_directories(mongoose PUBLIC ${CMAKE_BINARY_DIR}/mongoose-src)
 target_compile_definitions(mongoose PRIVATE MG_ENABLE_LINES=1)
 
 # Utils library must be defined first (Logger dependency used by all other libraries)
