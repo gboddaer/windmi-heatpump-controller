@@ -748,6 +748,15 @@ TEST(ModbusSerialClientTest, CClientInvalidParity) {
         "/dev/ttyUSB0", 9600, 'X', 1, false, 1);
     EXPECT_EQ(c, nullptr);  // Should fail at creation
 }
+
+TEST(ModbusSerialClientTest, CClientInvalidStopBits) {
+    modbus_serial_client_t *c = modbus_serial_client_create(
+        "/dev/ttyUSB0", 9600, 'N', 0, false, 1);
+    EXPECT_EQ(c, nullptr);  // Should fail at creation
+    modbus_serial_client_t *c2 = modbus_serial_client_create(
+        "/dev/ttyUSB0", 9600, 'N', 3, false, 1);
+    EXPECT_EQ(c2, nullptr);
+}
 ```
 
 #### 7.3 Integration Testing with socat + pymodbus
