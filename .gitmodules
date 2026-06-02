@@ -1,0 +1,4 @@
+[submodule "mongoose"]
+	path = mongoose
+	url = https://github.com/cesanta/mongoose.git
+	branch = master
