@@ -80,6 +80,7 @@ Connection (mutually exclusive):
 Serial options (only with --serial):
       --baud <rate>        Baud rate (default: 9600)
       --parity <type>      Parity: none, even, odd (default: none)
+      --stop-bits <bits>    Stop bits: 1 or 2 (default: 1; Windmi default is 8N1)
       --rs485               Enable kernel RS485 transceiver mode (TIOCSRS485)
 
 Other options:
@@ -97,7 +98,7 @@ Other options:
 
 **Why not `--device`?** — Avoid confusion with block device terminology. `--serial` is unambiguous and self-documenting.
 
-**Why no `--data-bits` / `--stop-bits`?** — Modbus RTU uses 8 data bits always. Stop bits are determined automatically by parity setting (see Phase 4). Exposing these adds complexity with no practical benefit.
+**Why no `--data-bits`?** — Windmi serial communication uses 8 data bits. `--stop-bits` is exposed because the Windmi default is confirmed as **9600 8N1**, while strict Modbus RTU no-parity setups are often 8N2.
 
 ### Usage Examples
 
@@ -111,7 +112,7 @@ Other options:
 # Serial via USB-to-RS485 adapter (new)
 ./windmi-control --serial /dev/ttyUSB0
 ./windmi-control --serial /dev/ttyUSB0 --baud 19200
-./windmi-control --serial /dev/ttyACM0 --parity even
+./windmi-control --serial /dev/ttyACM0 --parity even --stop-bits 1
 ./windmi-control --serial /dev/ttyUSB0 --rs485  # adapter needs kernel RS485
 
 # Demo mode (unchanged)
@@ -172,10 +173,14 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
    - Location: `include/modbus_serial_client.h` (same directory as `modbus_client.h`)
    - Mirrors the `modbus_client.h` API shape:
      ```c
+     #include <stdint.h>
+     #include <stdbool.h>
+
      typedef struct modbus_serial_client modbus_serial_client_t;
 
      modbus_serial_client_t *modbus_serial_client_create(
-         const char *device, int baud, char parity, uint8_t slave_id);
+         const char *device, int baud, char parity, int stop_bits,
+         bool rs485_enabled, uint8_t slave_id);
      void modbus_serial_client_destroy(modbus_serial_client_t *client);
      bool modbus_serial_client_connect(modbus_serial_client_t *client);
      void modbus_serial_client_disconnect(modbus_serial_client_t *client);
@@ -198,6 +203,7 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
    - Serial transport (detailed in Phase 4):
      - `open(device, O_RDWR | O_NOCTTY)` — blocking mode
      - Configure termios: baud, parity, stop bits, raw mode
+     - Apply `TIOCSRS485` only when `rs485_enabled == true`
      - `write()` / `read()` with `select()` + timeout
      - `tcdrain()` after write + inter-frame delay before next frame
      - `tcflush()` for buffer flush instead of the socket `select()`+`recv()` approach
@@ -215,7 +221,8 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
    class ModbusSerialClient : public IModbusClient {
    public:
        ModbusSerialClient(const std::string& device, int baud,
-                          char parity, uint8_t slave_id);
+                          char parity, int stop_bits,
+                          bool rs485_enabled, uint8_t slave_id);
        ~ModbusSerialClient();
 
        // IModbusClient interface
@@ -251,16 +258,17 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
 ### Phase 4: Serial Port Implementation Details
 **Goal:** Correct Modbus RTU serial communication
 
-1. **Termios Configuration — Parity and Stop Bits**
+1. **Termios Configuration — Windmi Default 9600 8N1**
 
-   Per the Modbus over Serial Line Specification V1.02, the standard configurations are:
-   - **8E1**: 8 data bits, even parity, 1 stop bit (recommended standard)
-   - **8N2**: 8 data bits, no parity, 2 stop bits (compatible alternative)
-   - **8O1**: 8 data bits, odd parity, 1 stop bit (rare)
+   The Windmi default serial configuration is confirmed as **9600 8N1**:
+   - 9600 baud
+   - 8 data bits
+   - no parity
+   - 1 stop bit
 
-   The Windmi device likely uses 8N1 (common in Chinese appliances), which is technically non-standard but works in practice. The default of `--parity none` with 2 stop bits matches the Modbus spec; users can switch to `--parity even` with 1 stop bit if their device requires it.
+   This differs from strict Modbus RTU's common no-parity recommendation of 8N2, but 8N1 is the required default for this device. The plan therefore exposes `--stop-bits` so users can select 8N2 if needed for other compatible devices.
 
-   **Stop bits must be set based on parity:**
+   **Stop bits are explicit, not inferred from parity:**
    ```c
    struct termios tty;
    tcgetattr(fd, &tty);
@@ -274,14 +282,17 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
    tty.c_cflag &= ~CSIZE;
    tty.c_cflag |= CS8;
 
-   // Parity and stop bits (per Modbus over Serial Line spec V1.02)
-   tty.c_cflag &= ~(PARENB | PARODD | CSTOPB);
+   // Parity
+   tty.c_cflag &= ~(PARENB | PARODD);
    if (parity == 'E') {
-       tty.c_cflag |= PARENB;            // Even parity, 1 stop bit (8E1)
+       tty.c_cflag |= PARENB;            // Even parity
    } else if (parity == 'O') {
-       tty.c_cflag |= PARENB | PARODD;   // Odd parity, 1 stop bit (8O1)
-   } else {
-       // No parity → MUST use 2 stop bits per Modbus spec (8N2)
+       tty.c_cflag |= PARENB | PARODD;   // Odd parity
+   }
+
+   // Stop bits: Windmi default is 1 stop bit (8N1)
+   tty.c_cflag &= ~CSTOPB;
+   if (stop_bits == 2) {
        tty.c_cflag |= CSTOPB;
    }
 
@@ -327,10 +338,10 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
    ```c
    // After writing a frame:
    tcdrain(fd);  // Wait for all output to be transmitted
-   // Before writing the next frame or reading response:
+   // Before sending the next request frame:
    usleep(inter_frame_delay_us);  // ≥ 4000us (4ms)
    ```
-   Note: no delay needed before the *first* read after a write — only between consecutive writes. The `tcdrain()` ensures the write is complete before reading the response.
+   Note: do **not** delay between writing a request and reading its response. The silent interval is required before sending the next request frame. `tcdrain()` ensures the request has been physically transmitted before the response read begins.
 
 4. **RS485 Half-Duplex Considerations**
 
@@ -362,12 +373,24 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
    Same `select()` + timeout pattern as TCP, but using `write()`/`read()` instead of `send()`/`recv()`:
 
    ```c
-   // Send a complete RTU frame
+   // Send a complete RTU frame, handling EINTR and partial writes
    static int serial_send_frame(modbus_serial_client_t *client,
                                  const uint8_t *frame, size_t len) {
        tcflush(client->fd, TCIFLUSH);  // Flush stale input before sending
-       ssize_t sent = write(client->fd, frame, len);
-       return (sent == (ssize_t)len) ? 0 : -1;
+
+       size_t total = 0;
+       while (total < len) {
+           ssize_t sent = write(client->fd, frame + total, len - total);
+           if (sent < 0) {
+               if (errno == EINTR) continue;
+               return -1;
+           }
+           if (sent == 0) return -1;
+           total += (size_t)sent;
+       }
+
+       if (tcdrain(client->fd) != 0) return -1;
+       return 0;
    }
 
    // Receive exactly N bytes with timeout (same logic as TCP receive_exact)
@@ -387,9 +410,13 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
 
            ssize_t received = read(client->fd, buffer + total,
                                     expected_len - total);
-           if (received <= 0) return -1;
+           if (received < 0) {
+               if (errno == EINTR) continue;
+               return -1;
+           }
+           if (received == 0) return -1;
 
-           total += received;
+           total += (size_t)received;
        }
        return 0;
    }
@@ -439,15 +466,21 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
      std::string serial_device;   // empty = no serial
      int serial_baud = SERIAL_DEFAULT_BAUD;
      char serial_parity = SERIAL_DEFAULT_PARITY;
+     int serial_stop_bits = SERIAL_DEFAULT_STOP_BITS;
      bool serial_rs485 = false;
+
+     bool ip_specified = false;
+     bool port_specified = false;
      ```
-   - Add `--serial <device>`, `--baud <rate>`, `--parity <type>`, `--rs485` option parsing
+   - Add `--serial <device>`, `--baud <rate>`, `--parity <type>`, `--stop-bits <bits>`, `--rs485` option parsing
+   - Track `ip_specified` and `port_specified`; defaults alone must not make TCP and serial look mutually exclusive.
    - Validation rules:
-     - `--serial` is mutually exclusive with `-i`/`-p` and with `-d`/`--demo`
-     - `--baud`, `--parity`, `--rs485` require `--serial`
+     - `--serial` is mutually exclusive with explicitly provided `-i`/`--ip` or `-p`/`--port`, and with `-d`/`--demo`
+     - `--baud`, `--parity`, `--stop-bits`, `--rs485` require `--serial`
      - Valid baud rates: 9600, 19200, 38400, 57600, 115200
      - Valid parity values: `none`, `even`, `odd`
-     - Invalid baud or parity → print error and exit
+     - Valid stop bits: `1`, `2`
+     - Invalid baud, parity, or stop bits → print error and exit
    - Print an error and exit on mutual exclusion violations
 
 2. **Update Modbus client instantiation** (`src/main.cpp`)
@@ -458,7 +491,8 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
          modbus_client = std::make_unique<windmi::SimulatedModbusClient>();
      } else if (!serial_device.empty()) {
          modbus_client = std::make_unique<windmi::ModbusSerialClient>(
-             serial_device, serial_baud, serial_parity, MODBUS_SLAVE_ID);
+             serial_device, serial_baud, serial_parity, serial_stop_bits,
+             serial_rs485, MODBUS_SLAVE_ID);
      } else {
          modbus_client = std::make_unique<windmi::ModbusClient>(
              modbus_ip, modbus_port, MODBUS_SLAVE_ID);
@@ -471,7 +505,8 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
      ```cpp
      if (!serial_device.empty()) {
          windmi::ModbusSerialClient shutdown_client(
-             serial_device, serial_baud, serial_parity, MODBUS_SLAVE_ID);
+             serial_device, serial_baud, serial_parity, serial_stop_bits,
+             serial_rs485, MODBUS_SLAVE_ID);
          // same retry logic using shutdown_client
      } else {
          windmi::ModbusClient shutdown_client(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
@@ -479,17 +514,18 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
      }
      ```
 
-4. **Refactor selftest to use `IModbusClient`** (`src/selftest.c` → `src/selftest.cpp` or new wrapper)
+4. **Refactor selftest to use `IModbusClient`** (`src/selftest.c` → `src/selftest.cpp`, move header to `include/selftest.hpp`)
 
    The current selftest calls `modbus_read_register()` / `modbus_write_register()` directly on the C struct. This ties selftest to the TCP C client. Three options:
 
    **Option A (recommended): Rewrite selftest to use `IModbusClient` C++ interface**
-   - Rewrite `selftest.c` as `src/selftest.cpp`
+   - Rewrite `src/selftest.c` as `src/selftest.cpp`
+   - Move `src/selftest.h` to `include/selftest.hpp`
    - Replace `modbus_client_t*` parameter with `windmi::IModbusClient*`
    - Replace `modbus_read_register(c, addr, &val)` → `client->readRegister(addr)`
    - Replace `modbus_write_register(c, addr, val)` → `client->writeRegister(addr, val)`
    - This makes selftest work with **any** `IModbusClient` implementation
-   - Update `selftest.h` → `selftest.hpp` (or keep C-linkage wrapper)
+   - Update `main.cpp` include from `#include "selftest.h"` to `#include "selftest.hpp"`
    - Update `main.cpp` selftest call: remove `getCClient()` cast, pass `modbus_client.get()` directly
    - Remove `ModbusClient::getCClient()` (no longer needed)
 
@@ -503,17 +539,18 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
 5. **Update logging** (`src/main.cpp`)
    - Add serial-specific log messages:
      ```
-     [INFO ] Serial device: /dev/ttyUSB0 @ 9600 baud, 8N2
+     [INFO ] Serial device: /dev/ttyUSB0 @ 9600 baud, 8N1
      [ERROR] Failed to open serial device /dev/ttyUSB0: No such file or directory
      [ERROR] Failed to open serial device /dev/ttyUSB0: Permission denied
             (are you in the 'dialout' group? sudo usermod -aG dialout $USER)
      [ERROR] Invalid baud rate: 12345 (supported: 9600, 19200, 38400, 57600, 115200)
+     [ERROR] Invalid stop bits: 3 (supported: 1 or 2)
      [ERROR] --serial and --demo are mutually exclusive
      [ERROR] --baud requires --serial
      ```
 
 6. **Update help text** (`src/main.cpp`)
-   - Add `--serial`, `--baud`, `--parity`, `--rs485` to the `--help` output
+   - Add `--serial`, `--baud`, `--parity`, `--stop-bits`, `--rs485` to the `--help` output
 
 ### Phase 6: Build System Changes
 
@@ -521,18 +558,23 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
    - Add `ModbusSerialClient.cpp` to `windmi_modbus` sources
    - Add `${CMAKE_CURRENT_SOURCE_DIR}/../../src/modbus_serial_client.c` to `windmi_modbus` sources
    - Add `${CMAKE_CURRENT_SOURCE_DIR}/../../src/modbus_rtu_frame.c` to `windmi_modbus` sources
-   - Add `${CMAKE_CURRENT_SOURCE_DIR}/../../src/selftest.cpp` (if rewritten per Phase 5 Option A)
+   - Do **not** add selftest here; selftest has its own top-level `windmi_selftest` target
 
-2. **Update `tests/modbus/CMakeLists.txt`**
+2. **Update top-level `CMakeLists.txt` for selftest**
+   - Current target builds `src/selftest.c`
+   - Change it to build `src/selftest.cpp`
+   - Link it against `windmi_modbus` and `windmi_utils` as before
+
+3. **Update `tests/modbus/CMakeLists.txt`**
    - Add `test_modbus_serial` executable and test registration
    - Add `test_modbus_rtu_frame` if frame function tests are extracted
 
-3. **Header installation** (if `CMakeLists.txt` has `install(DIRECTORY include/)`)
-   - New headers `include/modbus_serial_client.h`, `include/modbus_rtu_frame.h`, `include/modbus/ModbusSerialClient.hpp` will be automatically included
+4. **Header installation** (if `CMakeLists.txt` has `install(DIRECTORY include/)`)
+   - New headers `include/modbus_serial_client.h`, `include/modbus_rtu_frame.h`, `include/modbus/ModbusSerialClient.hpp`, and `include/selftest.hpp` will be automatically included
 
-4. **Build verification:** ensure both `-DWINDMI_BUILD_TESTS=ON` and `OFF` compile cleanly
+5. **Build verification:** ensure both `-DWINDMI_BUILD_TESTS=ON` and `OFF` compile cleanly
 
-5. **CI update** (`.github/workflows/ci.yml`)
+6. **CI update** (`.github/workflows/ci.yml`)
    - Serial port tests that require real hardware should be marked `DISABLED_` or use a CI-only guard (e.g., `if (getenv("WINDMI_CI_HARDWARE"))`) to avoid failures in GitHub Actions where no serial ports exist
 
 ### Phase 7: Testing
@@ -594,6 +636,7 @@ Location: `tests/modbus/test_modbus_serial.cpp`
 
 ```cpp
 #include <gtest/gtest.h>
+#include <unistd.h>
 #include "modbus/ModbusSerialClient.hpp"
 extern "C" {
 #include "modbus_serial_client.h"
@@ -603,19 +646,19 @@ using namespace windmi;
 
 // Construction and lifecycle (no real hardware needed)
 TEST(ModbusSerialClientTest, CreateAndDestroy) {
-    ModbusSerialClient client("/dev/ttyUSB0", 9600, 'N', 1);
+    ModbusSerialClient client("/dev/ttyUSB0", 9600, 'N', 1, false, 1);
     EXPECT_FALSE(client.isConnected());
 }
 
 TEST(ModbusSerialClientTest, CreateInvalidDevice) {
     // Should not crash, but connect() will fail
-    ModbusSerialClient client("/dev/nonexistent", 9600, 'N', 1);
+    ModbusSerialClient client("/dev/nonexistent", 9600, 'N', 1, false, 1);
     EXPECT_FALSE(client.connect());
 }
 
 TEST(ModbusSerialClientTest, DestructorDisconnects) {
     {
-        ModbusSerialClient client("/dev/ttyUSB0", 9600, 'N', 1);
+        ModbusSerialClient client("/dev/ttyUSB0", 9600, 'N', 1, false, 1);
         // Should not crash on scope exit
     }
 }
@@ -623,41 +666,52 @@ TEST(ModbusSerialClientTest, DestructorDisconnects) {
 // Baud rate validation (constructor should throw on invalid)
 TEST(ModbusSerialClientTest, ValidBaudRates) {
     // None of these should throw at construction
-    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600,   'N', 1));
-    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 19200,  'N', 1));
-    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 38400,  'N', 1));
-    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 57600,  'N', 1));
-    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 115200, 'N', 1));
+    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600,   'N', 1, false, 1));
+    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 19200,  'N', 1, false, 1));
+    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 38400,  'N', 1, false, 1));
+    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 57600,  'N', 1, false, 1));
+    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 115200, 'N', 1, false, 1));
 }
 
 TEST(ModbusSerialClientTest, InvalidBaudRate) {
-    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 1200,   'N', 1), ModbusException);
-    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 99999,  'N', 1), ModbusException);
-    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 0,      'N', 1), ModbusException);
-    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", -1,     'N', 1), ModbusException);
+    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 1200,   'N', 1, false, 1), ModbusException);
+    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 99999,  'N', 1, false, 1), ModbusException);
+    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 0,      'N', 1, false, 1), ModbusException);
+    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", -1,     'N', 1, false, 1), ModbusException);
+}
+
+// Stop-bit validation
+TEST(ModbusSerialClientTest, ValidStopBits) {
+    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'N', 1, false, 1));
+    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'N', 2, false, 1));
+}
+
+TEST(ModbusSerialClientTest, InvalidStopBits) {
+    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'N', 0, false, 1), ModbusException);
+    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'N', 3, false, 1), ModbusException);
 }
 
 // Parity validation
 TEST(ModbusSerialClientTest, ValidParityValues) {
-    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'N', 1));
-    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'E', 1));
-    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'O', 1));
+    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'N', 1, false, 1));
+    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'E', 1, false, 1));
+    EXPECT_NO_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'O', 1, false, 1));
 }
 
 TEST(ModbusSerialClientTest, InvalidParityValue) {
-    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'X', 1), ModbusException);
-    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'M', 1), ModbusException);
-    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'S', 1), ModbusException);
+    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'X', 1, false, 1), ModbusException);
+    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'M', 1, false, 1), ModbusException);
+    EXPECT_THROW(ModbusSerialClient("/dev/ttyUSB0", 9600, 'S', 1, false, 1), ModbusException);
 }
 
 // Operations when not connected
 TEST(ModbusSerialClientTest, ReadWhenNotConnected) {
-    ModbusSerialClient client("/dev/ttyUSB0", 9600, 'N', 1);
+    ModbusSerialClient client("/dev/ttyUSB0", 9600, 'N', 1, false, 1);
     EXPECT_THROW(client.readRegister(0x0001), ModbusException);
 }
 
 TEST(ModbusSerialClientTest, WriteWhenNotConnected) {
-    ModbusSerialClient client("/dev/ttyUSB0", 9600, 'N', 1);
+    ModbusSerialClient client("/dev/ttyUSB0", 9600, 'N', 1, false, 1);
     EXPECT_THROW(client.writeRegister(0x002C, 0), ModbusException);
 }
 
@@ -669,7 +723,7 @@ TEST(ModbusSerialClientTest, PermissionDenied) {
     if (access("/dev/ttyS0", F_OK) != 0) {
         GTEST_SKIP() << "/dev/ttyS0 not available on this system";
     }
-    ModbusSerialClient client("/dev/ttyS0", 9600, 'N', 1);
+    ModbusSerialClient client("/dev/ttyS0", 9600, 'N', 1, false, 1);
     // Connect may fail with permission denied — verify it doesn't crash
     client.connect();  // ignore result
 }
@@ -677,7 +731,7 @@ TEST(ModbusSerialClientTest, PermissionDenied) {
 // C Client API
 TEST(ModbusSerialClientTest, CClientCreateDestroy) {
     modbus_serial_client_t *c = modbus_serial_client_create(
-        "/dev/ttyUSB0", 9600, 'N', 1);
+        "/dev/ttyUSB0", 9600, 'N', 1, false, 1);
     ASSERT_NE(c, nullptr);
     EXPECT_FALSE(modbus_serial_client_is_connected(c));
     modbus_serial_client_destroy(c);
@@ -685,13 +739,13 @@ TEST(ModbusSerialClientTest, CClientCreateDestroy) {
 
 TEST(ModbusSerialClientTest, CClientInvalidBaud) {
     modbus_serial_client_t *c = modbus_serial_client_create(
-        "/dev/ttyUSB0", 12345, 'N', 1);
+        "/dev/ttyUSB0", 12345, 'N', 1, false, 1);
     EXPECT_EQ(c, nullptr);  // Should fail at creation
 }
 
 TEST(ModbusSerialClientTest, CClientInvalidParity) {
     modbus_serial_client_t *c = modbus_serial_client_create(
-        "/dev/ttyUSB0", 9600, 'X', 1);
+        "/dev/ttyUSB0", 9600, 'X', 1, false, 1);
     EXPECT_EQ(c, nullptr);  // Should fail at creation
 }
 ```
@@ -705,7 +759,8 @@ The socat loopback by itself doesn't work — there's no Modbus slave on the oth
 socat -d -d pty,raw,echo=0,link=/tmp/ttyV0 pty,raw,echo=0,link=/tmp/ttyV1 &
 
 # Step 2: Start a mock Modbus RTU slave on /tmp/ttyV1
-# Requires pymodbus >= 3.0
+# Example script; pymodbus APIs vary by version.
+# Pin a known version during implementation and adjust imports if needed.
 python3 -m pip install "pymodbus>=3.0"
 python3 << 'EOF' &
 from pymodbus.server import StartSerialServer
@@ -721,7 +776,8 @@ slave.setValues(3, 0x002D, [2])     # Running status = Heating
 slave.setValues(3, 0x0191, [450])   # Heating target = 45.0°C
 slave.setValues(3, 0x0194, [460])   # DHW target = 46.0°C
 
-context = ModbusServerContext(slaves={1: slave})
+# Controller default MODBUS_SLAVE_ID is 11
+context = ModbusServerContext(slaves={11: slave})
 StartSerialServer(context=context, port='/tmp/ttyV1', baudrate=9600)
 EOF
 
@@ -756,8 +812,8 @@ curl -X POST http://localhost:10000/api/set-mode -d '{"mode": 2}'
 | 17 | `--serial` with `--demo` | Error: "mutually exclusive options" |
 | 18 | RS485 adapter auto-direction (no `--rs485`) | Works without `TIOCSRS485` ioctl |
 | 19 | RS485 adapter with `--rs485` flag | `TIOCSRS485` ioctl called |
-| 20 | 8N2 stop bits (parity=none) | `CSTOPB` set in termios |
-| 21 | 8E1 stop bits (parity=even) | `CSTOPB` cleared in termios |
+| 20 | Windmi default 8N1 (`--parity none --stop-bits 1`) | `CSTOPB` cleared in termios |
+| 21 | Optional 8N2 (`--parity none --stop-bits 2`) | `CSTOPB` set in termios |
 | 22 | Device re-enumerates as different path | `connect()` fails, logged clearly |
 
 #### 7.5 Hardware Test Matrix
@@ -786,20 +842,20 @@ curl -X POST http://localhost:10000/api/set-mode -d '{"mode": 2}'
 ### Modified Files
 | File | Changes |
 |------|---------|
-| `include/config.h` | Add `SERIAL_DEFAULT_BAUD 9600`, `SERIAL_DEFAULT_PARITY 'N'`, `MODBUS_SERIAL_TIMEOUT_MS 2000` |
+| `include/config.h` | Add `SERIAL_DEFAULT_BAUD 9600`, `SERIAL_DEFAULT_PARITY 'N'`, `SERIAL_DEFAULT_STOP_BITS 1`, `MODBUS_SERIAL_TIMEOUT_MS 2000` |
 | `src/modbus_client.c` | Remove `static` `build_read_frame` / `build_write_frame`, call `modbus_rtu_build_*` from shared header |
-| `src/main.cpp` | Add `--serial`, `--baud`, `--parity`, `--rs485` CLI; update client creation; update shutdown client; update selftest to use `IModbusClient*` |
+| `src/main.cpp` | Add `--serial`, `--baud`, `--parity`, `--stop-bits`, `--rs485` CLI; update client creation; update shutdown client; update selftest to use `IModbusClient*` |
 | `src/selftest.c` → `src/selftest.cpp` | Rewrite to use `windmi::IModbusClient*` instead of `modbus_client_t*`; eliminate `getCClient()` dependency |
-| `include/selftest.h` → `include/selftest.hpp` | Update header to match C++ rewrite |
+| `src/selftest.h` → `include/selftest.hpp` | Move selftest header out of `src/`; project headers belong in `include/` |
 | `src/modbus/CMakeLists.txt` | Add new source files to `windmi_modbus` |
 | `tests/modbus/CMakeLists.txt` | Add `test_modbus_serial`, `test_modbus_rtu_frame` |
-| `CMakeLists.txt` | Update selftest library if it changes from C to C++ |
+| `CMakeLists.txt` | Update the existing top-level `windmi_selftest` target from `src/selftest.c` to `src/selftest.cpp`; do not add selftest to `windmi_modbus` |
 | `README.md` | Add "Serial Port Connection" section |
 
 ### Removed
 | File | Reason |
 |------|--------|
-| (nothing) | `ModbusClient::getCClient()` can be removed after selftest refactor, but leaving it is harmless |
+| (none as standalone deletion) | `src/selftest.h` is moved to `include/selftest.hpp`; `ModbusClient::getCClient()` can be removed after selftest refactor, but leaving it is harmless |
 
 ## Design Decisions
 
@@ -822,9 +878,9 @@ curl -X POST http://localhost:10000/api/set-mode -d '{"mode": 2}'
    - Decision: Use blocking `open()` with `select()` for timeouts (same pattern as TCP client)
    - Reason: Simpler than non-blocking I/O with poll. `O_NONBLOCK` adds complexity with no benefit for a single-device point-to-point serial link.
 
-6. **Stop bits determined by parity (not user-configurable)**
-   - Decision: parity=none → 2 stop bits (8N2), parity=even/odd → 1 stop bit (8E1/8O1)
-   - Reason: Per Modbus over Serial Line Specification V1.02. Always using 1 stop bit is technically non-compliant for 8N configurations.
+6. **Stop bits explicit, default 1 for Windmi 8N1**
+   - Decision: expose `--stop-bits` with default `1`
+   - Reason: Windmi default is confirmed as 9600 8N1. Strict Modbus RTU no-parity setups may use 8N2, so `--stop-bits 2` remains available for compatible devices.
 
 7. **RS485 direction: default off, explicit `--rs485` flag**
    - Decision: Do NOT call `TIOCSRS485` by default. Only when `--rs485` is specified.
@@ -846,7 +902,7 @@ curl -X POST http://localhost:10000/api/set-mode -d '{"mode": 2}'
 - **Modbus ASCII mode** — RTU is the standard for RS485; ASCII is rarely used
 - **Multi-drop bus (multiple slaves)** — Windmi uses a single slave; multi-drop adds addressing complexity
 - **Serial port hotplug monitoring (udev/inotify)** — ControlLoop's reconnect logic handles this; the user must restart with a new device path if USB re-enumerates differently
-- **Configurable data bits / stop bits** — Determined automatically by parity per Modbus spec
+- **Configurable data bits** — Windmi uses 8 data bits; `--stop-bits` is included because Windmi defaults to 8N1 while some Modbus RTU devices use 8N2
 - **libmodbus dependency** — Writing our own client keeps dependencies minimal and matches the existing architecture
 - **Modbus RTU over TCP/UDP bridge mode** — the existing TCP client already provides this via Waveshare gateway
 
