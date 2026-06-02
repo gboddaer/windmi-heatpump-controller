@@ -272,11 +272,12 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         status.heating_target = last_heating_target_;
     }
 
-    // Read DHW priority (0x02BF)
+    // Read DHW priority (0x02BF) - only for status reporting, not for control
     try {
         raw = modbus_client_->readRegister(REG_DHW_PRIORITY);
         status.dhw_priority = (raw != 0);
-        current_priority_ = status.dhw_priority ? PriorityMode::Dhw : PriorityMode::Heating;
+        // Note: current_priority_ is managed by applyControlLogic(), not read from device
+        // to prevent external changes from overriding the desired working mode priority
     } catch (const ModbusException&) {
         ok = false;
     }
@@ -475,6 +476,8 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
     }
 
     // Enforce priority based on working mode
+    WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "Enforcing priority for working_mode=%d, current_priority=%s",
+           desired_working_mode_, current_priority_ == PriorityMode::Dhw ? "Dhw" : "Heating");
     switch (desired_working_mode_) {
         case 1:  // DHW-only: must have DHW priority
         case 3:  // DHW+Heating: must have DHW priority
@@ -483,6 +486,7 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
                 try {
                     modbus_client_->writeRegister(REG_DHW_PRIORITY, 1);
                     current_priority_ = PriorityMode::Dhw;
+                    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Priority now set to DHW");
                 } catch (const ModbusException& e) {
                     WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set DHW priority: %s", e.what());
                 }
@@ -494,6 +498,7 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
                 try {
                     modbus_client_->writeRegister(REG_DHW_PRIORITY, 0);
                     current_priority_ = PriorityMode::Heating;
+                    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Priority now set to Heating");
                 } catch (const ModbusException& e) {
                     WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to clear DHW priority: %s", e.what());
                 }
