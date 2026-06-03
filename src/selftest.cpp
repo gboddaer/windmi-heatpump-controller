@@ -23,6 +23,15 @@ static inline float raw_to_temp(int16_t raw) {
 
 SelftestReport selftest_run(IModbusClient* client) {
     SelftestReport report;
+
+    // Guard against null client
+    if (!client) {
+        report.total = 6;
+        report.failed = 6;
+        report.all_critical_passed = false;
+        return report;
+    }
+
     // Zero-initialize the results array
     for (int i = 0; i < 6; i++) {
         report.results[i] = SelftestResult{};
@@ -150,7 +159,7 @@ SelftestReport selftest_run(IModbusClient* client) {
         r.read_ok = true;
         r.write_ok = false;
         r.verify_ok = false;
-        r.read_value = 0;
+        r.read_value = -1; // Will be set after successful read
 
         // Save original heating setpoint
         int16_t original_heating = 0;
@@ -164,6 +173,8 @@ SelftestReport selftest_run(IModbusClient* client) {
         }
 
         if (read_original_ok) {
+            r.read_value = original_heating;  // Store original value for report
+
             // Write test value (45 C)
             int16_t test_value = temp_to_raw(SELFTEST_DHW_TARGET_TEMP);
             try {
