@@ -94,8 +94,4 @@ std::string ModbusClient::getLastError() const {
     return "No error";
 }
 
-void* ModbusClient::getCClient() const {
-    return impl_ ? impl_->client : nullptr;
-}
-
 } // namespace windmi
