@@ -1,4 +1,5 @@
 #include "modbus_client.h"
+#include "modbus/modbus_rtu_frame.h"
 #include "crc16.h"
 #include "utils/LogTags.hpp"
 #include "utils/LoggerC.h"
@@ -37,40 +38,8 @@ struct modbus_client {
     bool connected;
 };
 
-#ifdef TEST_BUILD
-#define STATIC_FOR_TEST
-#else
-#define STATIC_FOR_TEST static
-#endif
-
 static uint16_t bytes_to_uint16(const uint8_t *bytes) {
     return (uint16_t)((bytes[0] << 8) | bytes[1]);
-}
-
-STATIC_FOR_TEST void build_read_frame(uint8_t *frame, uint8_t slave_id, uint16_t address, uint16_t count) {
-    frame[0] = slave_id;
-    frame[1] = 0x03;  // Read Holding Registers
-    frame[2] = (address >> 8) & 0xFF;
-    frame[3] = address & 0xFF;
-    frame[4] = (count >> 8) & 0xFF;
-    frame[5] = count & 0xFF;
-    
-    uint16_t crc = crc16(frame, 6);
-    frame[6] = crc & 0xFF;
-    frame[7] = (crc >> 8) & 0xFF;
-}
-
-STATIC_FOR_TEST void build_write_frame(uint8_t *frame, uint8_t slave_id, uint16_t address, uint16_t value) {
-    frame[0] = slave_id;
-    frame[1] = 0x06;  // Write Single Register
-    frame[2] = (address >> 8) & 0xFF;
-    frame[3] = address & 0xFF;
-    frame[4] = (value >> 8) & 0xFF;
-    frame[5] = value & 0xFF;
-    
-    uint16_t crc = crc16(frame, 6);
-    frame[6] = crc & 0xFF;
-    frame[7] = (crc >> 8) & 0xFF;
 }
 
 modbus_client_t *modbus_client_create(const char *ip, int port, uint8_t slave_id) {
@@ -222,13 +191,13 @@ static int modbus_read_write_registers_internal(modbus_client_t *client,
                                                  int16_t *values, 
                                                  uint16_t count,
                                                  bool single) {
-    if (!client || !client->connected || !values || count <= 0) {
+    if (!client || !client->connected || !values || count == 0) {
         return -1;
     }
     
     uint8_t frame[MODBUS_MAX_FRAME];
     uint16_t read_count = single ? 1 : count;
-    build_read_frame(frame, client->slave_id, address, read_count);
+    modbus_rtu_build_read_frame(frame, client->slave_id, address, read_count);
     
     if (send_frame(client, frame, 8) != 0) {
         client->connected = false;
@@ -321,7 +290,7 @@ int modbus_write_register(modbus_client_t *client, uint16_t address, uint16_t va
         }
         
         uint8_t frame[MODBUS_MAX_FRAME];
-        build_write_frame(frame, client->slave_id, address, value);
+        modbus_rtu_build_write_frame(frame, client->slave_id, address, value);
         
         if (send_frame(client, frame, 8) != 0) {
             continue; // Retry on send failure
@@ -379,7 +348,7 @@ int modbus_write_register(modbus_client_t *client, uint16_t address, uint16_t va
 
 int modbus_read_registers(modbus_client_t *client, uint16_t address,
                           int16_t *values, uint16_t count) {
-    if (!values || count <= 0) {
+    if (!values || count == 0) {
         return -1;
     }
     

@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: windmi-controller
 Upstream-Contact: maintainer@example.com
-Source: https://github.com/windmi/windmi-controller
+Source: https://github.com/gboddaer/windmi-heatpump-controller
 
 Files: *
 Copyright: 2026 Windmi Controller Contributors
@@ -22,5 +22,5 @@ License: GPL-2.0
  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  GNU General Public License for more details.
  .
- A copy of the GNU General Public License version 2 is included in
- the file LICENSE.
+ On Debian systems, the complete text of the GNU General Public License
+ version 2 can be found in /usr/share/common-licenses/GPL-2.
