@@ -56,13 +56,12 @@ add_subdirectory(src/modbus)
 # Web library sources
 add_subdirectory(src/web)
 
-# Self-test library (C code)
+# Self-test library (C++ code using IModbusClient interface)
 add_library(windmi_selftest STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/selftest.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/selftest.cpp
 )
 target_include_directories(windmi_selftest PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_link_libraries(windmi_selftest PUBLIC windmi_modbus windmi_utils)
 

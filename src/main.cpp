@@ -34,9 +34,7 @@
 #include "web/WebServer.hpp"
 #include "crc16.h"
 
-extern "C" {
-#include "selftest.h"
-}
+#include "selftest.hpp"
 
 // config.h defines (MODBUS_SLAVE_ID etc.) are in the extern "C" block
 // inside config.h itself, so they are available here.
@@ -353,11 +351,6 @@ int main(int argc, char* argv[]) {
             release_lock();
             return 1;
         }
-        if (run_selftest) {
-            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "--selftest is not supported in serial mode");
-            release_lock();
-            return 1;
-        }
         if (demo_mode) {
             WINDMI_LOG_ERROR(LOG_TAG_MAIN, "--serial is mutually exclusive with --demo");
             release_lock();
@@ -373,13 +366,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Demo mode: reject --selftest, use simulated client
+    // Demo mode: use simulated client
     if (demo_mode) {
-        if (run_selftest) {
-            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "--selftest is not supported in demo mode");
-            release_lock();
-            return 1;
-        }
         modbus_client = std::make_unique<windmi::SimulatedModbusClient>();
         WINDMI_LOG_INFO(LOG_TAG_MAIN, "DEMO MODE: using simulated Windmi device, no Modbus socket will be opened");
         // Use different default port for demo mode to avoid conflicts
@@ -400,29 +388,26 @@ int main(int argc, char* argv[]) {
         modbus_client = std::make_unique<windmi::ModbusClient>(modbus_ip, modbus_port, MODBUS_SLAVE_ID);
     }
 
-    // Self-test mode: run self-test and exit (only for non-demo)
+    // Self-test mode: run self-test and exit (works with any transport)
     if (run_selftest) {
-        // Cast is safe here: we only reach here in non-demo mode
-        auto* real_client = dynamic_cast<windmi::ModbusClient*>(modbus_client.get());
-        if (!real_client || !real_client->connect()) {
-            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to connect to Modbus for self-test");
+        if (!modbus_client->connect()) {
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to connect for self-test");
             release_lock();
             return 1;
         }
 
-        // Get C client for selftest_run (which takes modbus_client_t*)
-        modbus_client_t* c_client = static_cast<modbus_client_t*>(real_client->getCClient());
-        selftest_report_t selftest_result = selftest_run(c_client);
-        selftest_print_report(&selftest_result);
-        WINDMI_LOG_INFO(LOG_TAG_SELFTEST, "%d/%d registers passed", selftest_result.passed, selftest_result.total);
-        if (selftest_result.all_critical_passed) {
+        windmi::SelftestReport report = windmi::selftest_run(modbus_client.get());
+        windmi::selftest_print_report(report);
+        WINDMI_LOG_INFO(LOG_TAG_SELFTEST, "%d/%d registers passed", report.passed, report.total);
+        if (report.all_critical_passed) {
             WINDMI_LOG_INFO(LOG_TAG_SELFTEST, "Self-test PASSED");
         } else {
             WINDMI_LOG_WARN(LOG_TAG_SELFTEST, "Self-test FAILED");
         }
-        real_client->disconnect();
+
+        modbus_client->disconnect();
         release_lock();
-        return selftest_result.all_critical_passed ? 0 : 1;
+        return report.all_critical_passed ? 0 : 1;
     }
 
     // Connect to Modbus gateway (no-op for simulated client)
