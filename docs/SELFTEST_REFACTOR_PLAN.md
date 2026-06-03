@@ -23,8 +23,8 @@
 | Modify | `include/modbus/ModbusSerialClient.hpp` | Remove `getCClient()` declaration (lines 73-76) |
 | Modify | `src/modbus/ModbusSerialClient.cpp` | Remove `getCClient()` implementation (lines 138-144) |
 | Modify | `tests/modbus/test_modbus_client.cpp` | Remove `GetCClient` test (lines 40-43) |
-| Delete | `src/selftest.h` | Replaced by `include/selftest.hpp` |
-| Delete | `src/selftest.c` | Replaced by `src/selftest.cpp` |
+| Keep | `src/selftest.h` | Legacy C selftest header used by the legacy `Makefile` path |
+| Keep | `src/selftest.c` | Legacy C selftest implementation used by the legacy `Makefile` path |
 
 ---
 
@@ -364,15 +364,16 @@ void selftest_print_report(const SelftestReport& report) {
 } // namespace windmi
 ```
 
-- [ ] **Step 2: Build and verify it compiles**
+- [ ] **Step 2: Compile the new file directly to verify it is self-contained**
+
+`selftest.cpp` is not part of the CMake build until Task 3, so use a direct compile check here:
 
 ```bash
 cd /home/gbo/develop/wpomp
-rm -rf build && cmake -S . -B build -DWINDMI_BUILD_TESTS=ON 2>&1 | tail -5
-cmake --build build -j4 2>&1 | tail -5
+c++ -std=c++17 -Wall -Wextra -Werror -Iinclude -c src/selftest.cpp -o /tmp/selftest.o
 ```
 
-Expected: Build succeeds (selftest.cpp compiles, links into `windmi_selftest`, `windmi-control` links)
+Expected: Command exits with code 0.
 
 - [ ] **Step 3: Commit**
 
@@ -628,73 +629,51 @@ git commit -m "refactor: Remove getCClient() from ModbusClient and ModbusSerialC
 
 ---
 
-### Task 6: Delete old C selftest files
+### Task 6: Preserve legacy C selftest path
 
 **Files:**
-- Delete: `src/selftest.h`
-- Delete: `src/selftest.c`
+- Keep: `src/selftest.h`
+- Keep: `src/selftest.c`
+- Keep: `src/main.c`
+- Keep: `src/control_loop.c`
+- Keep: `src/control_loop.h`
 
-- [ ] **Step 1: Delete the files**
+The repository still advertises the legacy `Makefile` path in `README.md`, and `Makefile` currently compiles `src/main.c`, `src/control_loop.c`, and `src/selftest.c`. Do **not** delete those files as part of this refactor. This task verifies that the CMake/C++ path no longer depends on `getCClient()`, while the legacy C path remains available for follow-up cleanup if desired.
+
+- [ ] **Step 1: Verify CMake uses the new C++ selftest**
 
 ```bash
-git rm src/selftest.h src/selftest.c
+grep -n 'selftest' CMakeLists.txt
 ```
 
-- [ ] **Step 2: Build and verify**
+Expected: Shows `src/selftest.cpp` in the `windmi_selftest` target and does not show `src/selftest.c`.
+
+- [ ] **Step 2: Verify legacy Makefile still references C files**
 
 ```bash
-rm -rf build && cmake -S . -B build -DWINDMI_BUILD_TESTS=ON \
-    -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" \
-    -DCMAKE_CXX_FLAGS="-Wall -Wextra -Werror" 2>&1 | tail -3
-cmake --build build -j4 2>&1 | tail -5
-cd build && ctest --output-on-failure
+grep -n 'main\.c\|control_loop\.c\|selftest\.c' Makefile
 ```
 
-Expected: Clean build with all warnings-as-errors. All 6 test suites pass. No references to `selftest.h` or `selftest.c` remain.
+Expected: Shows the legacy C sources. This is intentional for now.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Verify no C++ code includes the old C selftest header**
 
 ```bash
-git commit -m "refactor: Remove old C selftest files (replaced by C++ versions)"
+grep -rn '#include.*"selftest\.h"' src include tests --include='*.cpp' --include='*.hpp'
+```
+
+Expected: No matches.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A
+git commit -m "chore: Preserve legacy C selftest while CMake uses C++ selftest"
 ```
 
 ---
 
-### Task 7: Clean up stale references
-
-**Files:**
-- Delete: `src/main.c` (legacy C main, not compiled)
-- Delete: `src/control_loop.c` (legacy C control loop, not compiled)
-- Delete: `src/control_loop.h` (legacy C header, not compiled)
-
-These are dead code from the pre-conversion C codebase that also `#include "selftest.h"`. They're not compiled or linked, but removing them eliminates confusion about which files are active.
-
-- [ ] **Step 1: Verify they're not in the build**
-
-```bash
-grep -rn 'main\.c\|control_loop\.c\|control_loop\.h' CMakeLists.txt
-```
-
-Expected: No matches (they're not compiled).
-
-- [ ] **Step 2: Verify no other references**
-
-```bash
-grep -rn '#include.*control_loop\.h\|#include.*"selftest\.h"' src/ include/ tests/ --include='*.cpp' --include='*.hpp' --include='*.h'
-```
-
-Expected: No matches (the only user was `src/main.cpp`, which we changed in Task 4).
-
-- [ ] **Step 3: Delete stale files**
-
-```bash
-git rm src/main.c src/control_loop.c src/control_loop.h
-git commit -m "chore: Remove legacy C files (main.c, control_loop.c/h)"
-```
-
----
-
-### Task 8: Verify end-to-end
+### Task 7: Verify end-to-end
 
 - [ ] **Step 1: Full clean build with warnings-as-errors**
 
@@ -734,15 +713,23 @@ grep -rn 'getCClient' src/ include/ tests/
 
 Expected: No matches.
 
-- [ ] **Step 5: Verify `selftest.h` and `selftest.c` no longer exist**
+- [ ] **Step 5: Verify legacy C selftest files still exist for Makefile compatibility**
 
 ```bash
-ls src/selftest.h src/selftest.c 2>&1
+ls src/selftest.h src/selftest.c
 ```
 
-Expected: "No such file or directory" for both.
+Expected: Both files exist.
 
-- [ ] **Step 6: Final commit**
+- [ ] **Step 6: Verify C++ path uses the new header only**
+
+```bash
+grep -rn '#include.*"selftest\.h"' src include tests --include='*.cpp' --include='*.hpp'
+```
+
+Expected: No matches.
+
+- [ ] **Step 7: Final commit**
 
 ```bash
 git add -A
@@ -756,8 +743,8 @@ git commit -m "feat: Selftest refactor complete — IModbusClient interface, no 
 - [x] **Spec coverage**: Every requirement from the original plan is implemented
 - [x] **Placeholder scan**: No TBD, TODO, or "implement later" — all code is complete
 - [x] **Type consistency**: `SelftestReport` and `SelftestResult` in `selftest.hpp` match usage in `selftest.cpp` and `main.cpp`
-- [x] **No orphan files**: `selftest.h` and `selftest.c` are deleted in Task 6
-- [x] **No orphan references**: stale `src/main.c`, `src/control_loop.c/h` removed in Task 7
+- [x] **Legacy compatibility**: `selftest.h`, `selftest.c`, `src/main.c`, and `src/control_loop.c/h` are preserved for the legacy Makefile path
+- [x] **No C++ orphan references**: active C++ files include `selftest.hpp`, not legacy `selftest.h`
 - [x] **CMake consistency**: `windmi_selftest` source updated from `.c` to `.cpp` in Task 3
 - [x] **Connect/disconnect**: Selftest manages its own connect/disconnect in Task 4, matching original behavior
 - [x] **Demo mode**: Selftest works with `SimulatedModbusClient` (throws `ModbusException` on unknown registers — same as existing behavior)
