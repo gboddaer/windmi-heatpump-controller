@@ -2,9 +2,9 @@ Source: windmi-controller
 Section: utils
 Priority: optional
 Maintainer: Windmi Controller Maintainer <maintainer@example.com>
-Build-Depends: cmake (>= 3.16), g++ (>= 10), libmongoose-dev | mongoose, debhelper-compat (= 12)
+Build-Depends: debhelper-compat (= 12), cmake (>= 3.16), g++ (>= 10)
 Standards-Version: 4.6.0
-Homepage: https://github.com/windmi/windmi-controller
+Homepage: https://github.com/gboddaer/windmi-heatpump-controller
 Rules-Requires-Root: no
 
 Package: windmi-controller
