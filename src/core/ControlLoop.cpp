@@ -339,28 +339,6 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         }
     }
 
-    // Calculate COP using water flow and delta-T (only if we have valid data)
-    // COP = heat_output / electrical_input
-    // heat_output = flow × 1000/3600 × 4186 × (T_leaving - T_entering)
-    // where flow is in m³/h, T in °C, result in Watts
-    status.heat_output_w = 0.0f;
-    status.cop = 0.0f;
-    status.cop_valid = false;
-
-    if (status.water_flow > 0.01f && status.power_valid &&
-        status.leaving_water_temp > 0.0f && status.entering_water_temp > -50.0f) {
-        float delta_t = status.leaving_water_temp - status.entering_water_temp;
-        if (delta_t > 0.1f) {
-            // flow_m3h / 3600 = m³/s → × 1000 = kg/s, × 4186 J/(kg·K) = W/K
-            float flow_kg_s = (status.water_flow * 1000.0f) / 3600.0f;
-            status.heat_output_w = flow_kg_s * 4186.0f * delta_t;
-            if (status.ac_power_w > 0.0f) {
-                status.cop = status.heat_output_w / status.ac_power_w;
-                status.cop_valid = true;
-            }
-        }
-    }
-
     // Read diagnostic registers (non-critical — failures don't affect ok flag)
     try {
         raw = modbus_client_->readRegister(REG_UNIT_CAPACITY);
@@ -409,6 +387,28 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         status.pump_runtime_h = raw;
     } catch (const ModbusException&) {
         status.pump_runtime_h = 0;
+    }
+
+    // Calculate COP using water flow and delta-T after reading water_flow.
+    // COP = heat_output / electrical_input
+    // heat_output = flow × 1000/3600 × 4186 × (T_leaving - T_entering)
+    // where flow is in m³/h, T in °C, result in Watts
+    status.heat_output_w = 0.0f;
+    status.cop = 0.0f;
+    status.cop_valid = false;
+
+    if (status.water_flow > 0.01f && status.power_valid &&
+        status.leaving_water_temp > 0.0f && status.entering_water_temp > -50.0f) {
+        float delta_t = status.leaving_water_temp - status.entering_water_temp;
+        if (delta_t > 0.1f) {
+            // flow_m3h / 3600 = m³/s → × 1000 = kg/s, × 4186 J/(kg·K) = W/K
+            float flow_kg_s = (status.water_flow * 1000.0f) / 3600.0f;
+            status.heat_output_w = flow_kg_s * 4186.0f * delta_t;
+            if (status.ac_power_w > 0.0f) {
+                status.cop = status.heat_output_w / status.ac_power_w;
+                status.cop_valid = true;
+            }
+        }
     }
 
     status.device_online = ok;

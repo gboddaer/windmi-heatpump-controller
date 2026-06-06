@@ -6,9 +6,57 @@
 #include <gtest/gtest.h>
 #include "core/ControlLoop.hpp"
 #include "core/StatusMonitor.hpp"
+#include "modbus/IModbusClient.hpp"
 #include "config.h"
 
+#include <chrono>
+#include <map>
+#include <thread>
+
 using namespace windmi;
+
+namespace {
+
+class FakeModbusClient : public IModbusClient {
+public:
+    explicit FakeModbusClient(std::map<uint16_t, int16_t> registers)
+        : registers_(std::move(registers)) {}
+
+    bool connect() override { connected_ = true; return true; }
+    void disconnect() override { connected_ = false; }
+    bool isConnected() const override { return connected_; }
+
+    int16_t readRegister(uint16_t address) override {
+        auto it = registers_.find(address);
+        if (it == registers_.end()) {
+            throw ModbusException("register not configured");
+        }
+        return it->second;
+    }
+
+    void writeRegister(uint16_t address, uint16_t value) override {
+        registers_[address] = static_cast<int16_t>(value);
+    }
+
+    void flushBuffer() override {}
+    std::string getLastError() const override { return {}; }
+
+private:
+    bool connected_ = true;
+    std::map<uint16_t, int16_t> registers_;
+};
+
+bool waitForLatest(StatusQueue& queue, StatusSnapshot& snapshot) {
+    for (int i = 0; i < 50; ++i) {
+        if (queue.latest(snapshot)) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+}
+
+} // namespace
 
 // ---- StatusSnapshot tests ----
 
@@ -117,7 +165,7 @@ TEST(ConfigRegisterTest, ControlLoopConfig) {
 TEST(ConfigRegisterTest, DiagnosticRegisters) {
     EXPECT_EQ(REG_UNIT_CAPACITY, 0x1006);
     EXPECT_EQ(REG_DEVICE_TYPE, REG_UNIT_CAPACITY);  // Backwards compatible alias
-    EXPECT_EQ(REG_COMPRESSOR_FREQ, 0x0040);
+    EXPECT_EQ(REG_COMPRESSOR_FREQ, 0x0017);
     EXPECT_EQ(REG_WATER_FLOW, 0x102A);
     EXPECT_EQ(REG_ACTUAL_CAPACITY_OUTPUT, 0x1004);
     EXPECT_EQ(REG_ODU_INPUT_STATUS, 0x101F);
@@ -217,6 +265,47 @@ TEST(ControlLoopTest, KickDoesNotCrash) {
     ControlLoop loop;
     // Kick without start should not crash
     loop.kick();
+}
+
+TEST(ControlLoopTest, CalculatesCopAfterReadingWaterFlow) {
+    FakeModbusClient client({
+        {REG_OUTDOOR_TEMP, 100},
+        {REG_INDOOR_TEMP, 210},
+        {REG_ENTERING_WATER_TEMP, 300},
+        {REG_LEAVING_WATER_TEMP, 350},
+        {REG_DHW_TANK_TEMP, 450},
+        {REG_RUNNING_MODE, MODE_SET_HEAT_DHW},
+        {REG_RUNNING_STATUS, MODE_STATUS_HEAT},
+        {REG_DHW_TARGET, 460},
+        {REG_HEATING_TARGET, 400},
+        {REG_DHW_PRIORITY, 1},
+        {REG_AC_CURRENT, 5},      // actual 10 A
+        {REG_DC_CURRENT, 3},
+        {REG_AC_VOLTAGE, 230},    // actual 230 V
+        {REG_DC_VOLTAGE, 24},
+        {REG_UNIT_CAPACITY, 8},
+        {REG_COMPRESSOR_FREQ, 42},
+        {REG_WATER_FLOW, 120},    // 1.20 m³/h
+        {REG_ACTUAL_CAPACITY_OUTPUT, 50},
+        {REG_ODU_INPUT_STATUS, 0},
+        {REG_COMPRESSOR_RUNTIME, 123},
+        {REG_PUMP_RUNTIME, 456},
+    });
+    CmdQueue cmd_queue;
+    StatusQueue status_queue;
+    ControlLoop loop;
+
+    ASSERT_TRUE(loop.start(&client, &cmd_queue, &status_queue));
+
+    StatusSnapshot snap{};
+    ASSERT_TRUE(waitForLatest(status_queue, snap));
+    loop.stop();
+
+    EXPECT_FLOAT_EQ(snap.water_flow, 1.2f);
+    EXPECT_TRUE(snap.power_valid);
+    EXPECT_TRUE(snap.cop_valid);
+    EXPECT_NEAR(snap.heat_output_w, 6976.7f, 1.0f);
+    EXPECT_NEAR(snap.cop, 3.37f, 0.02f);
 }
 
 // ---- Power scaling tests ----

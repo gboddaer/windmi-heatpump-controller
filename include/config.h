@@ -95,7 +95,7 @@ extern "C" {
 // documents 0x1006 as "Capacity of the unit" with values 4/6/8/10/12/14/16 = kW.
 // REG_DEVICE_TYPE is kept as alias for backwards compatibility.
 #define REG_DEVICE_TYPE           REG_UNIT_CAPACITY  // Alias: same register, old name
-#define REG_COMPRESSOR_FREQ       0x0040  // R  - Actual compressor frequency (1 Hz)
+#define REG_COMPRESSOR_FREQ       0x0017  // R  - Actual compressor frequency (1 Hz)
 #define REG_WATER_FLOW            0x102A  // R  - Water flow feedback (m3/h × 100)
 #define REG_ACTUAL_CAPACITY_OUTPUT 0x1004  // R  - Actual capacity output
 #define REG_ODU_INPUT_STATUS      0x101F  // R  - Outdoor unit input status (bit flags)

@@ -28,6 +28,7 @@ typedef struct {
     float outdoor_temp;
     float indoor_temp;
     float leaving_water_temp;
+    float entering_water_temp;
     float dhw_tank_temp;
     float dhw_target;
     float heating_target;
@@ -43,7 +44,19 @@ typedef struct {
     float dc_voltage;      // DC voltage in Volts (raw / 2)
     float ac_power_va;     // AC apparent power in VA (ac_voltage * ac_current)
     float ac_power_w;      // AC real power in Watts (estimated: VA * power_factor)
-    bool power_valid;      // True if at least one power register read succeeded
+    bool power_valid;      // True if both AC current and AC voltage were read
+    // Diagnostic registers
+    float compressor_freq;
+    float water_flow;
+    int unit_capacity_kw;
+    int actual_capacity_output;
+    int odu_input_status;
+    int compressor_runtime_h;
+    int pump_runtime_h;
+    // COP estimation
+    float heat_output_w;
+    float cop;
+    bool cop_valid;
     // Working mode (0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating)
     int working_mode;
 } status_snapshot_t;

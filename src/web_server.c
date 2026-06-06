@@ -56,7 +56,7 @@ static void api_status_handler(struct mg_connection *c) {
         g_last_status = snapshot;
     }
 
-    char response[2048];
+    char response[4096];
     snprintf(response, sizeof(response),
         "{\"dhwTemperature\":%.1f,"
         "\"dhwTarget\":%.1f,"
@@ -64,6 +64,7 @@ static void api_status_handler(struct mg_connection *c) {
         "\"heatingTarget\":%.1f,"
         "\"outdoorTemperature\":%.1f,"
         "\"leavingWaterTemperature\":%.1f,"
+        "\"enteringWaterTemperature\":%.1f,"
         "\"mode\":\"%s\","
         "\"runningStatus\":\"%s\","
         "\"priority\":\"%s\","
@@ -73,7 +74,19 @@ static void api_status_handler(struct mg_connection *c) {
         "\"dcCurrent\":%.2f,"
         "\"acVoltage\":%.1f,"
         "\"dcVoltage\":%.1f,"
-        "\"acPower\":%.1f,"
+        "\"acPowerVA\":%.1f,"
+        "\"acPowerW\":%.1f,"
+        "\"powerValid\":%s,"
+        "\"compressorFrequency\":%.1f,"
+        "\"waterFlow\":%.2f,"
+        "\"unitCapacityKw\":%d,"
+        "\"actualCapacityOutput\":%d,"
+        "\"oduInputStatus\":%d,"
+        "\"compressorRuntimeHours\":%d,"
+        "\"pumpRuntimeHours\":%d,"
+        "\"heatOutputW\":%.1f,"
+        "\"cop\":%.2f,"
+        "\"copValid\":%s,"
         "\"workingMode\":%d}\n",
         g_last_status.dhw_tank_temp,
         g_last_status.dhw_target,
@@ -81,6 +94,7 @@ static void api_status_handler(struct mg_connection *c) {
         g_last_status.heating_target,
         g_last_status.outdoor_temp,
         g_last_status.leaving_water_temp,
+        g_last_status.entering_water_temp,
         mode_to_string(g_last_status.running_mode),
         status_to_string(g_last_status.running_status),
         g_last_status.dhw_priority ? "dhw" : "heating",
@@ -90,7 +104,19 @@ static void api_status_handler(struct mg_connection *c) {
         g_last_status.dc_current,
         g_last_status.ac_voltage,
         g_last_status.dc_voltage,
-        g_last_status.ac_power,
+        g_last_status.ac_power_va,
+        g_last_status.ac_power_w,
+        g_last_status.power_valid ? "true" : "false",
+        g_last_status.compressor_freq,
+        g_last_status.water_flow,
+        g_last_status.unit_capacity_kw,
+        g_last_status.actual_capacity_output,
+        g_last_status.odu_input_status,
+        g_last_status.compressor_runtime_h,
+        g_last_status.pump_runtime_h,
+        g_last_status.heat_output_w,
+        g_last_status.cop,
+        g_last_status.cop_valid ? "true" : "false",
         g_last_status.working_mode
     );
 

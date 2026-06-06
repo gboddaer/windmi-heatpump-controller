@@ -59,6 +59,7 @@ public:
      * @param heating_target Heating target
      * @param outdoor_temp Outdoor temperature
      * @param leaving_water_temp Leaving water temperature
+     * @param entering_water_temp Entering water temperature
      * @param mode Mode string
      * @param running_status Running status string
      * @param priority Priority string
@@ -68,20 +69,27 @@ public:
      * @param dc_current DC current
      * @param ac_voltage AC voltage
      * @param dc_voltage DC voltage
-     * @param ac_power AC power
+     * @param ac_power_va AC apparent power
+     * @param ac_power_w Estimated AC real power
+     * @param power_valid Power reading validity flag
      * @param working_mode Working mode
      * @return JSON string
      */
     static std::string generateStatusJson(
         double dhw_temp, double dhw_target,
-        double heating_temp, double heating_target,
+        double heating_temp, double entering_water_temp, double heating_target,
         double outdoor_temp, double leaving_water_temp,
         const std::string& mode, const std::string& running_status,
         const std::string& priority, const std::string& status,
         bool device_online,
         double ac_current, double dc_current,
         double ac_voltage, double dc_voltage,
-        double ac_power, int working_mode);
+        double ac_power_va, double ac_power_w, bool power_valid,
+        double compressor_freq, double water_flow, int unit_capacity_kw,
+        int actual_capacity_output, int odu_input_status,
+        int compressor_runtime_h, int pump_runtime_h,
+        double heat_output_w, double cop, bool cop_valid,
+        int working_mode);
 
     /**
      * @brief Generate success response

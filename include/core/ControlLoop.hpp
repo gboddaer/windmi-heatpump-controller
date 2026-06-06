@@ -73,7 +73,7 @@ struct StatusSnapshot {
     float dc_voltage = 0.0f;       // DC voltage in Volts (raw / 2)
     float ac_power_va = 0.0f;      // AC apparent power in VA (ac_voltage * ac_current)
     float ac_power_w = 0.0f;       // AC real power in Watts (estimated: VA * power_factor)
-    bool power_valid = false;      // True if at least one power register read succeeded
+    bool power_valid = false;      // True if both AC current and AC voltage were read
     
     // Diagnostic registers
     float compressor_freq = 0.0f;       // Actual compressor frequency in Hz

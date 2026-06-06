@@ -220,7 +220,6 @@ static bool read_status(status_snapshot_t *status) {
     }
     
     // Read power monitoring registers (individual reads — one failure does not zero the others)
-    int16_t raw;
     float ac_current = 0.0f, ac_voltage = 0.0f;
     int got_current = 0, got_voltage = 0;
 
