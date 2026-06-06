@@ -340,7 +340,9 @@ function updateUI(status) {
     elements.dcCurrentValue.textContent = status.dcCurrent.toFixed(2) + ' A';
     elements.acVoltageValue.textContent = status.acVoltage.toFixed(1) + ' V';
     elements.dcVoltageValue.textContent = status.dcVoltage.toFixed(1) + ' V';
-    elements.acPowerValue.textContent = status.acPower.toFixed(1) + ' W';
+    // Show AC real power (W) if valid, otherwise show apparent power (VA)
+    const acPowerDisplay = status.powerValid ? status.acPowerW : status.acPowerVA;
+    elements.acPowerValue.textContent = acPowerDisplay.toFixed(1) + ' W';
     
     // Last update
     const now = new Date();
@@ -412,6 +414,10 @@ async function fetchStatus() {
         console.error('Failed to fetch status:', error);
         elements.deviceStatus.textContent = 'Error';
         elements.deviceStatus.className = 'status-indicator offline';
+        // Clear pending values so they don't block server updates
+        pendingDhwTarget = null;
+        pendingHeatingTarget = null;
+        pendingMode = null;
     } finally {
         isUpdating = false;
     }
