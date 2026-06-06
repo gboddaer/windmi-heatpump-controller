@@ -41,35 +41,56 @@ bool CmdQueue::empty() const {
     return head_.load(std::memory_order_acquire) == tail_.load(std::memory_order_acquire);
 }
 
-// ---- StatusQueue implementation ----
+// ---- StatusQueue implementation (ring buffer with overwrite) ----
 
-StatusQueue::StatusQueue() : head_(0), tail_(0) {}
+StatusQueue::StatusQueue() : head_(0), tail_(0), write_index_(0) {}
 
 bool StatusQueue::push(const StatusSnapshot& item) {
-    const uint32_t current_tail = tail_.load(std::memory_order_relaxed);
-    const uint32_t next_tail = (current_tail + 1) % CAPACITY;
-    if (next_tail == head_.load(std::memory_order_acquire)) return false;  // Full
-    buf_[current_tail] = item;
-    tail_.store(next_tail, std::memory_order_release);
-    return true;
+    // Ring buffer: always write, overwrite oldest if full
+    const uint32_t write_idx = write_index_.fetch_add(1, std::memory_order_relaxed);
+    const uint32_t buf_idx = write_idx % CAPACITY;
+    
+    buf_[buf_idx] = item;
+    
+    // Update tail to point past this write
+    tail_.store(write_idx + 1, std::memory_order_release);
+    
+    // If we overwrote old data, advance head to maintain at least one slot
+    // This prevents reading stale data that's been overwritten
+    uint32_t current_head = head_.load(std::memory_order_acquire);
+    uint32_t current_tail = write_idx + 1;
+    
+    // Ensure head doesn't lag too far behind (keep at most CAPACITY-1 items)
+    if (current_tail - current_head > CAPACITY - 1) {
+        head_.store(current_tail - (CAPACITY - 1), std::memory_order_release);
+    }
+    
+    return true;  // Always succeeds
 }
 
 bool StatusQueue::pop(StatusSnapshot& item) {
     const uint32_t current_head = head_.load(std::memory_order_relaxed);
-    if (current_head == tail_.load(std::memory_order_acquire)) return false;  // Empty
-    item = buf_[current_head];
-    head_.store((current_head + 1) % CAPACITY, std::memory_order_release);
+    const uint32_t current_tail = tail_.load(std::memory_order_acquire);
+    
+    if (current_head >= current_tail) return false;  // Empty
+    
+    const uint32_t buf_idx = current_head % CAPACITY;
+    item = buf_[buf_idx];
+    head_.store(current_head + 1, std::memory_order_release);
     return true;
 }
 
 bool StatusQueue::latest(StatusSnapshot& item) {
-    bool found = false;
-    StatusSnapshot tmp;
-    while (pop(tmp)) {
-        item = tmp;
-        found = true;
-    }
-    return found;
+    const uint32_t current_tail = tail_.load(std::memory_order_acquire);
+    const uint32_t current_head = head_.load(std::memory_order_acquire);
+    
+    if (current_head >= current_tail) return false;  // Empty
+    
+    // Get the last written item (tail - 1)
+    const uint32_t last_idx = current_tail - 1;
+    const uint32_t buf_idx = last_idx % CAPACITY;
+    item = buf_[buf_idx];
+    return true;
 }
 
 // ---- Helper functions ----
@@ -669,21 +690,17 @@ void ControlLoop::threadFunc() {
             // Set working mode for status reporting
             status.working_mode = desired_working_mode_;
 
-            // Publish status to queue
+            // Publish status to queue (always succeeds with ring buffer)
             if (status_queue_) {
-                if (!status_queue_->push(status)) {
-                    WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Status queue full, dropping snapshot");
-                }
+                status_queue_->push(status);
             }
         } else {
             WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to read status");
-            // Publish offline status
+            // Publish offline status (always succeeds with ring buffer)
             status.device_online = false;
             status.working_mode = desired_working_mode_;
             if (status_queue_) {
-                if (!status_queue_->push(status)) {
-                    WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Status queue full, dropping snapshot");
-                }
+                status_queue_->push(status);
             }
         }
 

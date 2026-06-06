@@ -124,24 +124,47 @@ private:
 };
 
 /**
- * @brief SPSC status queue interface
+ * @brief SPSC status queue with overwrite (ring buffer)
  *
  * Used by ControlLoop to publish status snapshots and by WebServer to consume them.
  * The control loop is the single producer; the web server is the single consumer.
+ * 
+ * When full, push() overwrites the oldest entry (ring buffer behavior) to prevent
+ * "queue full" warnings when the consumer is idle. This is appropriate for status
+ * monitoring where only the latest snapshot matters.
  */
 class StatusQueue {
 public:
     static constexpr size_t CAPACITY = 32;
 
     StatusQueue();
+    
+    /**
+     * @brief Push a status snapshot (overwrites oldest if full)
+     * @param item Snapshot to push
+     * @return Always true (never fails due to full queue)
+     */
     bool push(const StatusSnapshot& item);
+    
+    /**
+     * @brief Pop the oldest snapshot
+     * @param item Output parameter
+     * @return true if snapshot was available, false if queue was empty
+     */
     bool pop(StatusSnapshot& item);
+    
+    /**
+     * @brief Get the latest snapshot without consuming it
+     * @param item Output parameter
+     * @return true if snapshot was available, false if queue was empty
+     */
     bool latest(StatusSnapshot& item);
 
 private:
     StatusSnapshot buf_[CAPACITY];
     alignas(64) std::atomic<uint32_t> head_;
     alignas(64) std::atomic<uint32_t> tail_;
+    alignas(64) std::atomic<uint32_t> write_index_;  // For ring buffer overwrite
 };
 
 /**

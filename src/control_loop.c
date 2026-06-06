@@ -598,18 +598,14 @@ static void *control_loop_thread_func(void *arg) {
             // Set working mode for status reporting
             status.working_mode = desired_working_mode;
             
-            // Publish status to queue
-            if (!spsc_push_status_snapshot_t(thread_status_queue, status)) {
-                fprintf(stderr, "Control loop: Status queue full, dropping snapshot\n");
-            }
+            // Publish status to queue (always succeeds with ring buffer)
+            spsc_push_status_snapshot_t(thread_status_queue, status);
         } else {
             fprintf(stderr, "Control loop: Failed to read status\n");
-            // Publish offline status
+            // Publish offline status (always succeeds with ring buffer)
             status.device_online = false;
             status.working_mode = desired_working_mode;
-            if (!spsc_push_status_snapshot_t(thread_status_queue, status)) {
-                fprintf(stderr, "Control loop: Status queue full, dropping snapshot\n");
-            }
+            spsc_push_status_snapshot_t(thread_status_queue, status);
         }
         
         // Calculate sleep time to maintain interval

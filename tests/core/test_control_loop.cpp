@@ -254,6 +254,32 @@ TEST(StatusQueueTest, LatestEmpty) {
     EXPECT_FALSE(q.latest(snap));
 }
 
+TEST(StatusQueueTest, RingBufferOverwrite) {
+    // Test that StatusQueue overwrites oldest entries when full
+    // instead of returning false
+    StatusQueue q;
+    
+    // Fill the queue beyond capacity
+    for (int i = 0; i < 50; ++i) {
+        StatusSnapshot snap{};
+        snap.dhw_tank_temp = static_cast<float>(i);
+        EXPECT_TRUE(q.push(snap));  // Should always succeed
+    }
+    
+    // Latest should be the last written value (49)
+    StatusSnapshot latest;
+    EXPECT_TRUE(q.latest(latest));
+    EXPECT_FLOAT_EQ(latest.dhw_tank_temp, 49.0f);
+    
+    // We should be able to pop at least CAPACITY-1 items
+    int popped_count = 0;
+    StatusSnapshot snap;
+    while (q.pop(snap)) {
+        popped_count++;
+    }
+    EXPECT_GE(popped_count, StatusQueue::CAPACITY - 1);
+}
+
 // ---- ControlLoop tests ----
 
 TEST(ControlLoopTest, CreateAndStop) {
