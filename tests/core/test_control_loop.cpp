@@ -84,7 +84,7 @@ TEST(ConfigRegisterTest, NoFabricatedRegisters) {
     EXPECT_EQ(REG_RUNNING_MODE, 0x002C);
     EXPECT_EQ(REG_RUNNING_STATUS, 0x002D);
     EXPECT_EQ(REG_DHW_PRIORITY, 0x02BF);
-    EXPECT_EQ(REG_DEVICE_TYPE, 0x1006);
+    EXPECT_EQ(REG_UNIT_CAPACITY, 0x1006);
 }
 
 TEST(ConfigRegisterTest, ModeSetValues) {
