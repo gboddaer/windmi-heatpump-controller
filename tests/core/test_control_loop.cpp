@@ -114,6 +114,31 @@ TEST(ConfigRegisterTest, ControlLoopConfig) {
     EXPECT_EQ(MODBUS_RECONNECT_INTERVAL_S, 10);
 }
 
+TEST(ConfigRegisterTest, DiagnosticRegisters) {
+    EXPECT_EQ(REG_UNIT_CAPACITY, 0x1006);
+    EXPECT_EQ(REG_DEVICE_TYPE, REG_UNIT_CAPACITY);  // Backwards compatible alias
+    EXPECT_EQ(REG_COMPRESSOR_FREQ, 0x0040);
+    EXPECT_EQ(REG_WATER_FLOW, 0x102A);
+    EXPECT_EQ(REG_ACTUAL_CAPACITY_OUTPUT, 0x1004);
+    EXPECT_EQ(REG_ODU_INPUT_STATUS, 0x101F);
+    EXPECT_EQ(REG_COMPRESSOR_RUNTIME, 0x0174);
+    EXPECT_EQ(REG_PUMP_RUNTIME, 0x0176);
+}
+
+TEST(StatusSnapshotTest, DiagnosticDefaults) {
+    StatusSnapshot snap{};
+    EXPECT_FLOAT_EQ(snap.compressor_freq, 0.0f);
+    EXPECT_FLOAT_EQ(snap.water_flow, 0.0f);
+    EXPECT_EQ(snap.unit_capacity_kw, 0);
+    EXPECT_EQ(snap.actual_capacity_output, 0);
+    EXPECT_EQ(snap.odu_input_status, 0);
+    EXPECT_EQ(snap.compressor_runtime_h, 0);
+    EXPECT_EQ(snap.pump_runtime_h, 0);
+    EXPECT_FLOAT_EQ(snap.heat_output_w, 0.0f);
+    EXPECT_FLOAT_EQ(snap.cop, 0.0f);
+    EXPECT_FALSE(snap.cop_valid);
+}
+
 // ---- CmdQueue tests ----
 
 TEST(CmdQueueTest, PushPop) {

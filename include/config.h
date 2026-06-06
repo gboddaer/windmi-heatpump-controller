@@ -66,7 +66,8 @@ extern "C" {
 // Temperature values are in 0.1°C units (e.g., 450 = 45.0°C)
 //
 // === READ-ONLY REGISTERS ===
-#define REG_DEVICE_TYPE           0x1006  // R  - Device type identifier
+// Register 0x1006: Unit capacity (4/6/8/10/12/14/16 = kW)
+// Kept as REG_DEVICE_TYPE for backwards compatibility (see DIAGNOSTIC section below)
 #define REG_OUTDOOR_TEMP          0x0001  // R  - Outdoor temperature (0.1°C)
 #define REG_INDOOR_TEMP           0x0002  // R  - Indoor temperature (0.1°C)
 #define REG_ENTERING_WATER_TEMP   0x0003  // R  - Entering water temperature (0.1°C)
@@ -87,6 +88,20 @@ extern "C" {
 #define REG_DC_CURRENT            0x1015  // R  - DC current (Display * 4 = Actual Amps)
 #define REG_AC_VOLTAGE            0x1016  // R  - AC voltage (Display = Actual Volts)
 #define REG_DC_VOLTAGE            0x1017  // R  - DC voltage (Display / 2 = Actual Volts)
+//
+// === DIAGNOSTIC REGISTERS (READ-ONLY) ===
+#define REG_UNIT_CAPACITY         0x1006  // R  - Unit capacity (4/6/8/10/12/14/16 = kW)
+// Note: This was previously named REG_DEVICE_TYPE. The Rotenso Windmi manual (p123)
+// documents 0x1006 as "Capacity of the unit" with values 4/6/8/10/12/14/16 = kW.
+// REG_DEVICE_TYPE is kept as alias for backwards compatibility.
+#define REG_DEVICE_TYPE           REG_UNIT_CAPACITY  // Alias: same register, old name
+#define REG_COMPRESSOR_FREQ       0x0040  // R  - Actual compressor frequency (1 Hz)
+#define REG_WATER_FLOW            0x102A  // R  - Water flow feedback (m3/h × 100)
+#define REG_ACTUAL_CAPACITY_OUTPUT 0x1004  // R  - Actual capacity output
+#define REG_ODU_INPUT_STATUS      0x101F  // R  - Outdoor unit input status (bit flags)
+#define REG_COMPRESSOR_RUNTIME    0x0174  // R  - Compressor runtime (hours)
+#define REG_PUMP_RUNTIME          0x0176  // R  - Pump runtime (hours)
+
 //
 // === DHW TANK TEMPERATURE ===
 #define REG_DHW_TANK_TEMP         0x00CE  // R  - DHW tank temperature (0.1°C)

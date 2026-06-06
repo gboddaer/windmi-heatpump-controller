@@ -339,6 +339,78 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         }
     }
 
+    // Calculate COP using water flow and delta-T (only if we have valid data)
+    // COP = heat_output / electrical_input
+    // heat_output = flow × 1000/3600 × 4186 × (T_leaving - T_entering)
+    // where flow is in m³/h, T in °C, result in Watts
+    status.heat_output_w = 0.0f;
+    status.cop = 0.0f;
+    status.cop_valid = false;
+
+    if (status.water_flow > 0.01f && status.power_valid &&
+        status.leaving_water_temp > 0.0f && status.entering_water_temp > -50.0f) {
+        float delta_t = status.leaving_water_temp - status.entering_water_temp;
+        if (delta_t > 0.1f) {
+            // flow_m3h / 3600 = m³/s → × 1000 = kg/s, × 4186 J/(kg·K) = W/K
+            float flow_kg_s = (status.water_flow * 1000.0f) / 3600.0f;
+            status.heat_output_w = flow_kg_s * 4186.0f * delta_t;
+            if (status.ac_power_w > 0.0f) {
+                status.cop = status.heat_output_w / status.ac_power_w;
+                status.cop_valid = true;
+            }
+        }
+    }
+
+    // Read diagnostic registers (non-critical — failures don't affect ok flag)
+    try {
+        raw = modbus_client_->readRegister(REG_UNIT_CAPACITY);
+        status.unit_capacity_kw = raw;  // Raw = kW rating (4,6,8,10,12,14,16)
+    } catch (const ModbusException&) {
+        status.unit_capacity_kw = 0;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_COMPRESSOR_FREQ);
+        status.compressor_freq = static_cast<float>(raw);  // 1 Hz units
+    } catch (const ModbusException&) {
+        status.compressor_freq = 0.0f;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_WATER_FLOW);
+        status.water_flow = static_cast<float>(raw) / 100.0f;  // m³/h × 100
+    } catch (const ModbusException&) {
+        status.water_flow = 0.0f;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_ACTUAL_CAPACITY_OUTPUT);
+        status.actual_capacity_output = raw;
+    } catch (const ModbusException&) {
+        status.actual_capacity_output = 0;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_ODU_INPUT_STATUS);
+        status.odu_input_status = raw;
+    } catch (const ModbusException&) {
+        status.odu_input_status = 0;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_COMPRESSOR_RUNTIME);
+        status.compressor_runtime_h = raw;
+    } catch (const ModbusException&) {
+        status.compressor_runtime_h = 0;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_PUMP_RUNTIME);
+        status.pump_runtime_h = raw;
+    } catch (const ModbusException&) {
+        status.pump_runtime_h = 0;
+    }
+
     status.device_online = ok;
     if (ok) {
         saved_targets_initialized_ = true;
