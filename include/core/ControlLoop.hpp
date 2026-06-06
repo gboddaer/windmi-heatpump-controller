@@ -57,6 +57,7 @@ struct StatusSnapshot {
     float outdoor_temp = 0.0f;
     float indoor_temp = 0.0f;
     float leaving_water_temp = 0.0f;
+    float entering_water_temp = 0.0f;  // From REG_ENTERING_WATER_TEMP (0x0003, 0.1°C)
     float dhw_tank_temp = 0.0f;
     float dhw_target = 0.0f;
     float heating_target = 0.0f;

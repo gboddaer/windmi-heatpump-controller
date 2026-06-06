@@ -219,6 +219,14 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         ok = false;
     }
 
+    // Read entering water temp (0x0003)
+    try {
+        raw = modbus_client_->readRegister(REG_ENTERING_WATER_TEMP);
+        status.entering_water_temp = raw_to_temp(raw);
+    } catch (const ModbusException&) {
+        // Non-critical, leave as 0
+    }
+
     // Read DHW tank temp (0x00CE)
     try {
         raw = modbus_client_->readRegister(REG_DHW_TANK_TEMP);

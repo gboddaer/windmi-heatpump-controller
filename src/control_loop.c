@@ -149,6 +149,12 @@ static bool read_status(status_snapshot_t *status) {
         ok = false;
     }
     
+    // Read entering water temp (0x0003) — non-critical
+    if (modbus_read_register(thread_client, REG_ENTERING_WATER_TEMP, &raw) == 0) {
+        status->entering_water_temp = raw_to_temp(raw);
+    }
+    // If read fails, status->entering_water_temp retains its value (0.0 initially)
+    
     // Read DHW tank temp (0x1C5B) — critical for DHW priority logic
     // If read fails, status->dhw_tank_temp retains its value (0.0 initially,
     // last-known value on subsequent calls). We do NOT leave it at 0.0
