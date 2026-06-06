@@ -29,7 +29,9 @@ TEST(StatusSnapshotTest, DefaultValues) {
     EXPECT_FLOAT_EQ(snap.dc_current, 0.0f);
     EXPECT_FLOAT_EQ(snap.ac_voltage, 0.0f);
     EXPECT_FLOAT_EQ(snap.dc_voltage, 0.0f);
-    EXPECT_FLOAT_EQ(snap.ac_power, 0.0f);
+    EXPECT_FLOAT_EQ(snap.ac_power_va, 0.0f);
+    EXPECT_FLOAT_EQ(snap.ac_power_w, 0.0f);
+    EXPECT_FALSE(snap.power_valid);
     EXPECT_EQ(snap.working_mode, 0);
 }
 
@@ -222,12 +224,19 @@ TEST(PowerScalingTest, DcVoltageDividedBy2) {
     EXPECT_FLOAT_EQ(dc_voltage, 12.0f);
 }
 
-TEST(PowerScalingTest, AcPowerIsVoltageTimesCurrent) {
-    // Master: ac_power = ac_voltage * ac_current
+TEST(PowerScalingTest, AcPowerVaIsVoltageTimesCurrent) {
+    // Apparent power: VA = V × A
     float ac_voltage = 230.0f;
     float ac_current = 10.0f;
-    float ac_power = ac_voltage * ac_current;
-    EXPECT_FLOAT_EQ(ac_power, 2300.0f);
+    float ac_power_va = ac_voltage * ac_current;
+    EXPECT_FLOAT_EQ(ac_power_va, 2300.0f);
+}
+
+TEST(PowerScalingTest, AcPowerWEstimatedWithPowerFactor) {
+    // Real power: W = VA × PF
+    float ac_power_va = 2300.0f;
+    float ac_power_w = ac_power_va * ESTIMATED_POWER_FACTOR;
+    EXPECT_NEAR(ac_power_w, 2070.0f, 1.0f);
 }
 
 // ---- StatusMonitor tests ----

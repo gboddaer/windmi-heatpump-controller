@@ -191,7 +191,7 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         "\"dcCurrent\":%.2f,"
         "\"acVoltage\":%.1f,"
         "\"dcVoltage\":%.1f,"
-        "\"acPower\":%.1f,"
+        "\"acPowerVA\":%.1f,\n        \"acPowerW\":%.1f,\n        \"powerValid\":%s,"
         "\"workingMode\":%d}\n",
         last_status_.dhw_tank_temp,
         last_status_.dhw_target,
@@ -208,7 +208,9 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         last_status_.dc_current,
         last_status_.ac_voltage,
         last_status_.dc_voltage,
-        last_status_.ac_power,
+        last_status_.ac_power_va,
+        last_status_.ac_power_w,
+        last_status_.power_valid ? "true" : "false",
         last_status_.working_mode
     );
 

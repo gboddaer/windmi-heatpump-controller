@@ -66,11 +66,13 @@ struct StatusSnapshot {
     bool is_running = false;
     bool device_online = false;
     // Power monitoring
-    float ac_current = 0.0f;     // AC current in Amps (raw * 2)
-    float dc_current = 0.0f;     // DC current in Amps (raw * 4)
-    float ac_voltage = 0.0f;     // AC voltage in Volts (raw)
-    float dc_voltage = 0.0f;     // DC voltage in Volts (raw / 2)
-    float ac_power = 0.0f;       // AC power in Watts (ac_voltage * ac_current)
+    float ac_current = 0.0f;       // AC current in Amps (raw * 2)
+    float dc_current = 0.0f;       // DC current in Amps (raw * 4)
+    float ac_voltage = 0.0f;       // AC voltage in Volts (raw)
+    float dc_voltage = 0.0f;       // DC voltage in Volts (raw / 2)
+    float ac_power_va = 0.0f;      // AC apparent power in VA (ac_voltage * ac_current)
+    float ac_power_w = 0.0f;       // AC real power in Watts (estimated: VA * power_factor)
+    bool power_valid = false;      // True if at least one power register read succeeded
     // Working mode (0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating)
     int working_mode = 0;
 };

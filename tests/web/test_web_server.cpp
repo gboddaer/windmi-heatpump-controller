@@ -80,7 +80,9 @@ TEST(WebServerJsonTest, StatusSnapshotMatchesJsonFields) {
     snap.dc_current = 7.0f;
     snap.ac_voltage = 8.0f;
     snap.dc_voltage = 9.0f;
-    snap.ac_power = 10.0f;
+    snap.ac_power_va = 10.0f;
+    snap.ac_power_w = 10.0f * ESTIMATED_POWER_FACTOR;
+    snap.power_valid = true;
     snap.working_mode = 3;
 
     EXPECT_FLOAT_EQ(snap.dhw_tank_temp, 1.0f);
@@ -88,7 +90,7 @@ TEST(WebServerJsonTest, StatusSnapshotMatchesJsonFields) {
     EXPECT_EQ(snap.running_mode, 2);
     EXPECT_TRUE(snap.dhw_priority);
     EXPECT_TRUE(snap.is_running);
-    EXPECT_FLOAT_EQ(snap.ac_power, 10.0f);
+    EXPECT_FLOAT_EQ(snap.ac_power_w, 10.0f * ESTIMATED_POWER_FACTOR);
     EXPECT_EQ(snap.working_mode, 3);
 }
 

@@ -34,6 +34,9 @@ extern "C" {
 // Control Loop
 #define CONTROL_LOOP_INTERVAL_S 30
 #define DHW_HYSTERESIS_C       3.0f
+// Power factor assumption for inverter-driven compressor
+// Typical range: 0.85-0.95 for inverter heat pumps
+#define ESTIMATED_POWER_FACTOR  0.90f
 #define HEATING_HYSTERESIS_C   1.0f
 
 // Timeouts and Retries

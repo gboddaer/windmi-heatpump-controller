@@ -224,13 +224,17 @@ static bool read_status(status_snapshot_t *status) {
         status->dc_current = dc_current_raw * 4.0f;      // Actual = Display * 4
         status->ac_voltage = (float)ac_voltage_raw;      // Actual = Display
         status->dc_voltage = dc_voltage_raw / 2.0f;      // Actual = Display / 2
-        status->ac_power = status->ac_voltage * status->ac_current;  // Power in Watts (AC)
+        status->ac_power_va = status->ac_voltage * status->ac_current;  // Apparent power (VA)
+        status->ac_power_w = status->ac_power_va * ESTIMATED_POWER_FACTOR;  // Estimated real power (W)
+        status->power_valid = true;
     } else {
         status->ac_current = 0.0f;
         status->dc_current = 0.0f;
         status->ac_voltage = 0.0f;
         status->dc_voltage = 0.0f;
-        status->ac_power = 0.0f;
+        status->ac_power_va = 0.0f;
+        status->ac_power_w = 0.0f;
+        status->power_valid = false;
     }
     
     status->device_online = ok;

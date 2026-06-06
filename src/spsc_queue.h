@@ -41,7 +41,9 @@ typedef struct {
     float dc_current;      // DC current in Amps (raw * 4)
     float ac_voltage;      // AC voltage in Volts (raw)
     float dc_voltage;      // DC voltage in Volts (raw / 2)
-    float ac_power;        // AC power in Watts (ac_voltage * ac_current)
+    float ac_power_va;     // AC apparent power in VA (ac_voltage * ac_current)
+    float ac_power_w;      // AC real power in Watts (estimated: VA * power_factor)
+    bool power_valid;      // True if at least one power register read succeeded
     // Working mode (0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating)
     int working_mode;
 } status_snapshot_t;
