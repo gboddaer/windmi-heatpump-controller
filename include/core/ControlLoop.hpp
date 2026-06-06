@@ -57,6 +57,7 @@ struct StatusSnapshot {
     float outdoor_temp = 0.0f;
     float indoor_temp = 0.0f;
     float leaving_water_temp = 0.0f;
+    float entering_water_temp = 0.0f;  // From REG_ENTERING_WATER_TEMP (0x0003, 0.1°C)
     float dhw_tank_temp = 0.0f;
     float dhw_target = 0.0f;
     float heating_target = 0.0f;
@@ -66,11 +67,28 @@ struct StatusSnapshot {
     bool is_running = false;
     bool device_online = false;
     // Power monitoring
-    float ac_current = 0.0f;     // AC current in Amps (raw * 2)
-    float dc_current = 0.0f;     // DC current in Amps (raw * 4)
-    float ac_voltage = 0.0f;     // AC voltage in Volts (raw)
-    float dc_voltage = 0.0f;     // DC voltage in Volts (raw / 2)
-    float ac_power = 0.0f;       // AC power in Watts (ac_voltage * ac_current)
+    float ac_current = 0.0f;       // AC current in Amps (raw * 2)
+    float dc_current = 0.0f;       // DC current in Amps (raw * 4)
+    float ac_voltage = 0.0f;       // AC voltage in Volts (raw)
+    float dc_voltage = 0.0f;       // DC voltage in Volts (raw / 2)
+    float ac_power_va = 0.0f;      // AC apparent power in VA (ac_voltage * ac_current)
+    float ac_power_w = 0.0f;       // AC real power in Watts (estimated: VA * power_factor)
+    bool power_valid = false;      // True if both AC current and AC voltage were read
+    
+    // Diagnostic registers
+    float compressor_freq = 0.0f;       // Actual compressor frequency in Hz
+    float water_flow = 0.0f;            // Water flow in m³/h (from 0x102A, raw/100)
+    int unit_capacity_kw = 0;           // Unit capacity in kW (4/6/8/10/12/14/16)
+    int actual_capacity_output = 0;     // Actual capacity output (from 0x1004)
+    int odu_input_status = 0;           // Outdoor unit input status bit flags (from 0x101F)
+    int compressor_runtime_h = 0;       // Compressor runtime in hours (from 0x0174)
+    int pump_runtime_h = 0;             // Pump runtime in hours (from 0x0176)
+    
+    // COP estimation (calculated from water flow + delta-T + power)
+    float heat_output_w = 0.0f;         // Estimated heat output in Watts
+    float cop = 0.0f;                    // Coefficient of Performance (heat_out / power_in)
+    bool cop_valid = false;             // True if COP calculation had valid inputs
+    
     // Working mode (0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating)
     int working_mode = 0;
 };
@@ -106,24 +124,47 @@ private:
 };
 
 /**
- * @brief SPSC status queue interface
+ * @brief SPSC status queue with overwrite (ring buffer)
  *
  * Used by ControlLoop to publish status snapshots and by WebServer to consume them.
  * The control loop is the single producer; the web server is the single consumer.
+ * 
+ * When full, push() overwrites the oldest entry (ring buffer behavior) to prevent
+ * "queue full" warnings when the consumer is idle. This is appropriate for status
+ * monitoring where only the latest snapshot matters.
  */
 class StatusQueue {
 public:
     static constexpr size_t CAPACITY = 32;
 
     StatusQueue();
+    
+    /**
+     * @brief Push a status snapshot (overwrites oldest if full)
+     * @param item Snapshot to push
+     * @return Always true (never fails due to full queue)
+     */
     bool push(const StatusSnapshot& item);
+    
+    /**
+     * @brief Pop the oldest snapshot
+     * @param item Output parameter
+     * @return true if snapshot was available, false if queue was empty
+     */
     bool pop(StatusSnapshot& item);
+    
+    /**
+     * @brief Get the latest snapshot without consuming it
+     * @param item Output parameter
+     * @return true if snapshot was available, false if queue was empty
+     */
     bool latest(StatusSnapshot& item);
 
 private:
     StatusSnapshot buf_[CAPACITY];
     alignas(64) std::atomic<uint32_t> head_;
     alignas(64) std::atomic<uint32_t> tail_;
+    alignas(64) std::atomic<uint32_t> write_index_;  // For ring buffer overwrite
 };
 
 /**

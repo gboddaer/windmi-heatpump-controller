@@ -149,6 +149,12 @@ static bool read_status(status_snapshot_t *status) {
         ok = false;
     }
     
+    // Read entering water temp (0x0003) — non-critical
+    if (modbus_read_register(thread_client, REG_ENTERING_WATER_TEMP, &raw) == 0) {
+        status->entering_water_temp = raw_to_temp(raw);
+    }
+    // If read fails, status->entering_water_temp retains its value (0.0 initially)
+    
     // Read DHW tank temp (0x1C5B) — critical for DHW priority logic
     // If read fails, status->dhw_tank_temp retains its value (0.0 initially,
     // last-known value on subsequent calls). We do NOT leave it at 0.0
@@ -213,24 +219,111 @@ static bool read_status(status_snapshot_t *status) {
         ok = false;
     }
     
-    // Read power monitoring registers
-    int16_t ac_current_raw, dc_current_raw, ac_voltage_raw, dc_voltage_raw;
-    if (modbus_read_register(thread_client, REG_AC_CURRENT, &ac_current_raw) == 0 &&
-        modbus_read_register(thread_client, REG_DC_CURRENT, &dc_current_raw) == 0 &&
-        modbus_read_register(thread_client, REG_AC_VOLTAGE, &ac_voltage_raw) == 0 &&
-        modbus_read_register(thread_client, REG_DC_VOLTAGE, &dc_voltage_raw) == 0) {
-        // Apply scaling factors per device spec
-        status->ac_current = ac_current_raw * 2.0f;      // Actual = Display * 2
-        status->dc_current = dc_current_raw * 4.0f;      // Actual = Display * 4
-        status->ac_voltage = (float)ac_voltage_raw;      // Actual = Display
-        status->dc_voltage = dc_voltage_raw / 2.0f;      // Actual = Display / 2
-        status->ac_power = status->ac_voltage * status->ac_current;  // Power in Watts (AC)
+    // Read power monitoring registers (individual reads — one failure does not zero the others)
+    float ac_current = 0.0f, ac_voltage = 0.0f;
+    int got_current = 0, got_voltage = 0;
+
+    if (modbus_read_register(thread_client, REG_AC_CURRENT, &raw) == 0) {
+        status->ac_current = raw * 2.0f;      // Actual = Display × 2
+        ac_current = status->ac_current;
+        got_current = 1;
     } else {
         status->ac_current = 0.0f;
+    }
+
+    if (modbus_read_register(thread_client, REG_DC_CURRENT, &raw) == 0) {
+        status->dc_current = raw * 4.0f;      // Actual = Display × 4
+    } else {
         status->dc_current = 0.0f;
+    }
+
+    if (modbus_read_register(thread_client, REG_AC_VOLTAGE, &raw) == 0) {
+        status->ac_voltage = (float)raw;      // Actual = Display
+        ac_voltage = status->ac_voltage;
+        got_voltage = 1;
+    } else {
         status->ac_voltage = 0.0f;
+    }
+
+    if (modbus_read_register(thread_client, REG_DC_VOLTAGE, &raw) == 0) {
+        status->dc_voltage = raw / 2.0f;      // Actual = Display / 2
+    } else {
         status->dc_voltage = 0.0f;
-        status->ac_power = 0.0f;
+    }
+
+    // Calculate power only if both V and I were obtained
+    if (got_current && got_voltage) {
+        status->ac_power_va = ac_voltage * ac_current;        // Apparent power (VA)
+        status->ac_power_w = status->ac_power_va * ESTIMATED_POWER_FACTOR;  // Estimated real power (W)
+        status->power_valid = 1;
+    } else {
+        status->ac_power_va = 0.0f;
+        status->ac_power_w = 0.0f;
+        status->power_valid = 0;
+    }
+    
+    // Read diagnostic registers (non-critical)
+    if (modbus_read_register(thread_client, REG_UNIT_CAPACITY, &raw) == 0) {
+        status->unit_capacity_kw = raw;
+    } else {
+        status->unit_capacity_kw = 0;
+    }
+    
+    if (modbus_read_register(thread_client, REG_COMPRESSOR_FREQ, &raw) == 0) {
+        status->compressor_freq = (float)raw;
+    } else {
+        status->compressor_freq = 0.0f;
+    }
+    
+    if (modbus_read_register(thread_client, REG_WATER_FLOW, &raw) == 0) {
+        status->water_flow = (float)raw / 100.0f;
+    } else {
+        status->water_flow = 0.0f;
+    }
+    
+    if (modbus_read_register(thread_client, REG_ACTUAL_CAPACITY_OUTPUT, &raw) == 0) {
+        status->actual_capacity_output = raw;
+    } else {
+        status->actual_capacity_output = 0;
+    }
+    
+    if (modbus_read_register(thread_client, REG_ODU_INPUT_STATUS, &raw) == 0) {
+        status->odu_input_status = raw;
+    } else {
+        status->odu_input_status = 0;
+    }
+    
+    if (modbus_read_register(thread_client, REG_COMPRESSOR_RUNTIME, &raw) == 0) {
+        status->compressor_runtime_h = raw;
+    } else {
+        status->compressor_runtime_h = 0;
+    }
+    
+    if (modbus_read_register(thread_client, REG_PUMP_RUNTIME, &raw) == 0) {
+        status->pump_runtime_h = raw;
+    } else {
+        status->pump_runtime_h = 0;
+    }
+    
+    // Calculate COP using water flow and delta-T (only if we have valid data)
+    // COP = heat_output / electrical_input
+    // heat_output = flow × 1000/3600 × 4186 × (T_leaving - T_entering)
+    status->heat_output_w = 0.0f;
+    status->cop = 0.0f;
+    status->cop_valid = 0;
+
+    if (status->water_flow > 0.01f && status->power_valid &&
+        status->leaving_water_temp > 0.0f && status->entering_water_temp > -50.0f) {
+        float delta_t = status->leaving_water_temp - status->entering_water_temp;
+        if (delta_t > 0.1f) {
+            // flow_m3h / 3600 = m³/s → × 1000 = kg/s, × 4186 J/(kg·K) = W/K
+            float flow_kg_s = (status->water_flow * 1000.0f) / 3600.0f;
+            status->heat_output_w = flow_kg_s * 4186.0f * delta_t;
+            if (status->ac_power_w > 0.0f) {
+                status->cop = status->heat_output_w / status->ac_power_w;
+                status->cop_valid = 1;
+            }
+        }
     }
     
     status->device_online = ok;
@@ -505,18 +598,14 @@ static void *control_loop_thread_func(void *arg) {
             // Set working mode for status reporting
             status.working_mode = desired_working_mode;
             
-            // Publish status to queue
-            if (!spsc_push_status_snapshot_t(thread_status_queue, status)) {
-                fprintf(stderr, "Control loop: Status queue full, dropping snapshot\n");
-            }
+            // Publish status to queue (always succeeds with ring buffer)
+            spsc_push_status_snapshot_t(thread_status_queue, status);
         } else {
             fprintf(stderr, "Control loop: Failed to read status\n");
-            // Publish offline status
+            // Publish offline status (always succeeds with ring buffer)
             status.device_online = false;
             status.working_mode = desired_working_mode;
-            if (!spsc_push_status_snapshot_t(thread_status_queue, status)) {
-                fprintf(stderr, "Control loop: Status queue full, dropping snapshot\n");
-            }
+            spsc_push_status_snapshot_t(thread_status_queue, status);
         }
         
         // Calculate sleep time to maintain interval

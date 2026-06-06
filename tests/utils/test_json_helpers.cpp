@@ -11,18 +11,27 @@ using namespace windmi;
 TEST(JsonHelpersTest, GenerateStatusJson) {
     std::string json = JsonHelpers::generateStatusJson(
         45.0, 45.0,
-        35.0, 40.0,
+        35.0, 30.0, 40.0,
         20.0, 35.0,
         "heat+dhw", "heat",
         "dhw", "running",
         true,
         25.0, 20.0,
         230.0, 75.0,
-        5500.0, 3);
+        5750.0, 5175.0, true,
+        42.0, 1.20, 8, 50, 3, 123, 456,
+        6976.7, 1.35, true,
+        3);
     
     EXPECT_NE(json.find("\"dhwTemperature\":45.0"), std::string::npos);
+    EXPECT_NE(json.find("\"enteringWaterTemperature\":30.0"), std::string::npos);
     EXPECT_NE(json.find("\"heatingTarget\":40.0"), std::string::npos);
     EXPECT_NE(json.find("\"deviceOnline\":true"), std::string::npos);
+    EXPECT_NE(json.find("\"acPowerVA\":5750.0"), std::string::npos);
+    EXPECT_NE(json.find("\"acPowerW\":5175.0"), std::string::npos);
+    EXPECT_NE(json.find("\"powerValid\":true"), std::string::npos);
+    EXPECT_NE(json.find("\"copValid\":true"), std::string::npos);
+    EXPECT_EQ(json.find("\"acPower\":"), std::string::npos);
 }
 
 TEST(JsonHelpersTest, GenerateSuccessResponse) {

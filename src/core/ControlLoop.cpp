@@ -41,35 +41,56 @@ bool CmdQueue::empty() const {
     return head_.load(std::memory_order_acquire) == tail_.load(std::memory_order_acquire);
 }
 
-// ---- StatusQueue implementation ----
+// ---- StatusQueue implementation (ring buffer with overwrite) ----
 
-StatusQueue::StatusQueue() : head_(0), tail_(0) {}
+StatusQueue::StatusQueue() : head_(0), tail_(0), write_index_(0) {}
 
 bool StatusQueue::push(const StatusSnapshot& item) {
-    const uint32_t current_tail = tail_.load(std::memory_order_relaxed);
-    const uint32_t next_tail = (current_tail + 1) % CAPACITY;
-    if (next_tail == head_.load(std::memory_order_acquire)) return false;  // Full
-    buf_[current_tail] = item;
-    tail_.store(next_tail, std::memory_order_release);
-    return true;
+    // Ring buffer: always write, overwrite oldest if full
+    const uint32_t write_idx = write_index_.fetch_add(1, std::memory_order_relaxed);
+    const uint32_t buf_idx = write_idx % CAPACITY;
+    
+    buf_[buf_idx] = item;
+    
+    // Update tail to point past this write
+    tail_.store(write_idx + 1, std::memory_order_release);
+    
+    // If we overwrote old data, advance head to maintain at least one slot
+    // This prevents reading stale data that's been overwritten
+    uint32_t current_head = head_.load(std::memory_order_acquire);
+    uint32_t current_tail = write_idx + 1;
+    
+    // Ensure head doesn't lag too far behind (keep at most CAPACITY-1 items)
+    if (current_tail - current_head > CAPACITY - 1) {
+        head_.store(current_tail - (CAPACITY - 1), std::memory_order_release);
+    }
+    
+    return true;  // Always succeeds
 }
 
 bool StatusQueue::pop(StatusSnapshot& item) {
     const uint32_t current_head = head_.load(std::memory_order_relaxed);
-    if (current_head == tail_.load(std::memory_order_acquire)) return false;  // Empty
-    item = buf_[current_head];
-    head_.store((current_head + 1) % CAPACITY, std::memory_order_release);
+    const uint32_t current_tail = tail_.load(std::memory_order_acquire);
+    
+    if (current_head >= current_tail) return false;  // Empty
+    
+    const uint32_t buf_idx = current_head % CAPACITY;
+    item = buf_[buf_idx];
+    head_.store(current_head + 1, std::memory_order_release);
     return true;
 }
 
 bool StatusQueue::latest(StatusSnapshot& item) {
-    bool found = false;
-    StatusSnapshot tmp;
-    while (pop(tmp)) {
-        item = tmp;
-        found = true;
-    }
-    return found;
+    const uint32_t current_tail = tail_.load(std::memory_order_acquire);
+    const uint32_t current_head = head_.load(std::memory_order_acquire);
+    
+    if (current_head >= current_tail) return false;  // Empty
+    
+    // Get the last written item (tail - 1)
+    const uint32_t last_idx = current_tail - 1;
+    const uint32_t buf_idx = last_idx % CAPACITY;
+    item = buf_[buf_idx];
+    return true;
 }
 
 // ---- Helper functions ----
@@ -219,6 +240,14 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         ok = false;
     }
 
+    // Read entering water temp (0x0003)
+    try {
+        raw = modbus_client_->readRegister(REG_ENTERING_WATER_TEMP);
+        status.entering_water_temp = raw_to_temp(raw);
+    } catch (const ModbusException&) {
+        // Non-critical, leave as 0
+    }
+
     // Read DHW tank temp (0x00CE)
     try {
         raw = modbus_client_->readRegister(REG_DHW_TANK_TEMP);
@@ -282,25 +311,126 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         ok = false;
     }
 
-    // Read power monitoring registers
-    try {
-        int16_t ac_current_raw = modbus_client_->readRegister(REG_AC_CURRENT);
-        int16_t dc_current_raw = modbus_client_->readRegister(REG_DC_CURRENT);
-        int16_t ac_voltage_raw = modbus_client_->readRegister(REG_AC_VOLTAGE);
-        int16_t dc_voltage_raw = modbus_client_->readRegister(REG_DC_VOLTAGE);
+    // Read power monitoring registers (individual reads — one failure does not zero the others)
+    {
+        int16_t raw;
+        float ac_current = 0.0f, ac_voltage = 0.0f;
+        bool got_current = false, got_voltage = false;
 
-        // Apply scaling factors per device spec
-        status.ac_current = static_cast<float>(ac_current_raw) * 2.0f;   // Actual = Display * 2
-        status.dc_current = static_cast<float>(dc_current_raw) * 4.0f;   // Actual = Display * 4
-        status.ac_voltage = static_cast<float>(ac_voltage_raw);           // Actual = Display
-        status.dc_voltage = static_cast<float>(dc_voltage_raw) / 2.0f;   // Actual = Display / 2
-        status.ac_power = status.ac_voltage * status.ac_current;          // Power in Watts (AC)
+        try {
+            raw = modbus_client_->readRegister(REG_AC_CURRENT);
+            status.ac_current = static_cast<float>(raw) * 2.0f;   // Manual: Actual = Display × 2
+            ac_current = status.ac_current;
+            got_current = true;
+        } catch (const ModbusException&) {
+            status.ac_current = 0.0f;
+        }
+
+        try {
+            raw = modbus_client_->readRegister(REG_DC_CURRENT);
+            status.dc_current = static_cast<float>(raw) * 4.0f;   // Manual: Actual = Display × 4
+        } catch (const ModbusException&) {
+            status.dc_current = 0.0f;
+        }
+
+        try {
+            raw = modbus_client_->readRegister(REG_AC_VOLTAGE);
+            status.ac_voltage = static_cast<float>(raw);           // Manual: Actual = Display
+            ac_voltage = status.ac_voltage;
+            got_voltage = true;
+        } catch (const ModbusException&) {
+            status.ac_voltage = 0.0f;
+        }
+
+        try {
+            raw = modbus_client_->readRegister(REG_DC_VOLTAGE);
+            status.dc_voltage = static_cast<float>(raw) / 2.0f;   // Manual: Actual = Display / 2
+        } catch (const ModbusException&) {
+            status.dc_voltage = 0.0f;
+        }
+
+        // Calculate power only if both V and I were obtained
+        if (got_current && got_voltage) {
+            status.ac_power_va = ac_voltage * ac_current;                    // Apparent power (VA)
+            status.ac_power_w = status.ac_power_va * ESTIMATED_POWER_FACTOR; // Estimated real power (W)
+            status.power_valid = true;
+        } else {
+            status.ac_power_va = 0.0f;
+            status.ac_power_w = 0.0f;
+            status.power_valid = false;
+        }
+    }
+
+    // Read diagnostic registers (non-critical — failures don't affect ok flag)
+    try {
+        raw = modbus_client_->readRegister(REG_UNIT_CAPACITY);
+        status.unit_capacity_kw = raw;  // Raw = kW rating (4,6,8,10,12,14,16)
     } catch (const ModbusException&) {
-        status.ac_current = 0.0f;
-        status.dc_current = 0.0f;
-        status.ac_voltage = 0.0f;
-        status.dc_voltage = 0.0f;
-        status.ac_power = 0.0f;
+        status.unit_capacity_kw = 0;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_COMPRESSOR_FREQ);
+        status.compressor_freq = static_cast<float>(raw);  // 1 Hz units
+    } catch (const ModbusException&) {
+        status.compressor_freq = 0.0f;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_WATER_FLOW);
+        status.water_flow = static_cast<float>(raw) / 100.0f;  // m³/h × 100
+    } catch (const ModbusException&) {
+        status.water_flow = 0.0f;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_ACTUAL_CAPACITY_OUTPUT);
+        status.actual_capacity_output = raw;
+    } catch (const ModbusException&) {
+        status.actual_capacity_output = 0;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_ODU_INPUT_STATUS);
+        status.odu_input_status = raw;
+    } catch (const ModbusException&) {
+        status.odu_input_status = 0;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_COMPRESSOR_RUNTIME);
+        status.compressor_runtime_h = raw;
+    } catch (const ModbusException&) {
+        status.compressor_runtime_h = 0;
+    }
+
+    try {
+        raw = modbus_client_->readRegister(REG_PUMP_RUNTIME);
+        status.pump_runtime_h = raw;
+    } catch (const ModbusException&) {
+        status.pump_runtime_h = 0;
+    }
+
+    // Calculate COP using water flow and delta-T after reading water_flow.
+    // COP = heat_output / electrical_input
+    // heat_output = flow × 1000/3600 × 4186 × (T_leaving - T_entering)
+    // where flow is in m³/h, T in °C, result in Watts
+    status.heat_output_w = 0.0f;
+    status.cop = 0.0f;
+    status.cop_valid = false;
+
+    if (status.water_flow > 0.01f && status.power_valid &&
+        status.leaving_water_temp > 0.0f && status.entering_water_temp > -50.0f) {
+        float delta_t = status.leaving_water_temp - status.entering_water_temp;
+        if (delta_t > 0.1f) {
+            // flow_m3h / 3600 = m³/s → × 1000 = kg/s, × 4186 J/(kg·K) = W/K
+            float flow_kg_s = (status.water_flow * 1000.0f) / 3600.0f;
+            status.heat_output_w = flow_kg_s * 4186.0f * delta_t;
+            if (status.ac_power_w > 0.0f) {
+                status.cop = status.heat_output_w / status.ac_power_w;
+                status.cop_valid = true;
+            }
+        }
     }
 
     status.device_online = ok;
@@ -565,21 +695,17 @@ void ControlLoop::threadFunc() {
             // Set working mode for status reporting
             status.working_mode = desired_working_mode_;
 
-            // Publish status to queue
+            // Publish status to queue (always succeeds with ring buffer)
             if (status_queue_) {
-                if (!status_queue_->push(status)) {
-                    WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Status queue full, dropping snapshot");
-                }
+                status_queue_->push(status);
             }
         } else {
             WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to read status");
-            // Publish offline status
+            // Publish offline status (always succeeds with ring buffer)
             status.device_online = false;
             status.working_mode = desired_working_mode_;
             if (status_queue_) {
-                if (!status_queue_->push(status)) {
-                    WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Status queue full, dropping snapshot");
-                }
+                status_queue_->push(status);
             }
         }
 

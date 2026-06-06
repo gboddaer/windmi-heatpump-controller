@@ -39,14 +39,19 @@ bool JsonHelpers::parseString(const std::string& json, const std::string& key, s
 
 std::string JsonHelpers::generateStatusJson(
     double dhw_temp, double dhw_target,
-    double heating_temp, double heating_target,
+    double heating_temp, double entering_water_temp, double heating_target,
     double outdoor_temp, double leaving_water_temp,
     const std::string& mode, const std::string& running_status,
     const std::string& priority, const std::string& status,
     bool device_online,
     double ac_current, double dc_current,
     double ac_voltage, double dc_voltage,
-    double ac_power, int working_mode) {
+    double ac_power_va, double ac_power_w, bool power_valid,
+    double compressor_freq, double water_flow, int unit_capacity_kw,
+    int actual_capacity_output, int odu_input_status,
+    int compressor_runtime_h, int pump_runtime_h,
+    double heat_output_w, double cop, bool cop_valid,
+    int working_mode) {
 
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(1);
@@ -57,6 +62,7 @@ std::string JsonHelpers::generateStatusJson(
         << "\"heatingTarget\":" << heating_target << ","
         << "\"outdoorTemperature\":" << outdoor_temp << ","
         << "\"leavingWaterTemperature\":" << leaving_water_temp << ","
+        << "\"enteringWaterTemperature\":" << entering_water_temp << ","
         << "\"mode\":\"" << mode << "\","
         << "\"runningStatus\":\"" << running_status << "\","
         << "\"priority\":\"" << priority << "\","
@@ -66,7 +72,19 @@ std::string JsonHelpers::generateStatusJson(
         << "\"dcCurrent\":" << dc_current << ","
         << "\"acVoltage\":" << ac_voltage << ","
         << "\"dcVoltage\":" << dc_voltage << ","
-        << "\"acPower\":" << ac_power << ","
+        << "\"acPowerVA\":" << ac_power_va << ","
+        << "\"acPowerW\":" << ac_power_w << ","
+        << "\"powerValid\":" << (power_valid ? "true" : "false") << ","
+        << "\"compressorFrequency\":" << compressor_freq << ","
+        << "\"waterFlow\":" << water_flow << ","
+        << "\"unitCapacityKw\":" << unit_capacity_kw << ","
+        << "\"actualCapacityOutput\":" << actual_capacity_output << ","
+        << "\"oduInputStatus\":" << odu_input_status << ","
+        << "\"compressorRuntimeHours\":" << compressor_runtime_h << ","
+        << "\"pumpRuntimeHours\":" << pump_runtime_h << ","
+        << "\"heatOutputW\":" << heat_output_w << ","
+        << "\"cop\":" << cop << ","
+        << "\"copValid\":" << (cop_valid ? "true" : "false") << ","
         << "\"workingMode\":" << working_mode
         << "}";
     return oss.str();
