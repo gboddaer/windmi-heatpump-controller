@@ -213,28 +213,48 @@ static bool read_status(status_snapshot_t *status) {
         ok = false;
     }
     
-    // Read power monitoring registers
-    int16_t ac_current_raw, dc_current_raw, ac_voltage_raw, dc_voltage_raw;
-    if (modbus_read_register(thread_client, REG_AC_CURRENT, &ac_current_raw) == 0 &&
-        modbus_read_register(thread_client, REG_DC_CURRENT, &dc_current_raw) == 0 &&
-        modbus_read_register(thread_client, REG_AC_VOLTAGE, &ac_voltage_raw) == 0 &&
-        modbus_read_register(thread_client, REG_DC_VOLTAGE, &dc_voltage_raw) == 0) {
-        // Apply scaling factors per device spec
-        status->ac_current = ac_current_raw * 2.0f;      // Actual = Display * 2
-        status->dc_current = dc_current_raw * 4.0f;      // Actual = Display * 4
-        status->ac_voltage = (float)ac_voltage_raw;      // Actual = Display
-        status->dc_voltage = dc_voltage_raw / 2.0f;      // Actual = Display / 2
-        status->ac_power_va = status->ac_voltage * status->ac_current;  // Apparent power (VA)
-        status->ac_power_w = status->ac_power_va * ESTIMATED_POWER_FACTOR;  // Estimated real power (W)
-        status->power_valid = true;
+    // Read power monitoring registers (individual reads — one failure does not zero the others)
+    int16_t raw;
+    float ac_current = 0.0f, ac_voltage = 0.0f;
+    int got_current = 0, got_voltage = 0;
+
+    if (modbus_read_register(thread_client, REG_AC_CURRENT, &raw) == 0) {
+        status->ac_current = raw * 2.0f;      // Actual = Display × 2
+        ac_current = status->ac_current;
+        got_current = 1;
     } else {
         status->ac_current = 0.0f;
+    }
+
+    if (modbus_read_register(thread_client, REG_DC_CURRENT, &raw) == 0) {
+        status->dc_current = raw * 4.0f;      // Actual = Display × 4
+    } else {
         status->dc_current = 0.0f;
+    }
+
+    if (modbus_read_register(thread_client, REG_AC_VOLTAGE, &raw) == 0) {
+        status->ac_voltage = (float)raw;      // Actual = Display
+        ac_voltage = status->ac_voltage;
+        got_voltage = 1;
+    } else {
         status->ac_voltage = 0.0f;
+    }
+
+    if (modbus_read_register(thread_client, REG_DC_VOLTAGE, &raw) == 0) {
+        status->dc_voltage = raw / 2.0f;      // Actual = Display / 2
+    } else {
         status->dc_voltage = 0.0f;
+    }
+
+    // Calculate power only if both V and I were obtained
+    if (got_current && got_voltage) {
+        status->ac_power_va = ac_voltage * ac_current;        // Apparent power (VA)
+        status->ac_power_w = status->ac_power_va * ESTIMATED_POWER_FACTOR;  // Estimated real power (W)
+        status->power_valid = 1;
+    } else {
         status->ac_power_va = 0.0f;
         status->ac_power_w = 0.0f;
-        status->power_valid = false;
+        status->power_valid = 0;
     }
     
     status->device_online = ok;

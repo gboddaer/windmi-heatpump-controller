@@ -281,30 +281,54 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         ok = false;
     }
 
-    // Read power monitoring registers
-    try {
-        int16_t ac_current_raw = modbus_client_->readRegister(REG_AC_CURRENT);
-        int16_t dc_current_raw = modbus_client_->readRegister(REG_DC_CURRENT);
-        int16_t ac_voltage_raw = modbus_client_->readRegister(REG_AC_VOLTAGE);
-        int16_t dc_voltage_raw = modbus_client_->readRegister(REG_DC_VOLTAGE);
+    // Read power monitoring registers (individual reads — one failure does not zero the others)
+    {
+        int16_t raw;
+        float ac_current = 0.0f, ac_voltage = 0.0f;
+        bool got_current = false, got_voltage = false;
 
-        // Apply scaling factors per device spec
-        status.ac_current = static_cast<float>(ac_current_raw) * 2.0f;   // Actual = Display * 2
-        status.dc_current = static_cast<float>(dc_current_raw) * 4.0f;   // Actual = Display * 4
-        status.ac_voltage = static_cast<float>(ac_voltage_raw);           // Actual = Display
-        status.dc_voltage = static_cast<float>(dc_voltage_raw) / 2.0f;   // Actual = Display / 2
-        // Calculate power
-        status.ac_power_va = status.ac_voltage * status.ac_current;       // Apparent power (VA)
-        status.ac_power_w = status.ac_power_va * ESTIMATED_POWER_FACTOR;  // Estimated real power (W)
-        status.power_valid = true;
-    } catch (const ModbusException&) {
-        status.ac_current = 0.0f;
-        status.dc_current = 0.0f;
-        status.ac_voltage = 0.0f;
-        status.dc_voltage = 0.0f;
-        status.ac_power_va = 0.0f;
-        status.ac_power_w = 0.0f;
-        status.power_valid = false;
+        try {
+            raw = modbus_client_->readRegister(REG_AC_CURRENT);
+            status.ac_current = static_cast<float>(raw) * 2.0f;   // Manual: Actual = Display × 2
+            ac_current = status.ac_current;
+            got_current = true;
+        } catch (const ModbusException&) {
+            status.ac_current = 0.0f;
+        }
+
+        try {
+            raw = modbus_client_->readRegister(REG_DC_CURRENT);
+            status.dc_current = static_cast<float>(raw) * 4.0f;   // Manual: Actual = Display × 4
+        } catch (const ModbusException&) {
+            status.dc_current = 0.0f;
+        }
+
+        try {
+            raw = modbus_client_->readRegister(REG_AC_VOLTAGE);
+            status.ac_voltage = static_cast<float>(raw);           // Manual: Actual = Display
+            ac_voltage = status.ac_voltage;
+            got_voltage = true;
+        } catch (const ModbusException&) {
+            status.ac_voltage = 0.0f;
+        }
+
+        try {
+            raw = modbus_client_->readRegister(REG_DC_VOLTAGE);
+            status.dc_voltage = static_cast<float>(raw) / 2.0f;   // Manual: Actual = Display / 2
+        } catch (const ModbusException&) {
+            status.dc_voltage = 0.0f;
+        }
+
+        // Calculate power only if both V and I were obtained
+        if (got_current && got_voltage) {
+            status.ac_power_va = ac_voltage * ac_current;                    // Apparent power (VA)
+            status.ac_power_w = status.ac_power_va * ESTIMATED_POWER_FACTOR; // Estimated real power (W)
+            status.power_valid = true;
+        } else {
+            status.ac_power_va = 0.0f;
+            status.ac_power_w = 0.0f;
+            status.power_valid = false;
+        }
     }
 
     status.device_online = ok;
