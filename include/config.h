@@ -96,7 +96,11 @@ extern "C" {
 // REG_DEVICE_TYPE is kept as alias for backwards compatibility.
 #define REG_DEVICE_TYPE           REG_UNIT_CAPACITY  // Alias: same register, old name
 #define REG_COMPRESSOR_FREQ       0x0017  // R  - Actual compressor frequency (1 Hz)
+// NOTE: Address 0x0017 is from hvdb gist; NOT confirmed in Rotenso Windmi manual.
+// Requires hardware validation. Alternative: 0x100F (required freq) may be more reliable.
 #define REG_WATER_FLOW            0x102A  // R  - Water flow feedback (m3/h × 100)
+// NOTE: Address 0x102A is from hvdb gist; NOT confirmed in Rotenso Windmi manual.
+// Required for COP calculation. Requires hardware validation.
 #define REG_ACTUAL_CAPACITY_OUTPUT 0x1004  // R  - Actual capacity output
 #define REG_ODU_INPUT_STATUS      0x101F  // R  - Outdoor unit input status (bit flags)
 #define REG_COMPRESSOR_RUNTIME    0x0174  // R  - Compressor runtime (hours)

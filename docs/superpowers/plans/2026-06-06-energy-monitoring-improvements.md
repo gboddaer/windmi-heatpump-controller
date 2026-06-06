@@ -1,6 +1,6 @@
 # Energy Monitoring Improvements Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix power monitoring issues: rename VA→W mislabel, add entering water temp, add COP/energy fields, harden power reads, add diagnostic registers, rename REG_DEVICE_TYPE→REG_UNIT_CAPACITY.
 
@@ -30,7 +30,7 @@
 - Modify: `include/core/ControlLoop.hpp`
 - Modify: `tests/core/test_control_loop.cpp`
 
-- [ ] **Step 1: Add ac_power_va and ac_power_w fields to StatusSnapshot, add POWER_FACTOR constant**
+- [x] **Step 1: Add ac_power_va and ac_power_w fields to StatusSnapshot, add POWER_FACTOR constant**
 
 In `include/core/ControlLoop.hpp`, change the power monitoring section of `StatusSnapshot` from:
 
@@ -64,7 +64,7 @@ Also add this constant below `#define DHW_HYSTERESIS_C`:
 #define ESTIMATED_POWER_FACTOR  0.90f
 ```
 
-- [ ] **Step 2: Update tests to match new field names**
+- [x] **Step 2: Update tests to match new field names**
 
 In `tests/core/test_control_loop.cpp`, change the `DefaultValues` test:
 
@@ -93,7 +93,7 @@ TEST(PowerScalingTest, AcPowerWEstimatedWithPowerFactor) {
 }
 ```
 
-- [ ] **Step 3: Build and run tests**
+- [x] **Step 3: Build and run tests**
 
 Run: `cd /home/gbo/develop/wpomp && cmake --build build --target test_control_loop 2>&1 | tail -5`
 
@@ -101,7 +101,7 @@ Then: `cd /home/gbo/develop/wpomp/build && ./tests/core/test_control_loop`
 
 Expected: All tests PASS. The old `ac_power` field no longer exists, replaced by `ac_power_va` and `ac_power_w`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add include/core/ControlLoop.hpp tests/core/test_control_loop.cpp
@@ -115,7 +115,7 @@ git commit -m "refactor: rename ac_power to ac_power_va, add ac_power_w with pow
 **Files:**
 - Modify: `src/core/ControlLoop.cpp`
 
-- [ ] **Step 1: Replace the all-or-nothing power read block with individual try/catch**
+- [x] **Step 1: Replace the all-or-nothing power read block with individual try/catch**
 
 In `src/core/ControlLoop.cpp`, replace the entire power monitoring section in `readStatus()` from:
 
@@ -196,13 +196,13 @@ to:
     }
 ```
 
-- [ ] **Step 2: Build and verify compilation**
+- [x] **Step 2: Build and verify compilation**
 
 Run: `cd /home/gbo/develop/wpomp && cmake --build build 2>&1 | tail -10`
 
 Expected: Build succeeds with no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/core/ControlLoop.cpp
@@ -217,7 +217,7 @@ git commit -m "fix: individual try/catch per power register, compute VA and esti
 - Modify: `include/core/ControlLoop.hpp`
 - Modify: `src/core/ControlLoop.cpp`
 
-- [ ] **Step 1: Add entering_water_temp field to StatusSnapshot**
+- [x] **Step 1: Add entering_water_temp field to StatusSnapshot**
 
 In `include/core/ControlLoop.hpp`, after `float leaving_water_temp = 0.0f;` add:
 
@@ -225,7 +225,7 @@ In `include/core/ControlLoop.hpp`, after `float leaving_water_temp = 0.0f;` add:
     float entering_water_temp = 0.0f; // From REG_ENTERING_WATER_TEMP (0x0003, 0.1°C)
 ```
 
-- [ ] **Step 2: Read entering water temp in readStatus()**
+- [x] **Step 2: Read entering water temp in readStatus()**
 
 In `src/core/ControlLoop.cpp`, after the leaving water temp read block, add:
 
@@ -239,7 +239,7 @@ In `src/core/ControlLoop.cpp`, after the leaving water temp read block, add:
     }
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add include/core/ControlLoop.hpp src/core/ControlLoop.cpp
@@ -255,7 +255,7 @@ git commit -m "feat: add entering water temperature field and register read"
 - Modify: `include/core/ControlLoop.hpp`
 - Modify: `src/core/ControlLoop.cpp`
 
-- [ ] **Step 1: Add new register defines in config.h**
+- [x] **Step 1: Add new register defines in config.h**
 
 After the existing `// === POWER MONITORING REGISTERS` section in `include/config.h`, add:
 
@@ -288,7 +288,7 @@ to:
 #define REG_DEVICE_TYPE           REG_UNIT_CAPACITY  // Alias: same register, old name
 ```
 
-- [ ] **Step 2: Add diagnostic fields to StatusSnapshot**
+- [x] **Step 2: Add diagnostic fields to StatusSnapshot**
 
 In `include/core/ControlLoop.hpp`, add after the power monitoring section:
 
@@ -303,7 +303,7 @@ In `include/core/ControlLoop.hpp`, add after the power monitoring section:
     int pump_runtime_h = 0;              // Pump runtime in hours (from 0x0176)
 ```
 
-- [ ] **Step 3: Read diagnostic registers in readStatus()**
+- [x] **Step 3: Read diagnostic registers in readStatus()**
 
 In `src/core/ControlLoop.cpp`, add at the end of `readStatus()` (before `status.device_online = ok;`):
 
@@ -359,7 +359,7 @@ In `src/core/ControlLoop.cpp`, add at the end of `readStatus()` (before `status.
     }
 ```
 
-- [ ] **Step 4: Add tests for new register defines**
+- [x] **Step 4: Add tests for new register defines**
 
 In `tests/core/test_control_loop.cpp`, add to `ConfigRegisterTest`:
 
@@ -389,7 +389,7 @@ TEST(StatusSnapshotTest, DiagnosticDefaults) {
 }
 ```
 
-- [ ] **Step 5: Build and run tests**
+- [x] **Step 5: Build and run tests**
 
 Run: `cd /home/gbo/develop/wpomp && cmake --build build --target test_control_loop 2>&1 | tail -5`
 
@@ -397,7 +397,7 @@ Then: `cd /home/gbo/develop/wpomp/build && ./tests/core/test_control_loop`
 
 Expected: All tests PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add include/config.h include/core/ControlLoop.hpp src/core/ControlLoop.cpp tests/core/test_control_loop.cpp
@@ -420,7 +420,7 @@ git commit -m "feat: add diagnostic registers (capacity, compressor freq, water 
 - Modify: `include/core/ControlLoop.hpp`
 - Modify: `src/core/ControlLoop.cpp`
 
-- [ ] **Step 1: Add COP fields to StatusSnapshot**
+- [x] **Step 1: Add COP fields to StatusSnapshot**
 
 In `include/core/ControlLoop.hpp`, after the diagnostic section added in Task 4, add:
 
@@ -431,7 +431,7 @@ In `include/core/ControlLoop.hpp`, after the diagnostic section added in Task 4,
     bool cop_valid = false;             // True if COP calculation had valid inputs
 ```
 
-- [ ] **Step 2: Calculate COP in readStatus()**
+- [x] **Step 2: Calculate COP in readStatus()**
 
 In `src/core/ControlLoop.cpp`, after the diagnostic register reads and before `status.device_online = ok;`, add:
 
@@ -459,7 +459,7 @@ In `src/core/ControlLoop.cpp`, after the diagnostic register reads and before `s
     }
 ```
 
-- [ ] **Step 3: Add test**
+- [x] **Step 3: Add test**
 
 In `tests/core/test_control_loop.cpp`, add:
 
@@ -482,7 +482,7 @@ TEST(COPEstimationTest, COPWithKnownValues) {
 }
 ```
 
-- [ ] **Step 4: Build and run tests**
+- [x] **Step 4: Build and run tests**
 
 Run: `cd /home/gbo/develop/wpomp && cmake --build build --target test_control_loop 2>&1 | tail -5`
 
@@ -490,7 +490,7 @@ Then: `cd /home/gbo/develop/wpomp/build && ./tests/core/test_control_loop`
 
 Expected: All tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add include/core/ControlLoop.hpp src/core/ControlLoop.cpp tests/core/test_control_loop.cpp
@@ -506,7 +506,7 @@ git commit -m "feat: add COP estimation using water flow and delta-T"
 - Modify: `src/utils/JsonHelpers.cpp`
 - Modify: `src/web/WebServer.cpp`
 
-- [ ] **Step 1: Update JsonHelpers.hpp signature**
+- [x] **Step 1: Update JsonHelpers.hpp signature**
 
 In `include/utils/JsonHelpers.hpp`, add the new parameters to `generateStatusJson`:
 
@@ -547,7 +547,7 @@ to:
         int working_mode);
 ```
 
-- [ ] **Step 2: Update JsonHelpers.cpp implementation**
+- [x] **Step 2: Update JsonHelpers.cpp implementation**
 
 In `src/utils/JsonHelpers.cpp`, update the `generateStatusJson` function body:
 
@@ -609,7 +609,7 @@ std::string JsonHelpers::generateStatusJson(
 }
 ```
 
-- [ ] **Step 3: Update WebServer.cpp call sites**
+- [x] **Step 3: Update WebServer.cpp call sites**
 
 In `src/web/WebServer.cpp`, update the `generateStatusJson` call to include all new fields. Find the existing call and replace it with:
 
@@ -663,13 +663,13 @@ Also update the plain-JSON fallback format string in the status handler if there
 
 Make sure the format arguments match the new fields exactly.
 
-- [ ] **Step 4: Build and verify**
+- [x] **Step 4: Build and verify**
 
 Run: `cd /home/gbo/develop/wpomp && cmake --build build 2>&1 | tail -10`
 
 Expected: Build succeeds.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add include/utils/JsonHelpers.hpp src/utils/JsonHelpers.cpp src/web/WebServer.cpp
@@ -684,7 +684,7 @@ git commit -m "feat: add new fields to JSON API (powerVA/powerW, enteringWater, 
 - Modify: `include/config.h` (already done in Task 4 step 1)
 - Modify: `tests/core/test_control_loop.cpp`
 
-- [ ] **Step 1: Verify REG_DEVICE_TYPE alias works in tests**
+- [x] **Step 1: Verify REG_DEVICE_TYPE alias works in tests**
 
 In `tests/core/test_control_loop.cpp`, the test should already reference the new name from Task 4. Verify:
 
@@ -695,13 +695,13 @@ In `tests/core/test_control_loop.cpp`, the test should already reference the new
 
 If the old test still references `REG_DEVICE_TYPE` directly with `0x1006`, update it to use `REG_UNIT_CAPACITY`.
 
-- [ ] **Step 2: Build and run full test suite**
+- [x] **Step 2: Build and run full test suite**
 
 Run: `cd /home/gbo/develop/wpomp && cmake --build build && cd build && ctest --output-on-failure`
 
 Expected: All tests PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/core/test_control_loop.cpp
@@ -715,19 +715,19 @@ git commit -m "test: update tests for REG_UNIT_CAPACITY rename and new diagnosti
 **Files:**
 - All modified files from Tasks 1-7
 
-- [ ] **Step 1: Clean rebuild**
+- [x] **Step 1: Clean rebuild**
 
 Run: `cd /home/gbo/develop/wpomp && cmake --build build --clean-first 2>&1 | tail -15`
 
 Expected: Clean build with no warnings or errors.
 
-- [ ] **Step 2: Run all tests**
+- [x] **Step 2: Run all tests**
 
 Run: `cd /home/gbo/develop/wpomp/build && ctest --output-on-failure`
 
 Expected: All tests PASS.
 
-- [ ] **Step 3: Verify JSON output includes all new fields**
+- [x] **Step 3: Verify JSON output includes all new fields**
 
 Run a quick manual test if the binary can be executed, or inspect the `generateStatusJson` function to confirm all fields are present:
 
@@ -739,7 +739,7 @@ Run a quick manual test if the binary can be executed, or inspect the `generateS
 // heatOutputW, cop, copValid
 ```
 
-- [ ] **Step 4: Final commit**
+- [x] **Step 4: Final commit**
 
 ```bash
 git add -A
