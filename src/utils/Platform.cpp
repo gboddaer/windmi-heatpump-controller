@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <time.h>
 
 #ifdef _WIN32
 #include <io.h>
@@ -598,6 +599,30 @@ ConditionVariable::ConditionVariable() {
 
 ConditionVariable::~ConditionVariable() {
     pthread_cond_destroy(&cond_);
+}
+
+void ConditionVariable::notify_one() {
+    pthread_cond_signal(&cond_);
+}
+
+void ConditionVariable::notify_all() {
+    pthread_cond_broadcast(&cond_);
+}
+
+void ConditionVariable::wait(UniqueLock& lock) {
+    pthread_cond_wait(&cond_, lock.mutex()->native_handle());
+}
+
+bool ConditionVariable::wait_for(UniqueLock& lock, unsigned int ms) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    ts.tv_nsec += (ms % 1000) * 1000000;
+    ts.tv_sec += ms / 1000 + (ts.tv_nsec >= 1000000000 ? 1 : 0);
+    if (ts.tv_nsec >= 1000000000) {
+        ts.tv_nsec -= 1000000000;
+    }
+    int rc = pthread_cond_timedwait(&cond_, lock.mutex()->native_handle(), &ts);
+    return rc == 0;
 }
 
 }  // namespace windmi

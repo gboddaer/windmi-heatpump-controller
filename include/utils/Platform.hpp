@@ -1,20 +1,11 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <csignal>
 #include <functional>
 #include <string>
-#include <time.h>  // for clock_gettime / CLOCK_MONOTONIC
-
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include <pthread.h>
-#else
-#include <pthread.h>
-#include <sys/file.h>
-#include <unistd.h>
-#endif
 
 namespace windmi::platform {
 
@@ -105,10 +96,9 @@ public:
     // Friend for ConditionVariable access to underlying mutex
     friend class ConditionVariable;
 
-    // Public accessor for ConditionVariable
+private:
     pthread_mutex_t* native_handle() { return &mutex_; }
 
-private:
     pthread_mutex_t mutex_;
 };
 
@@ -201,32 +191,16 @@ public:
     ~ConditionVariable();
 
     /** Wake one waiting thread */
-    void notify_one() {
-        pthread_cond_signal(&cond_);
-    }
+    void notify_one();
 
     /** Wake all waiting threads */
-    void notify_all() {
-        pthread_cond_broadcast(&cond_);
-    }
+    void notify_all();
 
     /** Block until notified. Lock must be held on entry. */
-    inline void wait(UniqueLock& lock) {
-        pthread_cond_wait(&cond_, lock.mutex()->native_handle());
-    }
+    void wait(UniqueLock& lock);
 
     /** Block until notified or timeout. Returns false on timeout. */
-    inline bool wait_for(UniqueLock& lock, unsigned int ms) {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        ts.tv_nsec += (ms % 1000) * 1000000;
-        ts.tv_sec += ms / 1000 + (ts.tv_nsec >= 1000000000 ? 1 : 0);
-        if (ts.tv_nsec >= 1000000000) {
-            ts.tv_nsec -= 1000000000;
-        }
-        int rc = pthread_cond_timedwait(&cond_, lock.mutex()->native_handle(), &ts);
-        return rc == 0;
-    }
+    bool wait_for(UniqueLock& lock, unsigned int ms);
 
     /** Block until predicate returns true. Spurious-wakeup safe. */
     template<typename Predicate>
