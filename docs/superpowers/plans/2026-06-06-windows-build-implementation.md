@@ -764,7 +764,16 @@ Replace the current POSIX socket include block near the top:
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/select.h>
 ```
+
+> **Why `<sys/select.h>` is included:** The current code uses `select()` in
+> `flush_read_buffer` and `receive_exact`. On Windows, `select()` is provided by
+> `<winsock2.h>`, so `<sys/select.h>` must be in the POSIX-only block.
+>
+> **Why `<errno.h>` and `<time.h>` stay outside the ifdef:** MSVC provides both
+> headers. `<errno.h>` is needed on both platforms for `EWOULDBLOCK` and generic
+> error reporting in the POSIX code path.
 
 With:
 
@@ -788,6 +797,7 @@ typedef SOCKET windmi_socket_t;
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/select.h>
 typedef int windmi_socket_t;
 #define WINDMI_INVALID_SOCKET (-1)
 #define windmi_close_socket close
@@ -889,19 +899,30 @@ if (sock == WINDMI_INVALID_SOCKET) {
 }
 ```
 
-- [ ] **Step 6: Replace `inet_addr` with `inet_pton` compatible block**
+- [ ] **Step 6: Update inet_pton error-path cleanup**
+
+> **Why this replaces `inet_addr`, not adds `inet_pton`:** The current code (line 117)
+> already uses `inet_pton(AF_INET, client->ip, &server_addr.sin_addr) <= 0`, which
+> is cross-platform — `<ws2tcpip.h>` (added in Step 1) provides it on Windows.
+> The only change needed is replacing `close(sock)` with `windmi_close_socket(sock)`
+> and adding WSA cleanup so failed address parsing on Windows doesn't leak the
+> `WSAStartup` reference.
 
 Replace:
 
 ```c
-server_addr.sin_addr.s_addr = inet_addr(client->ip);
+if (inet_pton(AF_INET, client->ip, &server_addr.sin_addr) <= 0) {
+    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Invalid address");
+    close(sock);
+    return false;
+}
 ```
 
 With:
 
 ```c
-if (inet_pton(AF_INET, client->ip, &server_addr.sin_addr) != 1) {
-    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "invalid IP address: %s", client->ip);
+if (inet_pton(AF_INET, client->ip, &server_addr.sin_addr) <= 0) {
+    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Invalid address");
     windmi_close_socket(sock);
 #ifdef _WIN32
     if (client->wsa_started) {
@@ -913,25 +934,15 @@ if (inet_pton(AF_INET, client->ip, &server_addr.sin_addr) != 1) {
 }
 ```
 
-- [ ] **Step 7: Replace `close` and connect error handling**
+- [ ] **Step 7: General `close()` → `windmi_close_socket()` rule**
 
-Replace `close(sock)` with `windmi_close_socket(sock)`.
+> **Why this is a rule, not a code block:** Remaining standalone `close(sock)` calls
+> (outside the specific blocks handled in Steps 6 and 8) should simply be
+> replaced with `windmi_close_socket(sock)`. The connect-failure block is handled
+> separately in Step 8 because it also needs WSA cleanup.
 
-Replace connect error logging:
-
-```c
-WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %s", strerror(errno));
-```
-
-With:
-
-```c
-#ifdef _WIN32
-WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %d", windmi_socket_error);
-#else
-WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %s", strerror(errno));
-#endif
-```
+Anywhere outside Steps 6 and 8 where `close(sock)` or `close(client->socket_fd)`
+appears, replace with `windmi_close_socket(sock)` or `windmi_close_socket(client->socket_fd)`.
 
 - [ ] **Step 8: Update disconnect and connect-failure cleanup**
 
@@ -1015,22 +1026,66 @@ int ready = select(nfds, &fds, NULL, NULL, &tv);
 
 Apply this pattern in both `modbus_client_flush_buffer` and the receive loop.
 
-- [ ] **Step 10: Fix send/recv types**
+- [ ] **Step 10: Fix send/recv types for Winsock compatibility**
 
-Replace `ssize_t sent` with:
+> **Why `ssize_t` → `int`:** Winsock's `send()` and `recv()` return `int`, not `ssize_t`.
+> MSVC does not define `ssize_t` by default.
+>
+> **Why `(const char*)` and `(char*)` casts:** Winsock requires `char*` buffers;
+> POSIX `send`/`recv` accept `void*`.
+>
+> **Why `(int)len` cast:** Winsock `send`/`recv` take `int` length; the current code
+> passes `size_t len` which triggers MSVC truncation warnings.
+
+In `send_frame`, replace:
+
+```c
+ssize_t sent = send(client->socket_fd, frame, len, 0);
+return (sent == (ssize_t)len) ? 0 : -1;
+```
+
+With:
 
 ```c
 int sent = send(client->socket_fd, (const char *)frame, (int)len, 0);
+return (sent == (int)len) ? 0 : -1;
 ```
 
-Replace `ssize_t received` with:
+> **Note:** The `(ssize_t)len` cast in the return comparison must also change to
+> `(int)len` to match the new `int sent` type.
+
+In `receive_exact`, replace:
+
+```c
+ssize_t received = recv(client->socket_fd, buffer + total_received,
+                        expected_len - total_received, 0);
+```
+
+With:
 
 ```c
 int received = recv(client->socket_fd, (char *)buffer + total_received,
                     (int)(expected_len - total_received), 0);
 ```
 
-Keep existing logic that checks `sent < 0` and `received <= 0`.
+In `flush_read_buffer`, replace:
+
+```c
+ssize_t n = recv(client->socket_fd, dummy, sizeof(dummy), MSG_DONTWAIT);
+```
+
+With:
+
+```c
+int n = recv(client->socket_fd, (char *)dummy, (int)sizeof(dummy), MSG_DONTWAIT);
+```
+
+> **Why `flush_read_buffer` was missing:** The previous version of this plan only
+> addressed `send_frame` and `receive_exact`, but `flush_read_buffer` at line 162
+> also uses `ssize_t` recv with a `void*` buffer argument, which requires the same
+> Winsock-compatible changes.
+
+Keep existing logic that checks `sent < 0` and `received <= 0` and `n <= 0`.
 
 - [ ] **Step 11: Replace retry sleep**
 
