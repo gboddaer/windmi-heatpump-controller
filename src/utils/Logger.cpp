@@ -21,10 +21,10 @@ namespace windmi {
 // Logger singleton
 // ──────────────────────────────────────────────────────────────────
 
-Logger::Logger() : level_(static_cast<int>(LogLevel::Info))
+Logger::Logger() : mLevel(static_cast<int>(LogLevel::Info))
 {
   // Install default console output at INFO level
-  outputs_.push_back(std::make_unique<ConsoleLogOutput>());
+  mOutputs.push_back(std::make_unique<ConsoleLogOutput>());
 }
 
 Logger::~Logger()
@@ -40,31 +40,31 @@ Logger& Logger::instance()
 
 void Logger::setLevel(LogLevel level)
 {
-  level_.store(static_cast<int>(level), std::memory_order_release);
+  mLevel.store(static_cast<int>(level), std::memory_order_release);
 }
 
 bool Logger::shouldLog(LogLevel level) const
 {
-  return static_cast<int>(level) >= level_.load(std::memory_order_acquire);
+  return static_cast<int>(level) >= mLevel.load(std::memory_order_acquire);
 }
 
 void Logger::addOutput(std::unique_ptr<ILogOutput> output)
 {
-  LockGuard lock(mutex_);
-  outputs_.push_back(std::move(output));
+  LockGuard lock(mMutex);
+  mOutputs.push_back(std::move(output));
 }
 
 void Logger::setOutput(std::unique_ptr<ILogOutput> output)
 {
-  LockGuard lock(mutex_);
-  outputs_.clear();
-  outputs_.push_back(std::move(output));
+  LockGuard lock(mMutex);
+  mOutputs.clear();
+  mOutputs.push_back(std::move(output));
 }
 
 void Logger::log(LogLevel level, const char* tag, const char* file, int line, const char* function,
                  const char* message) const
 {
-  LockGuard lock(mutex_);
+  LockGuard lock(mMutex);
 
   // Create log entry with timestamp
   LogEntry entry;
@@ -77,7 +77,7 @@ void Logger::log(LogLevel level, const char* tag, const char* file, int line, co
   entry.timestamp = std::chrono::system_clock::now();
 
   // Write to all outputs
-  for (const auto& output : outputs_)
+  for (const auto& output : mOutputs)
   {
     output->write(entry);
   }
@@ -109,9 +109,9 @@ void ConsoleLogOutput::write(const LogEntry& entry)
 // FileLogOutput
 // ──────────────────────────────────────────────────────────────────
 
-FileLogOutput::FileLogOutput(const std::string& path) : file_(std::fopen(path.c_str(), "a"))
+FileLogOutput::FileLogOutput(const std::string& path) : mFile(std::fopen(path.c_str(), "a"))
 {
-  if (!file_)
+  if (!mFile)
   {
     // If we can't open the file, just ignore — log to console only
   }
@@ -119,25 +119,25 @@ FileLogOutput::FileLogOutput(const std::string& path) : file_(std::fopen(path.c_
 
 FileLogOutput::~FileLogOutput()
 {
-  if (file_)
+  if (mFile)
   {
-    std::fclose(file_);
-    file_ = nullptr;
+    std::fclose(mFile);
+    mFile = nullptr;
   }
 }
 
 void FileLogOutput::write(const LogEntry& entry)
 {
-  if (!file_)
+  if (!mFile)
     return;
 
   std::string ts = Logger::formatTimestamp(entry.timestamp);
   std::string lvl = Logger::instance().formatLevel(entry.level);
 
   // Determine output stream (no color support for file)
-  fprintf(file_, "[%s] [%-5s] [%-9s] %s (%s:%d)\n", ts.c_str(), lvl.c_str(), entry.tag,
+  fprintf(mFile, "[%s] [%-5s] [%-9s] %s (%s:%d)\n", ts.c_str(), lvl.c_str(), entry.tag,
           entry.message, entry.file, entry.line);
-  std::fflush(file_);
+  std::fflush(mFile);
 }
 
 // ──────────────────────────────────────────────────────────────────

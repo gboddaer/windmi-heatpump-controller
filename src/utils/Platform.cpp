@@ -371,40 +371,40 @@ struct Mutex::Impl
 #endif
 };
 
-Mutex::Mutex() : impl_(new Mutex::Impl)
+Mutex::Mutex() : mImpl(new Mutex::Impl)
 {
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  InitializeCriticalSection(&impl_->cs);
+  InitializeCriticalSection(&mImpl->cs);
 #else
-  pthread_mutex_init(&impl_->mutex, nullptr);
+  pthread_mutex_init(&mImpl->mutex, nullptr);
 #endif
 }
 
 Mutex::~Mutex()
 {
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  DeleteCriticalSection(&impl_->cs);
+  DeleteCriticalSection(&mImpl->cs);
 #else
-  pthread_mutex_destroy(&impl_->mutex);
+  pthread_mutex_destroy(&mImpl->mutex);
 #endif
-  delete impl_;
+  delete mImpl;
 }
 
 void Mutex::lock()
 {
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  EnterCriticalSection(&impl_->cs);
+  EnterCriticalSection(&mImpl->cs);
 #else
-  pthread_mutex_lock(&impl_->mutex);
+  pthread_mutex_lock(&mImpl->mutex);
 #endif
 }
 
 void Mutex::unlock()
 {
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  LeaveCriticalSection(&impl_->cs);
+  LeaveCriticalSection(&mImpl->cs);
 #else
-  pthread_mutex_unlock(&impl_->mutex);
+  pthread_mutex_unlock(&mImpl->mutex);
 #endif
 }
 
@@ -419,15 +419,15 @@ struct ConditionVariable::Impl
 #endif
 };
 
-ConditionVariable::ConditionVariable() : impl_(new ConditionVariable::Impl)
+ConditionVariable::ConditionVariable() : mImpl(new ConditionVariable::Impl)
 {
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  InitializeConditionVariable(&impl_->cv);
+  InitializeConditionVariable(&mImpl->cv);
 #else
   pthread_condattr_t attr;
   pthread_condattr_init(&attr);
   pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
-  pthread_cond_init(&impl_->cond, &attr);
+  pthread_cond_init(&mImpl->cond, &attr);
   pthread_condattr_destroy(&attr);
 #endif
 }
@@ -435,42 +435,42 @@ ConditionVariable::ConditionVariable() : impl_(new ConditionVariable::Impl)
 ConditionVariable::~ConditionVariable()
 {
 #if !defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  pthread_cond_destroy(&impl_->cond);
+  pthread_cond_destroy(&mImpl->cond);
 #endif
-  delete impl_;
+  delete mImpl;
 }
 
 void ConditionVariable::notify_one()
 {
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  WakeConditionVariable(&impl_->cv);
+  WakeConditionVariable(&mImpl->cv);
 #else
-  pthread_cond_signal(&impl_->cond);
+  pthread_cond_signal(&mImpl->cond);
 #endif
 }
 
 void ConditionVariable::notify_all()
 {
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  WakeAllConditionVariable(&impl_->cv);
+  WakeAllConditionVariable(&mImpl->cv);
 #else
-  pthread_cond_broadcast(&impl_->cond);
+  pthread_cond_broadcast(&mImpl->cond);
 #endif
 }
 
 void ConditionVariable::wait(UniqueLock& lock)
 {
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  SleepConditionVariableCS(&impl_->cv, &static_cast<Mutex*>(lock.mutex())->impl_->cs, INFINITE);
+  SleepConditionVariableCS(&mImpl->cv, &static_cast<Mutex*>(lock.mutex())->mImpl->cs, INFINITE);
 #else
-  pthread_cond_wait(&impl_->cond, &static_cast<Mutex*>(lock.mutex())->impl_->mutex);
+  pthread_cond_wait(&mImpl->cond, &static_cast<Mutex*>(lock.mutex())->mImpl->mutex);
 #endif
 }
 
 bool ConditionVariable::wait_for(UniqueLock& lock, unsigned int ms)
 {
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  BOOL r = SleepConditionVariableCS(&impl_->cv, &static_cast<Mutex*>(lock.mutex())->impl_->cs, ms);
+  BOOL r = SleepConditionVariableCS(&mImpl->cv, &static_cast<Mutex*>(lock.mutex())->mImpl->cs, ms);
   if (r)
     return true;
   DWORD err = GetLastError();
@@ -485,7 +485,7 @@ bool ConditionVariable::wait_for(UniqueLock& lock, unsigned int ms)
   ts.tv_sec += ms / 1000 + (ts.tv_nsec >= 1000000000 ? 1 : 0);
   if (ts.tv_nsec >= 1000000000)
     ts.tv_nsec -= 1000000000;
-  return pthread_cond_timedwait(&impl_->cond, &static_cast<Mutex*>(lock.mutex())->impl_->mutex,
+  return pthread_cond_timedwait(&mImpl->cond, &static_cast<Mutex*>(lock.mutex())->mImpl->mutex,
                                 &ts) == 0;
 #endif
 }
@@ -502,10 +502,10 @@ struct Thread::Impl
   bool detached = false;
 };
 
-Thread::Thread(std::function<void()> callable) : impl_(new Thread::Impl)
+Thread::Thread(std::function<void()> callable) : mImpl(new Thread::Impl)
 {
   auto* fp = new std::function<void()>(std::move(callable));
-  impl_->handle = reinterpret_cast<HANDLE>(_beginthreadex(
+  mImpl->handle = reinterpret_cast<HANDLE>(_beginthreadex(
       nullptr, 0,
       +[](void* a) -> unsigned int {
         auto* p = static_cast<std::function<void()>*>(a);
@@ -517,15 +517,15 @@ Thread::Thread(std::function<void()> callable) : impl_(new Thread::Impl)
         delete p;
         return 0;
       },
-      fp, 0, &impl_->thread_id));
-  if (impl_->handle == nullptr)
+      fp, 0, &mImpl->thread_id));
+  if (mImpl->handle == nullptr)
   {
     delete fp;
-    impl_->joined = true;
+    mImpl->joined = true;
   } else
   {
-    impl_->joined = false;
-    impl_->detached = false;
+    mImpl->joined = false;
+    mImpl->detached = false;
   }
 }
 
@@ -538,11 +538,11 @@ struct Thread::Impl
   bool detached = false;
 };
 
-Thread::Thread(std::function<void()> callable) : impl_(new Thread::Impl)
+Thread::Thread(std::function<void()> callable) : mImpl(new Thread::Impl)
 {
   auto* fp = new std::function<void()>(std::move(callable));
   int ret = pthread_create(
-      &impl_->thread, nullptr,
+      &mImpl->thread, nullptr,
       +[](void* a) -> void* {
         auto* p = static_cast<std::function<void()>*>(a);
         try
@@ -557,11 +557,11 @@ Thread::Thread(std::function<void()> callable) : impl_(new Thread::Impl)
   if (ret != 0)
   {
     delete fp;
-    impl_->joined = true;
+    mImpl->joined = true;
   } else
   {
-    impl_->joined = false;
-    impl_->detached = false;
+    mImpl->joined = false;
+    mImpl->detached = false;
   }
 }
 
@@ -571,12 +571,12 @@ Thread::~Thread()
 {
   if (joinable())
     join();
-  delete impl_;
+  delete mImpl;
 }
 
-Thread::Thread(Thread&& other) noexcept : impl_(other.impl_)
+Thread::Thread(Thread&& other) noexcept : mImpl(other.mImpl)
 {
-  other.impl_ = nullptr;
+  other.mImpl = nullptr;
 }
 
 Thread& Thread::operator=(Thread&& other) noexcept
@@ -585,65 +585,65 @@ Thread& Thread::operator=(Thread&& other) noexcept
   {
     if (joinable())
       join();
-    if (impl_)
+    if (mImpl)
     {
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-      if (impl_->handle)
-        CloseHandle(impl_->handle);
+      if (mImpl->handle)
+        CloseHandle(mImpl->handle);
 #endif
-      delete impl_;
+      delete mImpl;
     }
-    impl_ = other.impl_;
-    other.impl_ = nullptr;
+    mImpl = other.mImpl;
+    other.mImpl = nullptr;
   }
   return *this;
 }
 
 bool Thread::joinable() const
 {
-  return impl_ && !impl_->joined && !impl_->detached;
+  return mImpl && !mImpl->joined && !mImpl->detached;
 }
 
 void Thread::join()
 {
-  if (!impl_ || !joinable())
+  if (!mImpl || !joinable())
     return;
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  if (impl_->handle)
+  if (mImpl->handle)
   {
-    WaitForSingleObject(impl_->handle, INFINITE);
-    CloseHandle(impl_->handle);
-    impl_->handle = nullptr;
+    WaitForSingleObject(mImpl->handle, INFINITE);
+    CloseHandle(mImpl->handle);
+    mImpl->handle = nullptr;
   }
-  impl_->joined = true;
+  mImpl->joined = true;
 #else
-  if (impl_->thread)
+  if (mImpl->thread)
   {
-    pthread_join(impl_->thread, nullptr);
-    impl_->thread = 0;
+    pthread_join(mImpl->thread, nullptr);
+    mImpl->thread = 0;
   }
-  impl_->joined = true;
+  mImpl->joined = true;
 #endif
 }
 
 void Thread::detach()
 {
-  if (!impl_ || !joinable())
+  if (!mImpl || !joinable())
     return;
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-  if (impl_->handle)
+  if (mImpl->handle)
   {
-    CloseHandle(impl_->handle);
-    impl_->handle = nullptr;
+    CloseHandle(mImpl->handle);
+    mImpl->handle = nullptr;
   }
-  impl_->detached = true;
+  mImpl->detached = true;
 #else
-  if (impl_->thread)
+  if (mImpl->thread)
   {
-    pthread_detach(impl_->thread);
-    impl_->thread = 0;
+    pthread_detach(mImpl->thread);
+    mImpl->thread = 0;
   }
-  impl_->detached = true;
+  mImpl->detached = true;
 #endif
 }
 
@@ -661,38 +661,38 @@ void* Thread::thread_entry(void* arg)
 
 // ── UniqueLock ─────────────────────────────────────────────────────
 
-UniqueLock::UniqueLock(Mutex& mutex) : mutex_(&mutex), owns_(true)
+UniqueLock::UniqueLock(Mutex& mutex) : mMutex(&mutex), mOwns(true)
 {
-  mutex_->lock();
+  mMutex->lock();
 }
 UniqueLock::~UniqueLock()
 {
-  if (owns_)
-    mutex_->unlock();
+  if (mOwns)
+    mMutex->unlock();
 }
 void UniqueLock::lock()
 {
-  if (!owns_)
+  if (!mOwns)
   {
-    mutex_->lock();
-    owns_ = true;
+    mMutex->lock();
+    mOwns = true;
   }
 }
 void UniqueLock::unlock()
 {
-  if (owns_)
+  if (mOwns)
   {
-    mutex_->unlock();
-    owns_ = false;
+    mMutex->unlock();
+    mOwns = false;
   }
 }
 Mutex* UniqueLock::mutex() const noexcept
 {
-  return mutex_;
+  return mMutex;
 }
 bool UniqueLock::owns_lock() const noexcept
 {
-  return owns_;
+  return mOwns;
 }
 
 } // namespace windmi
@@ -706,28 +706,28 @@ namespace windmi::platform {
 #ifdef _WIN32
 // Windows SerialPort (MSVC + MinGW)
 
-SerialPort::SerialPort() : handle_(nullptr), rs485_enabled_(false), open_(false)
+SerialPort::SerialPort() : mHandle(nullptr), mRs485Enabled(false), mOpen(false)
 {}
 SerialPort::~SerialPort()
 {
   close();
 }
 SerialPort::SerialPort(SerialPort&& o) noexcept
-    : handle_(o.handle_), rs485_enabled_(o.rs485_enabled_), open_(o.open_)
+    : mHandle(o.mHandle), mRs485Enabled(o.mRs485Enabled), mOpen(o.mOpen)
 {
-  o.handle_ = nullptr;
-  o.open_ = false;
+  o.mHandle = nullptr;
+  o.mOpen = false;
 }
 SerialPort& SerialPort::operator=(SerialPort&& o) noexcept
 {
   if (this != &o)
   {
     close();
-    handle_ = o.handle_;
-    rs485_enabled_ = o.rs485_enabled_;
-    open_ = o.open_;
-    o.handle_ = nullptr;
-    o.open_ = false;
+    mHandle = o.mHandle;
+    mRs485Enabled = o.mRs485Enabled;
+    mOpen = o.mOpen;
+    o.mHandle = nullptr;
+    o.mOpen = false;
   }
   return *this;
 }
@@ -758,12 +758,12 @@ bool SerialPort::open(const std::string& device, int baud, char parity, int stop
     } catch (...)
     {}
   }
-  handle_ = CreateFileW(norm.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+  mHandle = CreateFileW(norm.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                         FILE_ATTRIBUTE_NORMAL, nullptr);
-  if (handle_ == INVALID_HANDLE_VALUE)
+  if (mHandle == INVALID_HANDLE_VALUE)
   {
     WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Failed to open serial port %s", device.c_str());
-    handle_ = nullptr;
+    mHandle = nullptr;
     return false;
   }
 
@@ -774,12 +774,12 @@ bool SerialPort::open(const std::string& device, int baud, char parity, int stop
   to.ReadTotalTimeoutMultiplier = 10;
   to.WriteTotalTimeoutConstant = 1000;
   to.WriteTotalTimeoutMultiplier = 10;
-  SetCommTimeouts(handle_, &to);
+  SetCommTimeouts(mHandle, &to);
 
   DCB dcb;
   memset(&dcb, 0, sizeof(dcb));
   dcb.DCBlength = sizeof(DCB);
-  if (!GetCommState(handle_, &dcb))
+  if (!GetCommState(mHandle, &dcb))
   {
     close();
     return false;
@@ -833,13 +833,13 @@ bool SerialPort::open(const std::string& device, int baud, char parity, int stop
   dcb.fDtrControl = DTR_CONTROL_DISABLE;
   dcb.fOutX = FALSE;
   dcb.fInX = FALSE;
-  if (!SetCommState(handle_, &dcb))
+  if (!SetCommState(mHandle, &dcb))
   {
     close();
     return false;
   }
-  rs485_enabled_ = rs485;
-  open_ = true;
+  mRs485Enabled = rs485;
+  mOpen = true;
   WINDMI_LOG_INFO(LOG_TAG_PLATFORM, "Serial port opened: %s @ %d %d%c%d", device.c_str(), baud, 8,
                   parity, stop_bits);
   return true;
@@ -847,72 +847,72 @@ bool SerialPort::open(const std::string& device, int baud, char parity, int stop
 
 void SerialPort::close()
 {
-  if (handle_ && handle_ != INVALID_HANDLE_VALUE)
+  if (mHandle && mHandle != INVALID_HANDLE_VALUE)
   {
-    FlushFileBuffers(handle_);
-    CloseHandle(handle_);
+    FlushFileBuffers(mHandle);
+    CloseHandle(mHandle);
   }
-  handle_ = nullptr;
-  open_ = false;
+  mHandle = nullptr;
+  mOpen = false;
 }
 bool SerialPort::isOpen() const
 {
-  return open_;
+  return mOpen;
 }
 void SerialPort::flush()
 {
-  if (handle_ && handle_ != INVALID_HANDLE_VALUE)
-    FlushFileBuffers(handle_);
+  if (mHandle && mHandle != INVALID_HANDLE_VALUE)
+    FlushFileBuffers(mHandle);
 }
 
 int SerialPort::read(uint8_t* buffer, size_t len, unsigned int timeout_ms)
 {
-  if (!open_ || !buffer || len == 0)
+  if (!mOpen || !buffer || len == 0)
     return -1;
   COMMTIMEOUTS to;
   memset(&to, 0, sizeof(to));
   to.ReadIntervalTimeout = 100;
   to.ReadTotalTimeoutConstant = timeout_ms;
   to.ReadTotalTimeoutMultiplier = 0;
-  SetCommTimeouts(handle_, &to);
+  SetCommTimeouts(mHandle, &to);
   DWORD br = 0;
-  if (!ReadFile(handle_, buffer, static_cast<DWORD>(len), &br, nullptr))
+  if (!ReadFile(mHandle, buffer, static_cast<DWORD>(len), &br, nullptr))
     return -1;
   return static_cast<int>(br);
 }
 
 int SerialPort::write(const uint8_t* buffer, size_t len)
 {
-  if (!open_ || !buffer || len == 0)
+  if (!mOpen || !buffer || len == 0)
     return -1;
   DWORD bw = 0;
-  if (!WriteFile(handle_, buffer, static_cast<DWORD>(len), &bw, nullptr))
+  if (!WriteFile(mHandle, buffer, static_cast<DWORD>(len), &bw, nullptr))
     return -1;
   return static_cast<int>(bw);
 }
 
 #else // POSIX SerialPort (Linux)
 
-SerialPort::SerialPort() : fd_(-1), open_(false)
+SerialPort::SerialPort() : mFd(-1), mOpen(false)
 {}
 SerialPort::~SerialPort()
 {
   close();
 }
-SerialPort::SerialPort(SerialPort&& o) noexcept : fd_(o.fd_), open_(o.open_)
+SerialPort::SerialPort(SerialPort&& o) noexcept : mFd(o.mFd), mOpen(o.mOpen)
 {
-  o.fd_ = -1;
-  o.open_ = false;
+  o.mFd = -1;
+  o.mOpen = false;
 }
 SerialPort& SerialPort::operator=(SerialPort&& o) noexcept
 {
   if (this != &o)
   {
     close();
-    fd_ = o.fd_;
-    open_ = o.open_;
-    o.fd_ = -1;
-    o.open_ = false;
+    mFd = o.mFd;
+    mOpen = o.mOpen;
+    o.mFd = -1;
+    o.mOpen = false;
   }
   return *this;
 }
@@ -920,8 +920,8 @@ SerialPort& SerialPort::operator=(SerialPort&& o) noexcept
 bool SerialPort::open(const std::string& device, int baud, char parity, int stop_bits, bool)
 {
   close();
-  fd_ = ::open(device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
-  if (fd_ < 0)
+  mFd = ::open(device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+  if (mFd < 0)
   {
     WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Failed to open serial device %s: %s", device.c_str(),
                      strerror(errno));
@@ -929,7 +929,7 @@ bool SerialPort::open(const std::string& device, int baud, char parity, int stop
   }
   struct termios tty;
   memset(&tty, 0, sizeof(tty));
-  if (tcgetattr(fd_, &tty) != 0)
+  if (tcgetattr(mFd, &tty) != 0)
   {
     close();
     return false;
@@ -991,14 +991,14 @@ bool SerialPort::open(const std::string& device, int baud, char parity, int stop
   tty.c_iflag &= ~(IXON | IXOFF | IXANY);
   tty.c_cc[VMIN] = 1;
   tty.c_cc[VTIME] = 0;
-  if (tcsetattr(fd_, TCSANOW, &tty) != 0)
+  if (tcsetattr(mFd, TCSANOW, &tty) != 0)
   {
     close();
     return false;
   }
-  fcntl(fd_, F_SETFL, fcntl(fd_, F_GETFL, 0) & ~O_NONBLOCK);
-  tcflush(fd_, TCIOFLUSH);
-  open_ = true;
+  fcntl(mFd, F_SETFL, fcntl(mFd, F_GETFL, 0) & ~O_NONBLOCK);
+  tcflush(mFd, TCIOFLUSH);
+  mOpen = true;
   WINDMI_LOG_INFO(LOG_TAG_PLATFORM, "Serial port opened: %s @ %d %d%c%d", device.c_str(), baud, 8,
                   parity, stop_bits);
   return true;
@@ -1006,37 +1006,37 @@ bool SerialPort::open(const std::string& device, int baud, char parity, int stop
 
 void SerialPort::close()
 {
-  if (fd_ >= 0)
+  if (mFd >= 0)
   {
-    ::close(fd_);
-    fd_ = -1;
+    ::close(mFd);
+    mFd = -1;
   }
-  open_ = false;
+  mOpen = false;
 }
 bool SerialPort::isOpen() const
 {
-  return open_;
+  return mOpen;
 }
 void SerialPort::flush()
 {
-  if (fd_ >= 0)
-    tcflush(fd_, TCIFLUSH);
+  if (mFd >= 0)
+    tcflush(mFd, TCIFLUSH);
 }
 
 int SerialPort::read(uint8_t* buffer, size_t len, unsigned int timeout_ms)
 {
-  if (!open_ || fd_ < 0 || !buffer || len == 0)
+  if (!mOpen || mFd < 0 || !buffer || len == 0)
     return -1;
   fd_set fds;
   struct timeval tv;
   FD_ZERO(&fds);
-  FD_SET(fd_, &fds);
+  FD_SET(mFd, &fds);
   tv.tv_sec = timeout_ms / 1000;
   tv.tv_usec = (timeout_ms % 1000) * 1000;
-  int r = select(fd_ + 1, &fds, nullptr, nullptr, &tv);
+  int r = select(mFd + 1, &fds, nullptr, nullptr, &tv);
   if (r <= 0)
     return (r == 0) ? 0 : -1;
-  ssize_t n = ::read(fd_, buffer, len);
+  ssize_t n = ::read(mFd, buffer, len);
   if (n < 0)
     return (errno == EINTR) ? 0 : -1;
   return static_cast<int>(n);
@@ -1044,9 +1044,9 @@ int SerialPort::read(uint8_t* buffer, size_t len, unsigned int timeout_ms)
 
 int SerialPort::write(const uint8_t* buffer, size_t len)
 {
-  if (!open_ || fd_ < 0 || !buffer || len == 0)
+  if (!mOpen || mFd < 0 || !buffer || len == 0)
     return -1;
-  ssize_t n = ::write(fd_, buffer, len);
+  ssize_t n = ::write(mFd, buffer, len);
   return (n < 0) ? -1 : static_cast<int>(n);
 }
 

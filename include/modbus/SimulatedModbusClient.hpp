@@ -47,20 +47,20 @@ private:
   void updateSimulationLocked();
 
   // Register storage
-  std::unordered_map<uint16_t, int16_t> registers_;
+  std::unordered_map<uint16_t, int16_t> mRegisters;
 
   // Connection state
-  bool connected_;
+  bool mConnected;
 
   // Simulation state
-  mutable windmi::Mutex mutex_;
-  std::chrono::steady_clock::time_point last_update_;
+  mutable windmi::Mutex mMutex;
+  std::chrono::steady_clock::time_point mLastUpdate;
 
   // Ambient temperature for drift simulation (degrees C * 10)
-  int16_t ambient_temp_;
+  int16_t mAmbientTemp;
 
   // Last error message
-  mutable std::string last_error_;
+  mutable std::string mLastError;
 };
 
 } // namespace windmi

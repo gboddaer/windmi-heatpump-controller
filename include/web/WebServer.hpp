@@ -69,15 +69,15 @@ private:
   void apiSetPriorityHandler(struct mg_connection* c, struct mg_str* body);
   void apiSetModeHandler(struct mg_connection* c, struct mg_str* body);
 
-  struct mg_mgr mgr_;
-  std::string static_dir_;
-  CmdQueue* cmd_queue_;
-  StatusQueue* status_queue_;
-  StatusSnapshot last_status_;
-  std::atomic<bool> running_;
-  volatile sig_atomic_t shutting_down_;
-  bool mgr_freed_;
-  std::function<void()> wake_callback_;
+  struct mg_mgr mMgr;
+  std::string mStaticDir;
+  CmdQueue* mCmdQueue;
+  StatusQueue* mStatusQueue;
+  StatusSnapshot mLastStatus;
+  std::atomic<bool> mRunning;
+  volatile sig_atomic_t mShuttingDown;
+  bool mMgrFreed;
+  std::function<void()> mWakeCallback;
 };
 
 } // namespace windmi

@@ -17,60 +17,60 @@ namespace windmi {
 
 // ---- CmdQueue implementation ----
 
-CmdQueue::CmdQueue() : head_(0), tail_(0)
+CmdQueue::CmdQueue() : mHead(0), mTail(0)
 {}
 
 bool CmdQueue::push(const Command& cmd)
 {
-  const uint32_t current_tail = tail_.load(std::memory_order_relaxed);
+  const uint32_t current_tail = mTail.load(std::memory_order_relaxed);
   const uint32_t next_tail = (current_tail + 1) % CAPACITY;
-  if (next_tail == head_.load(std::memory_order_acquire))
+  if (next_tail == mHead.load(std::memory_order_acquire))
     return false; // Full
-  buf_[current_tail] = cmd;
-  tail_.store(next_tail, std::memory_order_release);
+  mBuf[current_tail] = cmd;
+  mTail.store(next_tail, std::memory_order_release);
   return true;
 }
 
 bool CmdQueue::pop(Command& cmd)
 {
-  const uint32_t current_head = head_.load(std::memory_order_relaxed);
-  if (current_head == tail_.load(std::memory_order_acquire))
+  const uint32_t current_head = mHead.load(std::memory_order_relaxed);
+  if (current_head == mTail.load(std::memory_order_acquire))
     return false; // Empty
-  cmd = buf_[current_head];
-  head_.store((current_head + 1) % CAPACITY, std::memory_order_release);
+  cmd = mBuf[current_head];
+  mHead.store((current_head + 1) % CAPACITY, std::memory_order_release);
   return true;
 }
 
 bool CmdQueue::empty() const
 {
-  return head_.load(std::memory_order_acquire) == tail_.load(std::memory_order_acquire);
+  return mHead.load(std::memory_order_acquire) == mTail.load(std::memory_order_acquire);
 }
 
 // ---- StatusQueue implementation (ring buffer with overwrite) ----
 
-StatusQueue::StatusQueue() : head_(0), tail_(0), write_index_(0)
+StatusQueue::StatusQueue() : mHead(0), mTail(0), mWriteIndex(0)
 {}
 
 bool StatusQueue::push(const StatusSnapshot& item)
 {
   // Ring buffer: always write, overwrite oldest if full
-  const uint32_t write_idx = write_index_.fetch_add(1, std::memory_order_relaxed);
+  const uint32_t write_idx = mWriteIndex.fetch_add(1, std::memory_order_relaxed);
   const uint32_t buf_idx = write_idx % CAPACITY;
 
-  buf_[buf_idx] = item;
+  mBuf[buf_idx] = item;
 
   // Update tail to point past this write
-  tail_.store(write_idx + 1, std::memory_order_release);
+  mTail.store(write_idx + 1, std::memory_order_release);
 
   // If we overwrote old data, advance head to maintain at least one slot
   // This prevents reading stale data that's been overwritten
-  uint32_t current_head = head_.load(std::memory_order_acquire);
+  uint32_t current_head = mHead.load(std::memory_order_acquire);
   uint32_t current_tail = write_idx + 1;
 
   // Ensure head doesn't lag too far behind (keep at most CAPACITY-1 items)
   if (current_tail - current_head > CAPACITY - 1)
   {
-    head_.store(current_tail - (CAPACITY - 1), std::memory_order_release);
+    mHead.store(current_tail - (CAPACITY - 1), std::memory_order_release);
   }
 
   return true; // Always succeeds
@@ -78,22 +78,22 @@ bool StatusQueue::push(const StatusSnapshot& item)
 
 bool StatusQueue::pop(StatusSnapshot& item)
 {
-  const uint32_t current_head = head_.load(std::memory_order_relaxed);
-  const uint32_t current_tail = tail_.load(std::memory_order_acquire);
+  const uint32_t current_head = mHead.load(std::memory_order_relaxed);
+  const uint32_t current_tail = mTail.load(std::memory_order_acquire);
 
   if (current_head >= current_tail)
     return false; // Empty
 
   const uint32_t buf_idx = current_head % CAPACITY;
-  item = buf_[buf_idx];
-  head_.store(current_head + 1, std::memory_order_release);
+  item = mBuf[buf_idx];
+  mHead.store(current_head + 1, std::memory_order_release);
   return true;
 }
 
 bool StatusQueue::latest(StatusSnapshot& item)
 {
-  const uint32_t current_tail = tail_.load(std::memory_order_acquire);
-  const uint32_t current_head = head_.load(std::memory_order_acquire);
+  const uint32_t current_tail = mTail.load(std::memory_order_acquire);
+  const uint32_t current_head = mHead.load(std::memory_order_acquire);
 
   if (current_head >= current_tail)
     return false; // Empty
@@ -101,7 +101,7 @@ bool StatusQueue::latest(StatusSnapshot& item)
   // Get the last written item (tail - 1)
   const uint32_t last_idx = current_tail - 1;
   const uint32_t buf_idx = last_idx % CAPACITY;
-  item = buf_[buf_idx];
+  item = mBuf[buf_idx];
   return true;
 }
 
@@ -120,10 +120,10 @@ static inline int16_t temp_to_raw(float temp)
 // ---- ControlLoop implementation ----
 
 ControlLoop::ControlLoop()
-    : modbus_client_(nullptr), cmd_queue_(nullptr), status_queue_(nullptr), running_(false),
-      stop_requested_(false), kick_generation_(0), current_priority_(PriorityMode::Dhw),
-      current_mode_(MODE_SET_HEAT_DHW), desired_working_mode_(3), last_heating_target_(45.0f),
-      saved_dhw_target_(46.0f), saved_heating_target_(45.0f), saved_targets_initialized_(false)
+    : mModbusClient(nullptr), mCmdQueue(nullptr), mStatusQueue(nullptr), mRunning(false),
+      mStopRequested(false), mKickGeneration(0), mCurrentPriority(PriorityMode::Dhw),
+      mCurrentMode(MODE_SET_HEAT_DHW), mDesiredWorkingMode(3), mLastHeatingTarget(45.0f),
+      mSavedDhwTarget(46.0f), mSavedHeatingTarget(45.0f), mSavedTargetsInitialized(false)
 {}
 
 ControlLoop::~ControlLoop()
@@ -133,51 +133,51 @@ ControlLoop::~ControlLoop()
 
 bool ControlLoop::start(IModbusClient* client, CmdQueue* cmd_queue, StatusQueue* status_queue)
 {
-  if (running_.load())
+  if (mRunning.load())
     return true;
 
-  modbus_client_ = client;
-  cmd_queue_ = cmd_queue;
-  status_queue_ = status_queue;
-  stop_requested_.store(false);
-  running_.store(true);
+  mModbusClient = client;
+  mCmdQueue = cmd_queue;
+  mStatusQueue = status_queue;
+  mStopRequested.store(false);
+  mRunning.store(true);
 
-  thread_ = std::make_unique<windmi::Thread>([this]() { threadFunc(); });
+  mThread = std::make_unique<windmi::Thread>([this]() { threadFunc(); });
   return true;
 }
 
 void ControlLoop::stop()
 {
-  if (!running_.load())
+  if (!mRunning.load())
     return;
 
-  stop_requested_.store(true);
-  running_.store(false);
+  mStopRequested.store(true);
+  mRunning.store(false);
 
   // Wake the thread if it's sleeping
   kick();
 
-  if (thread_ && thread_->joinable())
+  if (mThread && mThread->joinable())
   {
-    thread_->join();
+    mThread->join();
   }
 }
 
 bool ControlLoop::isRunning() const
 {
-  return running_.load();
+  return mRunning.load();
 }
 
 void ControlLoop::kick()
 {
-  windmi::LockGuard lock(kick_mutex_);
-  ++kick_generation_;
-  kick_cond_.notify_one();
+  windmi::LockGuard lock(mKickMutex);
+  ++mKickGeneration;
+  mKickCond.notify_one();
 }
 
 int ControlLoop::setRunningMode(int mode)
 {
-  if (!modbus_client_)
+  if (!mModbusClient)
     return -1;
 
   // Validate: only 0, 1, 2 are valid device modes
@@ -191,7 +191,7 @@ int ControlLoop::setRunningMode(int mode)
 
   try
   {
-    modbus_client_->writeRegister(REG_RUNNING_MODE, static_cast<uint16_t>(mode));
+    mModbusClient->writeRegister(REG_RUNNING_MODE, static_cast<uint16_t>(mode));
     WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set running mode to %d", mode);
     return 0;
   } catch (const ModbusException& e)
@@ -203,13 +203,13 @@ int ControlLoop::setRunningMode(int mode)
 
 int ControlLoop::setDhwTarget(float temp)
 {
-  if (!modbus_client_)
+  if (!mModbusClient)
     return -1;
 
   int16_t raw_temp = temp_to_raw(temp);
   try
   {
-    modbus_client_->writeRegister(REG_DHW_TARGET, static_cast<uint16_t>(raw_temp));
+    mModbusClient->writeRegister(REG_DHW_TARGET, static_cast<uint16_t>(raw_temp));
     WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set DHW target to %.1f C", temp);
     return 0;
   } catch (const ModbusException& e)
@@ -221,13 +221,13 @@ int ControlLoop::setDhwTarget(float temp)
 
 int ControlLoop::setHeatingTarget(float temp)
 {
-  if (!modbus_client_)
+  if (!mModbusClient)
     return -1;
 
   int16_t raw_temp = temp_to_raw(temp);
   try
   {
-    modbus_client_->writeRegister(REG_HEATING_TARGET, static_cast<uint16_t>(raw_temp));
+    mModbusClient->writeRegister(REG_HEATING_TARGET, static_cast<uint16_t>(raw_temp));
     WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set heating target to %.1f C", temp);
     return 0;
   } catch (const ModbusException& e)
@@ -240,7 +240,7 @@ int ControlLoop::setHeatingTarget(float temp)
 
 bool ControlLoop::readStatus(StatusSnapshot& status)
 {
-  if (!modbus_client_)
+  if (!mModbusClient)
     return false;
 
   bool ok = true;
@@ -249,7 +249,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
   // Read outdoor temp (0x0001)
   try
   {
-    raw = modbus_client_->readRegister(REG_OUTDOOR_TEMP);
+    raw = mModbusClient->readRegister(REG_OUTDOOR_TEMP);
     status.outdoor_temp = raw_to_temp(raw);
   } catch (const ModbusException&)
   {
@@ -259,7 +259,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
   // Read indoor temp (0x0002)
   try
   {
-    raw = modbus_client_->readRegister(REG_INDOOR_TEMP);
+    raw = mModbusClient->readRegister(REG_INDOOR_TEMP);
     status.indoor_temp = raw_to_temp(raw);
   } catch (const ModbusException&)
   {
@@ -269,7 +269,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
   // Read leaving water temp (0x0004)
   try
   {
-    raw = modbus_client_->readRegister(REG_LEAVING_WATER_TEMP);
+    raw = mModbusClient->readRegister(REG_LEAVING_WATER_TEMP);
     status.leaving_water_temp = raw_to_temp(raw);
   } catch (const ModbusException&)
   {
@@ -279,7 +279,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
   // Read entering water temp (0x0003)
   try
   {
-    raw = modbus_client_->readRegister(REG_ENTERING_WATER_TEMP);
+    raw = mModbusClient->readRegister(REG_ENTERING_WATER_TEMP);
     status.entering_water_temp = raw_to_temp(raw);
   } catch (const ModbusException&)
   {
@@ -289,7 +289,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
   // Read DHW tank temp (0x00CE)
   try
   {
-    raw = modbus_client_->readRegister(REG_DHW_TANK_TEMP);
+    raw = mModbusClient->readRegister(REG_DHW_TANK_TEMP);
     status.dhw_tank_temp = raw_to_temp(raw);
   } catch (const ModbusException&)
   {
@@ -300,12 +300,12 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
   // Read running mode (0x002C)
   try
   {
-    raw = modbus_client_->readRegister(REG_RUNNING_MODE);
+    raw = mModbusClient->readRegister(REG_RUNNING_MODE);
     status.running_mode = raw;
     // Update current_mode from the device (may have been changed externally)
     if (raw == 0 || raw == 1 || raw == 2)
     {
-      current_mode_ = raw;
+      mCurrentMode = raw;
     }
   } catch (const ModbusException&)
   {
@@ -315,7 +315,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
   // Read running status (0x002D)
   try
   {
-    raw = modbus_client_->readRegister(REG_RUNNING_STATUS);
+    raw = mModbusClient->readRegister(REG_RUNNING_STATUS);
     status.running_status = raw;
     status.is_running = (raw != MODE_STATUS_OFF);
   } catch (const ModbusException&)
@@ -326,11 +326,11 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
   // Read DHW target (0x0194)
   try
   {
-    raw = modbus_client_->readRegister(REG_DHW_TARGET);
+    raw = mModbusClient->readRegister(REG_DHW_TARGET);
     status.dhw_target = raw_to_temp(raw);
-    if (!saved_targets_initialized_)
+    if (!mSavedTargetsInitialized)
     {
-      saved_dhw_target_ = status.dhw_target;
+      mSavedDhwTarget = status.dhw_target;
     }
   } catch (const ModbusException&)
   {
@@ -340,24 +340,24 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
   // Read heating target (0x0191)
   try
   {
-    raw = modbus_client_->readRegister(REG_HEATING_TARGET);
+    raw = mModbusClient->readRegister(REG_HEATING_TARGET);
     status.heating_target = raw_to_temp(raw);
-    last_heating_target_ = status.heating_target;
-    if (!saved_targets_initialized_)
+    mLastHeatingTarget = status.heating_target;
+    if (!mSavedTargetsInitialized)
     {
-      saved_heating_target_ = status.heating_target;
+      mSavedHeatingTarget = status.heating_target;
     }
   } catch (const ModbusException&)
   {
-    status.heating_target = last_heating_target_;
+    status.heating_target = mLastHeatingTarget;
   }
 
   // Read DHW priority (0x02BF) - only for status reporting, not for control
   try
   {
-    raw = modbus_client_->readRegister(REG_DHW_PRIORITY);
+    raw = mModbusClient->readRegister(REG_DHW_PRIORITY);
     status.dhw_priority = (raw != 0);
-    // Note: current_priority_ is managed by applyControlLogic(), not read from device
+    // Note: mCurrentPriority is managed by applyControlLogic(), not read from device
     // to prevent external changes from overriding the desired working mode priority
   } catch (const ModbusException&)
   {
@@ -372,7 +372,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
 
     try
     {
-      raw = modbus_client_->readRegister(REG_AC_CURRENT);
+      raw = mModbusClient->readRegister(REG_AC_CURRENT);
       status.ac_current = static_cast<float>(raw) * 2.0f; // Manual: Actual = Display × 2
       ac_current = status.ac_current;
       got_current = true;
@@ -383,7 +383,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
 
     try
     {
-      raw = modbus_client_->readRegister(REG_DC_CURRENT);
+      raw = mModbusClient->readRegister(REG_DC_CURRENT);
       status.dc_current = static_cast<float>(raw) * 4.0f; // Manual: Actual = Display × 4
     } catch (const ModbusException&)
     {
@@ -392,7 +392,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
 
     try
     {
-      raw = modbus_client_->readRegister(REG_AC_VOLTAGE);
+      raw = mModbusClient->readRegister(REG_AC_VOLTAGE);
       status.ac_voltage = static_cast<float>(raw); // Manual: Actual = Display
       ac_voltage = status.ac_voltage;
       got_voltage = true;
@@ -403,7 +403,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
 
     try
     {
-      raw = modbus_client_->readRegister(REG_DC_VOLTAGE);
+      raw = mModbusClient->readRegister(REG_DC_VOLTAGE);
       status.dc_voltage = static_cast<float>(raw) / 2.0f; // Manual: Actual = Display / 2
     } catch (const ModbusException&)
     {
@@ -427,7 +427,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
   // Read diagnostic registers (non-critical — failures don't affect ok flag)
   try
   {
-    raw = modbus_client_->readRegister(REG_UNIT_CAPACITY);
+    raw = mModbusClient->readRegister(REG_UNIT_CAPACITY);
     status.unit_capacity_kw = raw; // Raw = kW rating (4,6,8,10,12,14,16)
   } catch (const ModbusException&)
   {
@@ -436,7 +436,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
 
   try
   {
-    raw = modbus_client_->readRegister(REG_COMPRESSOR_FREQ);
+    raw = mModbusClient->readRegister(REG_COMPRESSOR_FREQ);
     status.compressor_freq = static_cast<float>(raw); // 1 Hz units
   } catch (const ModbusException&)
   {
@@ -445,7 +445,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
 
   try
   {
-    raw = modbus_client_->readRegister(REG_WATER_FLOW);
+    raw = mModbusClient->readRegister(REG_WATER_FLOW);
     status.water_flow = static_cast<float>(raw) / 100.0f; // m³/h × 100
   } catch (const ModbusException&)
   {
@@ -454,7 +454,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
 
   try
   {
-    raw = modbus_client_->readRegister(REG_ACTUAL_CAPACITY_OUTPUT);
+    raw = mModbusClient->readRegister(REG_ACTUAL_CAPACITY_OUTPUT);
     status.actual_capacity_output = raw;
   } catch (const ModbusException&)
   {
@@ -463,7 +463,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
 
   try
   {
-    raw = modbus_client_->readRegister(REG_ODU_INPUT_STATUS);
+    raw = mModbusClient->readRegister(REG_ODU_INPUT_STATUS);
     status.odu_input_status = raw;
   } catch (const ModbusException&)
   {
@@ -472,7 +472,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
 
   try
   {
-    raw = modbus_client_->readRegister(REG_COMPRESSOR_RUNTIME);
+    raw = mModbusClient->readRegister(REG_COMPRESSOR_RUNTIME);
     status.compressor_runtime_h = raw;
   } catch (const ModbusException&)
   {
@@ -481,7 +481,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
 
   try
   {
-    raw = modbus_client_->readRegister(REG_PUMP_RUNTIME);
+    raw = mModbusClient->readRegister(REG_PUMP_RUNTIME);
     status.pump_runtime_h = raw;
   } catch (const ModbusException&)
   {
@@ -516,19 +516,19 @@ bool ControlLoop::readStatus(StatusSnapshot& status)
   status.device_online = ok;
   if (ok)
   {
-    saved_targets_initialized_ = true;
+    mSavedTargetsInitialized = true;
   }
   return ok;
 }
 
 void ControlLoop::processCommands()
 {
-  if (!cmd_queue_)
+  if (!mCmdQueue)
     return;
 
   Command cmd;
   int cmd_count = 0;
-  while (cmd_queue_->pop(cmd))
+  while (mCmdQueue->pop(cmd))
   {
     cmd_count++;
     WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "Processing command #%d - type=%d", cmd_count,
@@ -539,22 +539,22 @@ void ControlLoop::processCommands()
     case CommandType::CMD_SET_DHW_TEMP:
       WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_DHW_TEMP, temp=%.1f C", cmd.float_val);
       setDhwTarget(cmd.float_val);
-      saved_dhw_target_ = cmd.float_val;
+      mSavedDhwTarget = cmd.float_val;
       break;
 
     case CommandType::CMD_SET_HEATING_TEMP:
       WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_HEATING_TEMP, temp=%.1f C", cmd.float_val);
       setHeatingTarget(cmd.float_val);
-      last_heating_target_ = cmd.float_val;
-      saved_heating_target_ = cmd.float_val;
+      mLastHeatingTarget = cmd.float_val;
+      mSavedHeatingTarget = cmd.float_val;
       break;
 
     case CommandType::CMD_SET_PRIORITY:
       WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_PRIORITY, pri_val=%d", cmd.int_val);
       try
       {
-        modbus_client_->writeRegister(REG_DHW_PRIORITY, static_cast<uint16_t>(cmd.int_val));
-        current_priority_ = (cmd.int_val == 1) ? PriorityMode::Dhw : PriorityMode::Heating;
+        mModbusClient->writeRegister(REG_DHW_PRIORITY, static_cast<uint16_t>(cmd.int_val));
+        mCurrentPriority = (cmd.int_val == 1) ? PriorityMode::Dhw : PriorityMode::Heating;
         WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Priority set to %s",
                         cmd.int_val == 1 ? "DHW" : "Heating");
       } catch (const ModbusException& e)
@@ -565,7 +565,7 @@ void ControlLoop::processCommands()
 
     case CommandType::CMD_SET_RUNNING_MODE:
       WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_RUNNING_MODE, mode=%d", cmd.int_val);
-      desired_working_mode_ = cmd.int_val;
+      mDesiredWorkingMode = cmd.int_val;
 
       {
         int target_device_mode;
@@ -590,7 +590,7 @@ void ControlLoop::processCommands()
 
         if (setRunningMode(target_device_mode) == 0)
         {
-          current_mode_ = target_device_mode;
+          mCurrentMode = target_device_mode;
           WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Working mode set to %d (device mode=%d)",
                           cmd.int_val, target_device_mode);
         } else
@@ -609,8 +609,8 @@ void ControlLoop::processCommands()
           setHeatingTarget(HEATING_TARGET_MIN);
           try
           {
-            modbus_client_->writeRegister(REG_DHW_PRIORITY, 1);
-            current_priority_ = PriorityMode::Dhw;
+            mModbusClient->writeRegister(REG_DHW_PRIORITY, 1);
+            mCurrentPriority = PriorityMode::Dhw;
             WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW-only mode, set DHW priority");
           } catch (const ModbusException& e)
           {
@@ -624,8 +624,8 @@ void ControlLoop::processCommands()
           setDhwTarget(DHW_TARGET_MIN);
           try
           {
-            modbus_client_->writeRegister(REG_DHW_PRIORITY, 0);
-            current_priority_ = PriorityMode::Heating;
+            mModbusClient->writeRegister(REG_DHW_PRIORITY, 0);
+            mCurrentPriority = PriorityMode::Heating;
             WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Heating-only mode, cleared DHW priority");
           } catch (const ModbusException& e)
           {
@@ -635,13 +635,13 @@ void ControlLoop::processCommands()
         case 3: // DHW+Heating
           WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP,
                           "DHW+Heating mode, restoring targets (DHW=%.1f, Heating=%.1f)",
-                          saved_dhw_target_, saved_heating_target_);
-          setDhwTarget(saved_dhw_target_);
-          setHeatingTarget(saved_heating_target_);
+                          mSavedDhwTarget, mSavedHeatingTarget);
+          setDhwTarget(mSavedDhwTarget);
+          setHeatingTarget(mSavedHeatingTarget);
           try
           {
-            modbus_client_->writeRegister(REG_DHW_PRIORITY, 1);
-            current_priority_ = PriorityMode::Dhw;
+            mModbusClient->writeRegister(REG_DHW_PRIORITY, 1);
+            mCurrentPriority = PriorityMode::Dhw;
             WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW+Heating mode, set DHW priority");
           } catch (const ModbusException& e)
           {
@@ -669,7 +669,7 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status)
 {
   // Determine what device mode we should be in
   int desired_device_mode;
-  switch (desired_working_mode_)
+  switch (mDesiredWorkingMode)
   {
   case 0:
     desired_device_mode = MODE_SET_OFF;
@@ -689,19 +689,19 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status)
   }
 
   // Only change mode if it doesn't match
-  if (current_mode_ != desired_device_mode)
+  if (mCurrentMode != desired_device_mode)
   {
     WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP,
-                    "Correcting device mode from %d to %d (desired working mode=%d)", current_mode_,
-                    desired_device_mode, desired_working_mode_);
+                    "Correcting device mode from %d to %d (desired working mode=%d)", mCurrentMode,
+                    desired_device_mode, mDesiredWorkingMode);
     if (setRunningMode(desired_device_mode) == 0)
     {
-      current_mode_ = desired_device_mode;
+      mCurrentMode = desired_device_mode;
     }
   }
 
   // Enforce target temperature overrides based on working mode
-  switch (desired_working_mode_)
+  switch (mDesiredWorkingMode)
   {
   case 1: // DHW-only: keep heating target at minimum
     if (status.heating_target > HEATING_TARGET_MIN + 0.5f)
@@ -720,17 +720,17 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status)
     }
     break;
   case 3: // DHW+Heating: ensure user's saved targets are active
-    if (fabsf(status.dhw_target - saved_dhw_target_) > 0.5f)
+    if (fabsf(status.dhw_target - mSavedDhwTarget) > 0.5f)
     {
       WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Restoring DHW target (%.1f, was %.1f)",
-                      saved_dhw_target_, status.dhw_target);
-      setDhwTarget(saved_dhw_target_);
+                      mSavedDhwTarget, status.dhw_target);
+      setDhwTarget(mSavedDhwTarget);
     }
-    if (fabsf(status.heating_target - saved_heating_target_) > 0.5f)
+    if (fabsf(status.heating_target - mSavedHeatingTarget) > 0.5f)
     {
       WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Restoring heating target (%.1f, was %.1f)",
-                      saved_heating_target_, status.heating_target);
-      setHeatingTarget(saved_heating_target_);
+                      mSavedHeatingTarget, status.heating_target);
+      setHeatingTarget(mSavedHeatingTarget);
     }
     break;
   }
@@ -738,18 +738,18 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status)
   // Enforce priority based on working mode
   WINDMI_LOG_DEBUG(
       LOG_TAG_CONTROLLOOP, "Enforcing priority for working_mode=%d, current_priority=%s",
-      desired_working_mode_, current_priority_ == PriorityMode::Dhw ? "Dhw" : "Heating");
-  switch (desired_working_mode_)
+      mDesiredWorkingMode, mCurrentPriority == PriorityMode::Dhw ? "Dhw" : "Heating");
+  switch (mDesiredWorkingMode)
   {
   case 1: // DHW-only: must have DHW priority
   case 3: // DHW+Heating: must have DHW priority
-    if (current_priority_ != PriorityMode::Dhw)
+    if (mCurrentPriority != PriorityMode::Dhw)
     {
-      WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Mode %d enforcing DHW priority", desired_working_mode_);
+      WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Mode %d enforcing DHW priority", mDesiredWorkingMode);
       try
       {
-        modbus_client_->writeRegister(REG_DHW_PRIORITY, 1);
-        current_priority_ = PriorityMode::Dhw;
+        mModbusClient->writeRegister(REG_DHW_PRIORITY, 1);
+        mCurrentPriority = PriorityMode::Dhw;
         WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Priority now set to DHW");
       } catch (const ModbusException& e)
       {
@@ -758,13 +758,13 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status)
     }
     break;
   case 2: // Heating-only: must have no DHW priority
-    if (current_priority_ != PriorityMode::Heating)
+    if (mCurrentPriority != PriorityMode::Heating)
     {
       WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Heating-only mode clearing DHW priority");
       try
       {
-        modbus_client_->writeRegister(REG_DHW_PRIORITY, 0);
-        current_priority_ = PriorityMode::Heating;
+        mModbusClient->writeRegister(REG_DHW_PRIORITY, 0);
+        mCurrentPriority = PriorityMode::Heating;
         WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Priority now set to Heating");
       } catch (const ModbusException& e)
       {
@@ -785,10 +785,10 @@ void ControlLoop::threadFunc()
     if (readStatus(initial_status))
     {
       initial_status.device_online = true;
-      initial_status.working_mode = desired_working_mode_;
-      if (status_queue_)
+      initial_status.working_mode = mDesiredWorkingMode;
+      if (mStatusQueue)
       {
-        if (!status_queue_->push(initial_status))
+        if (!mStatusQueue->push(initial_status))
         {
           WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Status queue full, dropping snapshot");
         }
@@ -797,35 +797,35 @@ void ControlLoop::threadFunc()
   }
 
   // Main loop
-  while (!stop_requested_.load())
+  while (!mStopRequested.load())
   {
     auto start_time = std::chrono::steady_clock::now();
 
     // Check connection and reconnect if needed
-    if (!modbus_client_ || !modbus_client_->isConnected())
+    if (!mModbusClient || !mModbusClient->isConnected())
     {
       WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Not connected, attempting to reconnect...");
 
       int retries = 0;
-      while (!stop_requested_.load() && retries < MODBUS_MAX_RETRIES)
+      while (!mStopRequested.load() && retries < MODBUS_MAX_RETRIES)
       {
-        if (modbus_client_->connect())
+        if (mModbusClient->connect())
         {
           WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Reconnected successfully");
           break;
         }
         retries++;
-        windmi::UniqueLock lock(kick_mutex_);
-        kick_cond_.wait_for(lock, MODBUS_RECONNECT_INTERVAL_S * 1000,
-                            [this]() { return stop_requested_.load(); });
+        windmi::UniqueLock lock(mKickMutex);
+        mKickCond.wait_for(lock, MODBUS_RECONNECT_INTERVAL_S * 1000,
+                            [this]() { return mStopRequested.load(); });
       }
 
       if (retries >= MODBUS_MAX_RETRIES)
       {
         WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to reconnect after %d attempts", retries);
-        windmi::UniqueLock lock(kick_mutex_);
-        kick_cond_.wait_for(lock, MODBUS_RECONNECT_INTERVAL_S * 1000,
-                            [this]() { return stop_requested_.load(); });
+        windmi::UniqueLock lock(mKickMutex);
+        mKickCond.wait_for(lock, MODBUS_RECONNECT_INTERVAL_S * 1000,
+                            [this]() { return mStopRequested.load(); });
         continue;
       }
     }
@@ -841,22 +841,22 @@ void ControlLoop::threadFunc()
       applyControlLogic(status);
 
       // Set working mode for status reporting
-      status.working_mode = desired_working_mode_;
+      status.working_mode = mDesiredWorkingMode;
 
       // Publish status to queue (always succeeds with ring buffer)
-      if (status_queue_)
+      if (mStatusQueue)
       {
-        status_queue_->push(status);
+        mStatusQueue->push(status);
       }
     } else
     {
       WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to read status");
       // Publish offline status (always succeeds with ring buffer)
       status.device_online = false;
-      status.working_mode = desired_working_mode_;
-      if (status_queue_)
+      status.working_mode = mDesiredWorkingMode;
+      if (mStatusQueue)
       {
-        status_queue_->push(status);
+        mStatusQueue->push(status);
       }
     }
 
@@ -868,23 +868,23 @@ void ControlLoop::threadFunc()
 
     if (sleep_ms > 0)
     {
-      windmi::UniqueLock lock(kick_mutex_);
-      const uint64_t observed_generation = kick_generation_;
-      kick_cond_.wait_for(lock, static_cast<unsigned int>(sleep_ms), [this, observed_generation]() {
-        return stop_requested_.load() || kick_generation_ != observed_generation ||
-               (cmd_queue_ && !cmd_queue_->empty());
+      windmi::UniqueLock lock(mKickMutex);
+      const uint64_t observed_generation = mKickGeneration;
+      mKickCond.wait_for(lock, static_cast<unsigned int>(sleep_ms), [this, observed_generation]() {
+        return mStopRequested.load() || mKickGeneration != observed_generation ||
+               (mCmdQueue && !mCmdQueue->empty());
       });
     }
   }
 
   // Disconnect
-  if (modbus_client_)
+  if (mModbusClient)
   {
-    modbus_client_->disconnect();
+    mModbusClient->disconnect();
   }
 
   WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Thread stopped");
-  running_.store(false);
+  mRunning.store(false);
 }
 
 } // namespace windmi

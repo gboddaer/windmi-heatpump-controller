@@ -64,8 +64,8 @@ void Config::loadFromFile(const std::string& filename)
 
 std::string Config::getString(const std::string& key, const std::string& default_value) const
 {
-  auto it = values_.find(key);
-  if (it != values_.end())
+  auto it = mValues.find(key);
+  if (it != mValues.end())
   {
     return it->second;
   }
@@ -74,8 +74,8 @@ std::string Config::getString(const std::string& key, const std::string& default
 
 int Config::getInt(const std::string& key, int default_value) const
 {
-  auto it = values_.find(key);
-  if (it != values_.end())
+  auto it = mValues.find(key);
+  if (it != mValues.end())
   {
     try
     {
@@ -90,8 +90,8 @@ int Config::getInt(const std::string& key, int default_value) const
 
 double Config::getDouble(const std::string& key, double default_value) const
 {
-  auto it = values_.find(key);
-  if (it != values_.end())
+  auto it = mValues.find(key);
+  if (it != mValues.end())
   {
     try
     {
@@ -106,8 +106,8 @@ double Config::getDouble(const std::string& key, double default_value) const
 
 bool Config::getBool(const std::string& key, bool default_value) const
 {
-  auto it = values_.find(key);
-  if (it != values_.end())
+  auto it = mValues.find(key);
+  if (it != mValues.end())
   {
     std::string value = it->second;
     std::transform(value.begin(), value.end(), value.begin(), ::tolower);
@@ -118,12 +118,12 @@ bool Config::getBool(const std::string& key, bool default_value) const
 
 void Config::set(const std::string& key, const std::string& value)
 {
-  values_[key] = value;
+  mValues[key] = value;
 }
 
 bool Config::hasKey(const std::string& key) const
 {
-  return values_.find(key) != values_.end();
+  return mValues.find(key) != mValues.end();
 }
 
 } // namespace windmi

@@ -14,48 +14,48 @@ template <typename T, size_t Size> SpscQueue<T, Size>::SpscQueue()
 
 template <typename T, size_t Size> bool SpscQueue<T, Size>::push(const T& item)
 {
-  size_t current_tail = tail_.load(std::memory_order_relaxed);
-  size_t next_tail = (current_tail + 1) & mask_;
+  size_t current_tail = mTail.load(std::memory_order_relaxed);
+  size_t next_tail = (current_tail + 1) & mMask;
 
-  if (next_tail == head_.load(std::memory_order_acquire))
+  if (next_tail == mHead.load(std::memory_order_acquire))
   {
     return false; // Queue is full
   }
 
-  items_[current_tail] = item;
-  tail_.store(next_tail, std::memory_order_release);
+  mItems[current_tail] = item;
+  mTail.store(next_tail, std::memory_order_release);
   return true;
 }
 
 template <typename T, size_t Size> bool SpscQueue<T, Size>::pop(T& item)
 {
-  size_t current_head = head_.load(std::memory_order_relaxed);
+  size_t current_head = mHead.load(std::memory_order_relaxed);
 
-  if (current_head == tail_.load(std::memory_order_acquire))
+  if (current_head == mTail.load(std::memory_order_acquire))
   {
     return false; // Queue is empty
   }
 
-  item = items_[current_head];
-  head_.store((current_head + 1) & mask_, std::memory_order_release);
+  item = mItems[current_head];
+  mHead.store((current_head + 1) & mMask, std::memory_order_release);
   return true;
 }
 
 template <typename T, size_t Size> bool SpscQueue<T, Size>::empty() const
 {
-  return head_.load(std::memory_order_acquire) == tail_.load(std::memory_order_acquire);
+  return mHead.load(std::memory_order_acquire) == mTail.load(std::memory_order_acquire);
 }
 
 template <typename T, size_t Size> bool SpscQueue<T, Size>::full() const
 {
-  size_t next_tail = (tail_.load(std::memory_order_acquire) + 1) & mask_;
-  return next_tail == head_.load(std::memory_order_acquire);
+  size_t next_tail = (mTail.load(std::memory_order_acquire) + 1) & mMask;
+  return next_tail == mHead.load(std::memory_order_acquire);
 }
 
 template <typename T, size_t Size> void SpscQueue<T, Size>::clear()
 {
-  head_.store(0, std::memory_order_release);
-  tail_.store(0, std::memory_order_release);
+  mHead.store(0, std::memory_order_release);
+  mTail.store(0, std::memory_order_release);
 }
 
 // Explicit template instantiations

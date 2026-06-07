@@ -29,7 +29,7 @@ struct ModbusSerialClient::Impl
 
 ModbusSerialClient::ModbusSerialClient(const std::string& device, int baud, char parity,
                                        int stop_bits, bool rs485_enabled, uint8_t slave_id)
-    : impl_(new Impl())
+    : mImpl(new Impl())
 {
 
   // Validate baud rate
@@ -59,10 +59,10 @@ ModbusSerialClient::ModbusSerialClient(const std::string& device, int baud, char
     throw ModbusException(oss.str());
   }
 
-  impl_->c_client =
+  mImpl->c_client =
       modbus_serial_client_create(device.c_str(), baud, parity, stop_bits, rs485_enabled, slave_id);
 
-  if (!impl_->c_client)
+  if (!mImpl->c_client)
   {
     throw ModbusException("Failed to create Modbus serial client");
   }
@@ -70,58 +70,58 @@ ModbusSerialClient::ModbusSerialClient(const std::string& device, int baud, char
 
 ModbusSerialClient::~ModbusSerialClient()
 {
-  if (impl_)
+  if (mImpl)
   {
-    delete impl_;
-    impl_ = nullptr;
+    delete mImpl;
+    mImpl = nullptr;
   }
 }
 
 bool ModbusSerialClient::connect()
 {
-  if (!impl_ || !impl_->c_client)
+  if (!mImpl || !mImpl->c_client)
   {
-    impl_->last_error = "Client is not initialized";
+    mImpl->last_error = "Client is not initialized";
     return false;
   }
 
-  bool result = modbus_serial_client_connect(impl_->c_client);
+  bool result = modbus_serial_client_connect(mImpl->c_client);
   if (!result)
   {
-    impl_->last_error = "Failed to connect to serial port";
-    WINDMI_LOG_ERROR(LOG_TAG_MODBUS, "%s", impl_->last_error.c_str());
+    mImpl->last_error = "Failed to connect to serial port";
+    WINDMI_LOG_ERROR(LOG_TAG_MODBUS, "%s", mImpl->last_error.c_str());
   }
   return result;
 }
 
 void ModbusSerialClient::disconnect()
 {
-  if (impl_ && impl_->c_client)
+  if (mImpl && mImpl->c_client)
   {
-    modbus_serial_client_disconnect(impl_->c_client);
+    modbus_serial_client_disconnect(mImpl->c_client);
   }
 }
 
 bool ModbusSerialClient::isConnected() const
 {
-  return impl_ && impl_->c_client && modbus_serial_client_is_connected(impl_->c_client);
+  return mImpl && mImpl->c_client && modbus_serial_client_is_connected(mImpl->c_client);
 }
 
 int16_t ModbusSerialClient::readRegister(uint16_t address)
 {
-  if (!impl_ || !impl_->c_client)
+  if (!mImpl || !mImpl->c_client)
   {
     throw ModbusException("Client is not initialized");
   }
 
   int16_t value;
-  int result = modbus_serial_read_register(impl_->c_client, address, &value);
+  int result = modbus_serial_read_register(mImpl->c_client, address, &value);
 
   if (result != 0)
   {
-    impl_->last_error = "Failed to read register";
+    mImpl->last_error = "Failed to read register";
     WINDMI_LOG_ERROR(LOG_TAG_MODBUS, "readRegister(0x%04X) failed", address);
-    throw ModbusException(impl_->last_error);
+    throw ModbusException(mImpl->last_error);
   }
 
   return value;
@@ -129,34 +129,34 @@ int16_t ModbusSerialClient::readRegister(uint16_t address)
 
 void ModbusSerialClient::writeRegister(uint16_t address, uint16_t value)
 {
-  if (!impl_ || !impl_->c_client)
+  if (!mImpl || !mImpl->c_client)
   {
     throw ModbusException("Client is not initialized");
   }
 
-  int result = modbus_serial_write_register(impl_->c_client, address, value);
+  int result = modbus_serial_write_register(mImpl->c_client, address, value);
 
   if (result != 0)
   {
-    impl_->last_error = "Failed to write register";
+    mImpl->last_error = "Failed to write register";
     WINDMI_LOG_ERROR(LOG_TAG_MODBUS, "writeRegister(0x%04X, %u) failed", address, value);
-    throw ModbusException(impl_->last_error);
+    throw ModbusException(mImpl->last_error);
   }
 }
 
 void ModbusSerialClient::flushBuffer()
 {
-  if (impl_ && impl_->c_client)
+  if (mImpl && mImpl->c_client)
   {
-    modbus_serial_flush_buffer(impl_->c_client);
+    modbus_serial_flush_buffer(mImpl->c_client);
   }
 }
 
 std::string ModbusSerialClient::getLastError() const
 {
-  if (impl_)
+  if (mImpl)
   {
-    return impl_->last_error;
+    return mImpl->last_error;
   }
   return "Client is not initialized";
 }

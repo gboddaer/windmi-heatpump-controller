@@ -72,7 +72,7 @@ public:
 
 private:
   struct Impl;
-  Impl* impl_;
+  Impl* mImpl;
 };
 
 } // namespace windmi

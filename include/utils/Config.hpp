@@ -88,7 +88,7 @@ public:
   bool hasKey(const std::string& key) const;
 
 private:
-  std::map<std::string, std::string> values_;
+  std::map<std::string, std::string> mValues;
 };
 
 } // namespace windmi

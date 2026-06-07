@@ -32,9 +32,9 @@ public:
   void reset();
 
 private:
-  StatusSnapshot status_;
-  mutable windmi::Mutex mutex_;
-  std::atomic<bool> valid_;
+  StatusSnapshot mStatus;
+  mutable windmi::Mutex mMutex;
+  std::atomic<bool> mValid;
 };
 
 } // namespace windmi

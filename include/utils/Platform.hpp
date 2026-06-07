@@ -71,12 +71,12 @@ public:
 
 private:
 #ifdef _WIN32
-  void* handle_; // HANDLE (void*) on Windows
-  bool rs485_enabled_;
+  void* mHandle; // HANDLE (void*) on Windows
+  bool mRs485Enabled;
 #else
-  int fd_;
+  int mFd;
 #endif
-  bool open_;
+  bool mOpen;
 };
 
 } // namespace windmi::platform
@@ -109,7 +109,7 @@ public:
 
 private:
   struct Impl;
-  Impl* impl_;
+  Impl* mImpl;
 };
 
 /**
@@ -118,19 +118,19 @@ private:
 class LockGuard
 {
 public:
-  explicit LockGuard(Mutex& mutex) : mutex_(mutex)
+  explicit LockGuard(Mutex& mutex) : mMutex(mutex)
   {
-    mutex_.lock();
+    mMutex.lock();
   }
   ~LockGuard()
   {
-    mutex_.unlock();
+    mMutex.unlock();
   }
   LockGuard(const LockGuard&) = delete;
   LockGuard& operator=(const LockGuard&) = delete;
 
 private:
-  Mutex& mutex_;
+  Mutex& mMutex;
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -168,7 +168,7 @@ private:
   static void* thread_entry(void* arg);
 
   struct Impl;
-  Impl* impl_;
+  Impl* mImpl;
 };
 
 /**
@@ -192,8 +192,8 @@ public:
   UniqueLock& operator=(const UniqueLock&) = delete;
 
 private:
-  Mutex* mutex_;
-  bool owns_;
+  Mutex* mMutex;
+  bool mOwns;
 };
 
 /**
@@ -248,7 +248,7 @@ public:
 
 private:
   struct Impl;
-  Impl* impl_;
+  Impl* mImpl;
 };
 
 } // namespace windmi

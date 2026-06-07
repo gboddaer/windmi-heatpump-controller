@@ -120,9 +120,9 @@ public:
   bool empty() const;
 
 private:
-  Command buf_[CAPACITY];
-  alignas(64) std::atomic<uint32_t> head_;
-  alignas(64) std::atomic<uint32_t> tail_;
+  Command mBuf[CAPACITY];
+  alignas(64) std::atomic<uint32_t> mHead;
+  alignas(64) std::atomic<uint32_t> mTail;
 };
 
 /**
@@ -164,10 +164,10 @@ public:
   bool latest(StatusSnapshot& item);
 
 private:
-  StatusSnapshot buf_[CAPACITY];
-  alignas(64) std::atomic<uint32_t> head_;
-  alignas(64) std::atomic<uint32_t> tail_;
-  alignas(64) std::atomic<uint32_t> write_index_; // For ring buffer overwrite
+  StatusSnapshot mBuf[CAPACITY];
+  alignas(64) std::atomic<uint32_t> mHead;
+  alignas(64) std::atomic<uint32_t> mTail;
+  alignas(64) std::atomic<uint32_t> mWriteIndex; // For ring buffer overwrite
 };
 
 /**
@@ -215,28 +215,28 @@ private:
   int setHeatingTarget(float temp);
 
   // Modbus and queue pointers (not owned)
-  IModbusClient* modbus_client_;
-  CmdQueue* cmd_queue_;
-  StatusQueue* status_queue_;
+  IModbusClient* mModbusClient;
+  CmdQueue* mCmdQueue;
+  StatusQueue* mStatusQueue;
 
   // Thread management
-  std::unique_ptr<windmi::Thread> thread_;
-  std::atomic<bool> running_;
-  std::atomic<bool> stop_requested_;
+  std::unique_ptr<windmi::Thread> mThread;
+  std::atomic<bool> mRunning;
+  std::atomic<bool> mStopRequested;
 
   // Kick mechanism
-  windmi::Mutex kick_mutex_;
-  windmi::ConditionVariable kick_cond_;
-  uint64_t kick_generation_;
+  windmi::Mutex mKickMutex;
+  windmi::ConditionVariable mKickCond;
+  uint64_t mKickGeneration;
 
   // Control state (matches master branch)
-  PriorityMode current_priority_;
-  int current_mode_;         // Device mode we last set (0, 1, or 2)
-  int desired_working_mode_; // Application-level (0-3)
-  float last_heating_target_;
-  float saved_dhw_target_;
-  float saved_heating_target_;
-  bool saved_targets_initialized_;
+  PriorityMode mCurrentPriority;
+  int mCurrentMode;         // Device mode we last set (0, 1, or 2)
+  int mDesiredWorkingMode; // Application-level (0-3)
+  float mLastHeatingTarget;
+  float mSavedDhwTarget;
+  float mSavedHeatingTarget;
+  bool mSavedTargetsInitialized;
 };
 
 } // namespace windmi

@@ -61,43 +61,43 @@ static const char* status_to_string(int status)
 
 WebServer::WebServer(int port, const std::string& static_dir, CmdQueue* cmd_queue,
                      StatusQueue* status_queue, std::function<void()> wake_callback)
-    : static_dir_(static_dir), cmd_queue_(cmd_queue), status_queue_(status_queue), last_status_{},
-      running_(false), shutting_down_(0), mgr_freed_(false),
-      wake_callback_(std::move(wake_callback))
+    : mStaticDir(static_dir), mCmdQueue(cmd_queue), mStatusQueue(status_queue), mLastStatus{},
+      mRunning(false), mShuttingDown(0), mMgrFreed(false),
+      mWakeCallback(std::move(wake_callback))
 {
-  mg_mgr_init(&mgr_);
+  mg_mgr_init(&mMgr);
 
   char url[64];
   snprintf(url, sizeof(url), "http://%s:%d", WEB_SERVER_IP, port);
 
-  struct mg_connection* conn = mg_http_listen(&mgr_, url, WebServer::eventHandler, this);
+  struct mg_connection* conn = mg_http_listen(&mMgr, url, WebServer::eventHandler, this);
   if (!conn)
   {
     WINDMI_LOG_ERROR(LOG_TAG_WEBSERVER, "Failed to start server on %s", url);
-    mg_mgr_free(&mgr_);
-    mgr_freed_ = true;
+    mg_mgr_free(&mMgr);
+    mMgrFreed = true;
     throw std::runtime_error("Failed to start web server");
   }
 
   WINDMI_LOG_INFO(LOG_TAG_WEBSERVER, "Started on %s", url);
-  WINDMI_LOG_INFO(LOG_TAG_WEBSERVER, "Static files served from: %s", static_dir_.c_str());
+  WINDMI_LOG_INFO(LOG_TAG_WEBSERVER, "Static files served from: %s", mStaticDir.c_str());
 
-  running_.store(true);
+  mRunning.store(true);
 }
 
 WebServer::~WebServer()
 {
   stop();
-  if (!mgr_freed_)
+  if (!mMgrFreed)
   {
-    mg_mgr_free(&mgr_);
-    mgr_freed_ = true;
+    mg_mgr_free(&mMgr);
+    mMgrFreed = true;
   }
 }
 
 void WebServer::run()
 {
-  while (running_.load())
+  while (mRunning.load())
   {
     pollOnce(100);
   }
@@ -105,21 +105,21 @@ void WebServer::run()
 
 void WebServer::pollOnce(int timeout_ms)
 {
-  if (running_.load())
+  if (mRunning.load())
   {
-    mg_mgr_poll(&mgr_, timeout_ms);
+    mg_mgr_poll(&mMgr, timeout_ms);
   }
 }
 
 void WebServer::stop()
 {
-  shutting_down_ = 1;
-  running_.store(false);
+  mShuttingDown = 1;
+  mRunning.store(false);
 }
 
 bool WebServer::isShuttingDown() const
 {
-  return shutting_down_ != 0;
+  return mShuttingDown != 0;
 }
 
 void WebServer::sendJsonReply(struct mg_connection* c, int status_code, const char* json)
@@ -200,7 +200,7 @@ void WebServer::handleRequest(struct mg_connection* c, struct mg_http_message* h
     // Serve static files
     struct mg_http_serve_opts opts;
     memset(&opts, 0, sizeof(opts));
-    opts.root_dir = static_dir_.c_str();
+    opts.root_dir = mStaticDir.c_str();
     mg_http_serve_dir(c, hm, &opts);
   }
 }
@@ -210,9 +210,9 @@ void WebServer::handleRequest(struct mg_connection* c, struct mg_http_message* h
 void WebServer::apiStatusHandler(struct mg_connection* c)
 {
   StatusSnapshot snapshot;
-  if (status_queue_ && status_queue_->latest(snapshot))
+  if (mStatusQueue && mStatusQueue->latest(snapshot))
   {
-    last_status_ = snapshot;
+    mLastStatus = snapshot;
   }
 
   char response[4096];
@@ -248,19 +248,19 @@ void WebServer::apiStatusHandler(struct mg_connection* c)
       "\"cop\":%.2f,"
       "\"copValid\":%s,"
       "\"workingMode\":%d}\n",
-      last_status_.dhw_tank_temp, last_status_.dhw_target, last_status_.leaving_water_temp,
-      last_status_.heating_target, last_status_.outdoor_temp, last_status_.leaving_water_temp,
-      last_status_.entering_water_temp, mode_to_string(last_status_.running_mode),
-      status_to_string(last_status_.running_status), last_status_.dhw_priority ? "dhw" : "heating",
-      last_status_.is_running ? "running" : "stopped",
-      last_status_.device_online ? "true" : "false", last_status_.ac_current,
-      last_status_.dc_current, last_status_.ac_voltage, last_status_.dc_voltage,
-      last_status_.ac_power_va, last_status_.ac_power_w,
-      last_status_.power_valid ? "true" : "false", last_status_.compressor_freq,
-      last_status_.water_flow, last_status_.unit_capacity_kw, last_status_.actual_capacity_output,
-      last_status_.odu_input_status, last_status_.compressor_runtime_h, last_status_.pump_runtime_h,
-      last_status_.heat_output_w, last_status_.cop, last_status_.cop_valid ? "true" : "false",
-      last_status_.working_mode);
+      mLastStatus.dhw_tank_temp, mLastStatus.dhw_target, mLastStatus.leaving_water_temp,
+      mLastStatus.heating_target, mLastStatus.outdoor_temp, mLastStatus.leaving_water_temp,
+      mLastStatus.entering_water_temp, mode_to_string(mLastStatus.running_mode),
+      status_to_string(mLastStatus.running_status), mLastStatus.dhw_priority ? "dhw" : "heating",
+      mLastStatus.is_running ? "running" : "stopped",
+      mLastStatus.device_online ? "true" : "false", mLastStatus.ac_current,
+      mLastStatus.dc_current, mLastStatus.ac_voltage, mLastStatus.dc_voltage,
+      mLastStatus.ac_power_va, mLastStatus.ac_power_w,
+      mLastStatus.power_valid ? "true" : "false", mLastStatus.compressor_freq,
+      mLastStatus.water_flow, mLastStatus.unit_capacity_kw, mLastStatus.actual_capacity_output,
+      mLastStatus.odu_input_status, mLastStatus.compressor_runtime_h, mLastStatus.pump_runtime_h,
+      mLastStatus.heat_output_w, mLastStatus.cop, mLastStatus.cop_valid ? "true" : "false",
+      mLastStatus.working_mode);
 
   sendJsonReply(c, 200, response);
 }
@@ -300,9 +300,9 @@ void WebServer::apiSetDhwHandler(struct mg_connection* c, struct mg_str* body)
   cmd.type = CommandType::CMD_SET_DHW_TEMP;
   cmd.float_val = static_cast<float>(temperature);
   cmd.int_val = 0;
-  bool pushed = cmd_queue_ ? cmd_queue_->push(cmd) : false;
-  if (pushed && wake_callback_)
-    wake_callback_();
+  bool pushed = mCmdQueue ? mCmdQueue->push(cmd) : false;
+  if (pushed && mWakeCallback)
+    mWakeCallback();
   WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "DHW command pushed to queue (temp=%.1f, pushed=%d)",
                    temperature, pushed);
   sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
@@ -343,9 +343,9 @@ void WebServer::apiSetHeatingHandler(struct mg_connection* c, struct mg_str* bod
   cmd.type = CommandType::CMD_SET_HEATING_TEMP;
   cmd.float_val = static_cast<float>(temperature);
   cmd.int_val = 0;
-  bool pushed = cmd_queue_ ? cmd_queue_->push(cmd) : false;
-  if (pushed && wake_callback_)
-    wake_callback_();
+  bool pushed = mCmdQueue ? mCmdQueue->push(cmd) : false;
+  if (pushed && mWakeCallback)
+    mWakeCallback();
   WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Heating command pushed to queue (temp=%.1f, pushed=%d)",
                    temperature, pushed);
   sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
@@ -394,9 +394,9 @@ void WebServer::apiSetPriorityHandler(struct mg_connection* c, struct mg_str* bo
   cmd.type = CommandType::CMD_SET_PRIORITY;
   cmd.float_val = 0.0f;
   cmd.int_val = pri_val;
-  bool pushed = cmd_queue_ ? cmd_queue_->push(cmd) : false;
-  if (pushed && wake_callback_)
-    wake_callback_();
+  bool pushed = mCmdQueue ? mCmdQueue->push(cmd) : false;
+  if (pushed && mWakeCallback)
+    mWakeCallback();
   WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Priority command pushed to queue (pri_val=%d, pushed=%d)",
                    pri_val, pushed);
   sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
@@ -436,9 +436,9 @@ void WebServer::apiSetModeHandler(struct mg_connection* c, struct mg_str* body)
   mode_cmd.float_val = 0.0f;
   mode_cmd.int_val = static_cast<int>(mode);
 
-  bool pushed = cmd_queue_ ? cmd_queue_->push(mode_cmd) : false;
-  if (pushed && wake_callback_)
-    wake_callback_();
+  bool pushed = mCmdQueue ? mCmdQueue->push(mode_cmd) : false;
+  if (pushed && mWakeCallback)
+    mWakeCallback();
   WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Mode command pushed to queue (mode=%ld, pushed=%d)", mode,
                    pushed);
 

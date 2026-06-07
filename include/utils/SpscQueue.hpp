@@ -69,10 +69,10 @@ public:
   void clear();
 
 private:
-  T items_[Size];
-  std::atomic<size_t> head_{0};
-  std::atomic<size_t> tail_{0};
-  size_t mask_{Size - 1};
+  T mItems[Size];
+  std::atomic<size_t> mHead{0};
+  std::atomic<size_t> mTail{0};
+  size_t mMask{Size - 1};
 };
 
 } // namespace windmi

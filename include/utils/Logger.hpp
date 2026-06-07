@@ -96,7 +96,7 @@ public:
   void write(const LogEntry& entry) override;
 
 private:
-  std::FILE* file_;
+  std::FILE* mFile;
 };
 
 /*
@@ -168,9 +168,9 @@ private:
   Logger(const Logger&) = delete;
   Logger& operator=(const Logger&) = delete;
 
-  mutable Mutex mutex_;
-  std::atomic<int> level_;
-  std::vector<std::unique_ptr<ILogOutput>> outputs_;
+  mutable Mutex mMutex;
+  std::atomic<int> mLevel;
+  std::vector<std::unique_ptr<ILogOutput>> mOutputs;
 };
 
 // Alias for compatibility
