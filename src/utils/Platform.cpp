@@ -4,6 +4,12 @@
 #include <cstring>
 
 #ifdef _WIN32
+#include <io.h>
+#else
+#include <termios.h>
+#endif
+
+#ifdef _WIN32
 #include <direct.h>
 #include <process.h>
 #include <windows.h>
@@ -194,42 +200,7 @@ void release_instance_lock() {
 #endif
 }
 
-bool is_pid_alive(int pid) {
-#ifdef _WIN32
-    // Use /proc/<pid>/stat equivalent on Windows by checking if process exists
-    // OpenProcess returns a handle if process exists
-    HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
-    if (process == nullptr) {
-        return false;
-    }
 
-    DWORD exit_code;
-    if (GetExitCodeProcess(process, &exit_code)) {
-        bool alive = (exit_code == STILL_ACTIVE);
-        CloseHandle(process);
-        return alive;
-    }
-
-    CloseHandle(process);
-    return false;
-#else
-    if (pid <= 0) {
-        return false;
-    }
-
-    char proc_path[64];
-    snprintf(proc_path, sizeof(proc_path), "/proc/%d/stat", pid);
-
-    FILE* f = fopen(proc_path, "r");
-    if (!f) {
-        return false;
-    }
-
-    // Read and close - if we can open it, the process exists
-    fclose(f);
-    return true;
-#endif
-}
 
 std::string resolve_static_dir(const std::string& dir) {
     char exe_path[MAX_PATH];
@@ -372,24 +343,6 @@ void release_instance_lock() {
         g_lock_fd = -1;
     }
 #endif
-}
-
-bool is_pid_alive(int pid) {
-    if (pid <= 0) {
-        return false;
-    }
-
-    char proc_path[64];
-    snprintf(proc_path, sizeof(proc_path), "/proc/%d/stat", pid);
-
-    FILE* f = fopen(proc_path, "r");
-    if (!f) {
-        return false;
-    }
-
-    // Read and close - if we can open it, the process exists
-    fclose(f);
-    return true;
 }
 
 std::string resolve_static_dir(const std::string& dir) {
@@ -593,8 +546,407 @@ Mutex* UniqueLock::mutex() const noexcept {
 }
 
 bool UniqueLock::owns_lock() const noexcept {
-    return owns_;
+    return owns_;  
 }
+
+}  // namespace windmi
+
+// ─────────────────────────────────────────────────────────────────────
+// Windmi Platform SerialPort Implementation
+// ─────────────────────────────────────────────────────────────────────
+
+namespace windmi::platform {
+
+// ─────────────────────────────────────────────────────────────────────
+// SerialPort (POSIX implementation using termios)
+// ─────────────────────────────────────────────────────────────────────
+
+#ifdef _WIN32
+// Windows SerialPort implementation
+
+SerialPort::SerialPort() : handle_(nullptr), rs485_enabled_(false), open_(false) {}
+
+SerialPort::~SerialPort() {
+    close();
+}
+
+SerialPort::SerialPort(SerialPort&& other) noexcept
+    : handle_(other.handle_), rs485_enabled_(other.rs485_enabled_), open_(other.open_) {
+    other.handle_ = nullptr;
+    other.open_ = false;
+}
+
+SerialPort& SerialPort::operator=(SerialPort&& other) noexcept {
+    if (this != &other) {
+        close();
+        handle_ = other.handle_;
+        rs485_enabled_ = other.rs485_enabled_;
+        open_ = other.open_;
+        other.handle_ = nullptr;
+        other.open_ = false;
+    }
+    return *this;
+}
+
+bool SerialPort::open(const std::string& device, int baud, char parity, int stop_bits, bool rs485_enabled) {
+    close();
+
+    // Convert device path to wide string for Windows
+    std::wstring wdevice;
+    if (!device.empty()) {
+        int size = MultiByteToWideChar(CP_UTF8, 0, device.c_str(), -1, nullptr, 0);
+        if (size > 0) {
+            wdevice.resize(size - 1);
+            MultiByteToWideChar(CP_UTF8, 0, device.c_str(), -1, &wdevice[0], size);
+        }
+    }
+
+    // Open the serial port
+    handle_ = CreateFileW(wdevice.c_str(), GENERIC_READ | GENERIC_WRITE,
+                          0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle_ == INVALID_HANDLE_VALUE) {
+        WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Failed to open serial port %s", device.c_str());
+        handle_ = nullptr;
+        return false;
+    }
+
+    // Set timeout parameters
+    COMMTIMEOUTS timeouts = {0};
+    timeouts.ReadIntervalTimeout = 100;  // 100ms between characters
+    timeouts.ReadTotalTimeoutConstant = 1000;  // 1 second total timeout
+    timeouts.ReadTotalTimeoutMultiplier = 10;  // 10ms per character
+    timeouts.WriteTotalTimeoutConstant = 1000;
+    timeouts.WriteTotalTimeoutMultiplier = 10;
+    SetCommTimeouts(handle_, &timeouts);
+
+    // Configure port
+    DCB dcb = {0};
+    dcb.DCBlength = sizeof(DCB);
+
+    if (!GetCommState(handle_, &dcb)) {
+        WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "GetCommState failed");
+        close();
+        return false;
+    }
+
+    // Set baud rate
+    switch (baud) {
+        case 9600:   dcb.BaudRate = CBR_9600;   break;
+        case 19200:  dcb.BaudRate = CBR_19200;  break;
+        case 38400:  dcb.BaudRate = CBR_38400;  break;
+        case 57600:  dcb.BaudRate = CBR_57600;  break;
+        case 115200: dcb.BaudRate = CBR_115200; break;
+        default:
+            WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Unsupported baud rate: %d", baud);
+            close();
+            return false;
+    }
+
+    // 8 data bits
+    dcb.ByteSize = 8;
+
+    // Stop bits
+    dcb.StopBits = (stop_bits == 2) ? TWOSTOPBITS : ONESTOPBIT;
+
+    // Parity
+    switch (parity) {
+        case 'N':
+            dcb.Parity = NOPARITY;
+            dcb.fParity = FALSE;
+            break;
+        case 'E':
+            dcb.Parity = EVENPARITY;
+            dcb.fParity = TRUE;
+            break;
+        case 'O':
+            dcb.Parity = ODDPARITY;
+            dcb.fParity = TRUE;
+            break;
+        default:
+            WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Unsupported parity: %c", parity);
+            close();
+            return false;
+    }
+
+    // Flow control (none)
+    dcb.fOutxCtsFlow = FALSE;
+    dcb.fRtsControl = RTS_CONTROL_DISABLE;
+    dcb.fOutxDsrFlow = FALSE;
+    dcb.fDtrControl = DTR_CONTROL_DISABLE;
+    dcb.fOutX = FALSE;
+    dcb.fInX = FALSE;
+
+    if (!SetCommState(handle_, &dcb)) {
+        WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "SetCommState failed");
+        close();
+        return false;
+    }
+
+    rs485_enabled_ = rs485_enabled;
+    open_ = true;
+
+    WINDMI_LOG_INFO(LOG_TAG_PLATFORM, "Serial port opened: %s @ %d %d%c%d",
+                    device.c_str(), baud, 8, parity, stop_bits);
+    return true;
+}
+
+void SerialPort::close() {
+    if (handle_ && handle_ != INVALID_HANDLE_VALUE) {
+        FlushFileBuffers(handle_);
+        CloseHandle(handle_);
+        handle_ = nullptr;
+    }
+    open_ = false;
+}
+
+bool SerialPort::isOpen() const {
+    return open_;
+}
+
+void SerialPort::flush() {
+    if (handle_ && handle_ != INVALID_HANDLE_VALUE) {
+        FlushFileBuffers(handle_);
+    }
+}
+
+int SerialPort::read(uint8_t* buffer, size_t len, unsigned int timeout_ms) {
+    if (!open_ || !buffer || len == 0) {
+        return -1;
+    }
+
+    // Set timeout
+    COMMTIMEOUTS timeouts = {0};
+    timeouts.ReadIntervalTimeout = 100;
+    timeouts.ReadTotalTimeoutConstant = timeout_ms;
+    timeouts.ReadTotalTimeoutMultiplier = 0;
+    SetCommTimeouts(handle_, &timeouts);
+
+    DWORD bytes_read = 0;
+    if (!ReadFile(handle_, buffer, static_cast<DWORD>(len), &bytes_read, nullptr)) {
+        return -1;
+    }
+
+    return static_cast<int>(bytes_read);
+}
+
+int SerialPort::write(const uint8_t* buffer, size_t len) {
+    if (!open_ || !buffer || len == 0) {
+        return -1;
+    }
+
+    DWORD bytes_written = 0;
+    if (!WriteFile(handle_, buffer, static_cast<DWORD>(len), &bytes_written, nullptr)) {
+        return -1;
+    }
+
+    return static_cast<int>(bytes_written);
+}
+
+#else
+// POSIX SerialPort implementation using termios
+
+SerialPort::SerialPort() : fd_(-1), open_(false) {}
+
+SerialPort::~SerialPort() {
+    close();
+}
+
+SerialPort::SerialPort(SerialPort&& other) noexcept : fd_(other.fd_), open_(other.open_) {
+    other.fd_ = -1;
+    other.open_ = false;
+}
+
+SerialPort& SerialPort::operator=(SerialPort&& other) noexcept {
+    if (this != &other) {
+        close();
+        fd_ = other.fd_;
+        open_ = other.open_;
+        other.fd_ = -1;
+        other.open_ = false;
+    }
+    return *this;
+}
+
+bool SerialPort::open(const std::string& device, int baud, char parity, int stop_bits, bool rs485_enabled) {
+    (void)rs485_enabled;  // RS-485 not implemented on Windows yet
+    close();
+
+    // Open device in read-write mode (non-blocking to avoid hanging on open)
+    fd_ = ::open(device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+    if (fd_ < 0) {
+        WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Failed to open serial device %s: %s", device.c_str(), strerror(errno));
+        return false;
+    }
+
+    // Configure serial port
+    struct termios tty;
+    memset(&tty, 0, sizeof(tty));
+
+    if (tcgetattr(fd_, &tty) != 0) {
+        WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "tcgetattr failed: %s", strerror(errno));
+        close();
+        return false;
+    }
+
+    // Set raw mode
+    cfmakeraw(&tty);
+
+    // Set baud rate
+    speed_t speed;
+    switch (baud) {
+        case 9600:   speed = B9600;   break;
+        case 19200:  speed = B19200;  break;
+        case 38400:  speed = B38400;  break;
+        case 57600:  speed = B57600;  break;
+        case 115200: speed = B115200; break;
+        default:
+            WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Unsupported baud rate: %d", baud);
+            close();
+            return false;
+    }
+
+    if (cfsetspeed(&tty, speed) != 0) {
+        WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "cfsetspeed failed: %s", strerror(errno));
+        close();
+        return false;
+    }
+
+    // 8 data bits
+    tty.c_cflag &= ~CSIZE;
+    tty.c_cflag |= CS8;
+
+    // Stop bits
+    if (stop_bits == 2) {
+        tty.c_cflag |= CSTOPB;
+    } else {
+        tty.c_cflag &= ~CSTOPB;
+    }
+
+    // Parity
+    tty.c_cflag &= ~PARENB;
+    tty.c_cflag &= ~PARODD;
+
+    switch (parity) {
+        case 'N':
+            tty.c_cflag &= ~PARENB;
+            break;
+        case 'E':
+            tty.c_cflag |= PARENB;
+            tty.c_cflag &= ~PARODD;
+            break;
+        case 'O':
+            tty.c_cflag |= PARENB;
+            tty.c_cflag |= PARODD;
+            break;
+        default:
+            WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Unsupported parity: %c", parity);
+            close();
+            return false;
+    }
+
+    // Disable flow control
+    tty.c_cflag &= ~CRTSCTS;
+    tty.c_iflag &= ~(IXON | IXOFF | IXANY);
+
+    // Read behavior: minimum = 1, timeout = 0 (blocking with select)
+    tty.c_cc[VMIN] = 1;
+    tty.c_cc[VTIME] = 0;
+
+    if (tcsetattr(fd_, TCSANOW, &tty) != 0) {
+        WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "tcsetattr failed: %s", strerror(errno));
+        close();
+        return false;
+    }
+
+    // Clear non-blocking flag for normal operation
+    int flags = fcntl(fd_, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(fd_, F_SETFL, flags & ~O_NONBLOCK);
+    }
+
+    // Flush any stale data
+    tcflush(fd_, TCIOFLUSH);
+
+    open_ = true;
+
+    WINDMI_LOG_INFO(LOG_TAG_PLATFORM, "Serial port opened: %s @ %d %d%c%d",
+                    device.c_str(), baud, 8, parity, stop_bits);
+    return true;
+}
+
+void SerialPort::close() {
+    if (fd_ >= 0) {
+        ::close(fd_);
+        fd_ = -1;
+    }
+    open_ = false;
+}
+
+bool SerialPort::isOpen() const {
+    return open_;
+}
+
+void SerialPort::flush() {
+    if (fd_ >= 0) {
+        tcflush(fd_, TCIFLUSH);
+    }
+}
+
+int SerialPort::read(uint8_t* buffer, size_t len, unsigned int timeout_ms) {
+    if (!open_ || fd_ < 0 || !buffer || len == 0) {
+        return -1;
+    }
+
+    fd_set fds;
+    struct timeval tv;
+    FD_ZERO(&fds);
+    FD_SET(fd_, &fds);
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    int ready = select(fd_ + 1, &fds, nullptr, nullptr, &tv);
+    if (ready <= 0) {
+        return (ready == 0) ? 0 : -1;  // 0 = timeout, -1 = error
+    }
+
+    ssize_t received = ::read(fd_, buffer, len);
+    if (received < 0) {
+        if (errno == EINTR) {
+            return 0;  // Interrupted, return 0 to indicate timeout behavior
+        }
+        return -1;
+    }
+
+    return static_cast<int>(received);
+}
+
+int SerialPort::write(const uint8_t* buffer, size_t len) {
+#ifdef _WIN32
+    if (!open_ || !buffer || len == 0) {
+        return -1;
+    }
+
+    DWORD bytes_written = 0;
+    if (!WriteFile(handle_, buffer, static_cast<DWORD>(len), &bytes_written, nullptr)) {
+        return -1;
+    }
+
+    return static_cast<int>(bytes_written);
+#else
+    if (!open_ || fd_ < 0 || !buffer || len == 0) {
+        return -1;
+    }
+
+    ssize_t sent = ::write(fd_, buffer, len);
+    if (sent < 0) {
+        return -1;
+    }
+
+    return static_cast<int>(sent);
+#endif
+}
+
+#endif  // _WIN32 (outer from line 601)
 
 }  // namespace windmi
 

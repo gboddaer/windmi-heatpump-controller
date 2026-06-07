@@ -27,7 +27,42 @@ bool acquire_instance_lock(bool force = false);
 void release_instance_lock();
 
 /** Check whether a PID appears alive on the current platform. */
-bool is_pid_alive(int pid);
+inline bool is_pid_alive(int pid) {
+#ifdef _WIN32
+    // Use /proc/<pid>/stat equivalent on Windows by checking if process exists
+    // OpenProcess returns a handle if process exists
+    HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+    if (process == nullptr) {
+        return false;
+    }
+
+    DWORD exit_code;
+    if (GetExitCodeProcess(process, &exit_code)) {
+        bool alive = (exit_code == STILL_ACTIVE);
+        CloseHandle(process);
+        return alive;
+    }
+
+    CloseHandle(process);
+    return false;
+#else
+    if (pid <= 0) {
+        return false;
+    }
+
+    char proc_path[64];
+    snprintf(proc_path, sizeof(proc_path), "/proc/%d/stat", pid);
+
+    FILE* f = fopen(proc_path, "r");
+    if (!f) {
+        return false;
+    }
+
+    // Read and close - if we can open it, the process exists
+    fclose(f);
+    return true;
+#endif
+}
 
 /** Resolve static directory as-is, relative to executable, or one level above executable. */
 std::string resolve_static_dir(const std::string& dir);
@@ -40,6 +75,46 @@ void set_instance_lock_name_for_test(const std::string& lock_name);
 
 /** Test hook: clear lock override. */
 void clear_instance_lock_name_for_test();
+
+/** Platform abstraction for serial port (Modbus RTU over RS-485). */
+class SerialPort {
+public:
+    SerialPort();
+    ~SerialPort();
+
+    SerialPort(const SerialPort&) = delete;
+    SerialPort& operator=(const SerialPort&) = delete;
+
+    SerialPort(SerialPort&& other) noexcept;
+    SerialPort& operator=(SerialPort&& other) noexcept;
+
+    /** Open serial device with specified settings. Returns false on failure. */
+    bool open(const std::string& device, int baud, char parity, int stop_bits, bool rs485_enabled);
+
+    /** Close serial device. Safe to call multiple times. */
+    void close();
+
+    /** Check if device is open. */
+    bool isOpen() const;
+
+    /** Flush input buffer. */
+    void flush();
+
+    /** Read bytes from serial port. Returns actual bytes read (0 = timeout, -1 = error). */
+    int read(uint8_t* buffer, size_t len, unsigned int timeout_ms);
+
+    /** Write bytes to serial port. Returns actual bytes written (-1 = error). */
+    int write(const uint8_t* buffer, size_t len);
+
+private:
+#ifdef _WIN32
+    void* handle_;  // HANDLE (void*) on Windows
+    bool rs485_enabled_;
+#else
+    int fd_;
+#endif
+    bool open_;
+};
 
 }  // namespace windmi::platform
 
