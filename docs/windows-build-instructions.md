@@ -5,7 +5,7 @@
 To build Windmi Controller for Windows, you need:
 
 1. **Windows 10/11**
-2. **Visual Studio 2022** or **MinGW-w64** (64-bit) with complete C++17 support
+2. **Visual Studio 2022** (recommended) or **MinGW-w64** (64-bit) with pthread support
 3. **CMake 3.16+**
 4. **Git**
 
@@ -43,22 +43,26 @@ cmake --build . --config Release
 ctest --test-dir build --output-on-failure
 ```
 
-## Option 2: MinGW-w64 with Complete C++17
+## Option 2: MinGW-w64 (Limited Support)
 
 ### Install MinGW-w64 with pthreads
 
-Note: The MinGW version currently installed on the build system (10-win32) lacks:
-- `std::thread` support
-- Some C++17 features
+Note: The MinGW version 10-win32 lacks full pthread support:
+- `clock_gettime` and `CLOCK_MONOTONIC` may not be available
+- Some POSIX APIs are missing or incomplete
+
+For production builds, **use Visual Studio 2022 instead**. MinGW is only suitable for basic builds with known limitations.
 
 You need a MinGW-w64 with **pthreads-win32** support. Options:
 
-1. **MSYS2** (recommended):
+1. **MSYS2** (recommended for MinGW builds):
 ```bash
 pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake
 ```
 
 2. **Win64 Seh** build from [mingw-w64.org](https://www.mingw-w64.org/)
+
+**Warning:** MinGW builds may require additional patches for `clock_gettime` and other POSIX APIs. The CI/CD uses Visual Studio for Windows builds.
 
 ### Build Steps
 
@@ -93,6 +97,8 @@ sudo apt-get install g++-mingw-w64-x86-64 gcc-mingw-w64-x86-64
 cd windmi-heatpump-controller
 ./build_windows.sh
 ```
+
+**Note:** MinGW cross-compilation on Linux has the same limitations as native MinGW builds. For production Windows builds, use Visual Studio or GitHub Actions with Windows runners.
 
 Or manually with proper toolchain:
 
