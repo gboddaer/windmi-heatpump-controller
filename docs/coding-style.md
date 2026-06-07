@@ -24,8 +24,11 @@ The goal is readable, maintainable, portable code rather than clever code.
 - Header files must be self-contained: they should compile when included alone.
 - Headers must include everything they directly use.
 - Do not rely on transitive includes from other headers.
-- Use include guards named `_<PROJECT>___<PATH>___<FILE>__H_` (e.g.,
-  `WINDMI_SERIAL_PORT_H_` for `include/serial_port.h`).
+- Use include guards named `WINDMI_<PATH>_<FILE>_H_` (for `.h`) or `WINDMI_<PATH>_<FILE>_HPP_`
+  (for `.hpp`). Use single underscores between segments, matching the existing
+  project convention. For example, `include/utils/Config.hpp` uses
+  `WINDMI_UTILS_CONFIG_HPP_`, and `include/modbus_client.h` uses
+  `WINDMI_MODBUS_CLIENT_H_`.
 - Prefer `#include` over forward declarations. Forward declarations introduce
   subtle risks (hidden dependencies, ABI changes, ODR violations) and should
   only be used when the full header is prohibitively expensive to include.
