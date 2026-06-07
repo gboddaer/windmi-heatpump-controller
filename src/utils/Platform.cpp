@@ -459,7 +459,10 @@ Thread::Thread(std::function<void()> callable) : impl_(new Thread::Impl) {
 
 #endif
 
-Thread::~Thread() { if (joinable()) join(); }
+Thread::~Thread() {
+    if (joinable()) join();
+    delete impl_;
+}
 
 Thread::Thread(Thread&& other) noexcept : impl_(other.impl_) { other.impl_ = nullptr; }
 
@@ -483,7 +486,8 @@ bool Thread::joinable() const { return impl_ && !impl_->joined && !impl_->detach
 void Thread::join() {
     if (!impl_ || !joinable()) return;
 #if defined(WINDMI_NATIVE_WINDOWS_THREADS)
-    if (impl_->handle && WaitForSingleObject(impl_->handle, INFINITE) == WAIT_OBJECT_0) {
+    if (impl_->handle) {
+        WaitForSingleObject(impl_->handle, INFINITE);
         CloseHandle(impl_->handle);
         impl_->handle = nullptr;
     }
