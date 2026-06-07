@@ -41,6 +41,9 @@ include_directories(mongoose)
 add_library(mongoose STATIC mongoose/mongoose.c)
 target_include_directories(mongoose PUBLIC mongoose)
 target_compile_definitions(mongoose PRIVATE MG_ENABLE_LINES=1)
+if(WIN32)
+    target_link_libraries(mongoose PUBLIC ws2_32)
+endif()
 
 # Utils library must be defined first (Logger dependency used by all other libraries)
 add_subdirectory(src/utils)
@@ -87,10 +90,10 @@ if(WINDMI_BUILD_TESTS)
     add_subdirectory(tests/modbus)
     add_subdirectory(tests/web)
     add_subdirectory(tests/utils)
-    
+
     # Add CRC16 to utils tests
     target_link_libraries(test_utils PRIVATE windmi_utils GTest::gtest_main)
-    
+
     # Register all test executables
     add_test(NAME test_modbus_client COMMAND test_modbus_client)
     add_test(NAME test_modbus_rtu_frame COMMAND test_modbus_rtu_frame)

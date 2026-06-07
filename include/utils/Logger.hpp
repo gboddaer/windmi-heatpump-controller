@@ -18,9 +18,17 @@
 #include <chrono>
 #include <cstdio>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
+
+// Platform-specific includes
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
+// Platform abstraction for mutex (must be before Logger class)
+#include "utils/Platform.hpp"
 
 namespace windmi {
 
@@ -28,29 +36,31 @@ namespace windmi {
  * @brief Log severity levels
  */
 enum class LogLevel {
-    TRACE = 0,  // Very verbose, debug-only
-    DEBUG = 1,  // Detailed flow
-    INFO  = 2,  // General info (default in production)
-    WARN  = 3,  // Warning conditions
-    ERROR = 4,  // Errors (goes to stderr)
-    FATAL = 5,  // Critical failures (exit)
+    Trace = 0,  // Very verbose, debug-only
+    Debug = 1,  // Detailed flow
+    Info  = 2,  // General info (default in production)
+    Warn  = 3,  // Warning conditions
+    Error = 4,  // Errors (goes to stderr)
+    Fatal = 5,  // Critical failures (exit)
 };
 
 /**
  * @brief A single log entry
  */
 struct LogEntry {
+    LogLevel level;
+    const char* tag;
+    const char* message;
+    const char* file;
+    int line;
+    const char* function;
     std::chrono::system_clock::time_point timestamp;
-    LogLevel    level;
-    const char* tag;       // Component tag (static string, not owned)
-    std::string message;
-    const char* file;      // Static string from __FILE__
-    int         line;
-    const char* function;  // Static string from __func__
 };
 
 /**
- * @brief Interface for log output destinations
+ * @brief Log output interface
+ *
+ * Implement this interface to create custom log outputs.
  */
 class ILogOutput {
 public:
@@ -84,6 +94,11 @@ public:
 private:
     std::FILE* file_;
 };
+
+/*
+ * Mutex and LockGuard are now in Platform.hpp to be platform-agnostic
+ * and work with both MinGW (without std::mutex) and full C++17 implementations
+ */
 
 /**
  * @brief Singleton logger
@@ -144,15 +159,19 @@ public:
 
 private:
     Logger();
+    ~Logger();
     Logger(const Logger&) = delete;
     Logger& operator=(const Logger&) = delete;
 
-    mutable std::mutex mutex_;
+    mutable Mutex mutex_;
     std::atomic<int> level_;
     std::vector<std::unique_ptr<ILogOutput>> outputs_;
 };
 
-} // namespace windmi
+// Alias for compatibility
+using StdoutLogOutput = ConsoleLogOutput;
+
+}  // namespace windmi
 
 // ─────────────────────────────────────────────────────────────────────
 // C++ Macros
@@ -176,11 +195,11 @@ private:
         } \
     } while (0)
 
-#define WINDMI_LOG_TRACE(tag, fmt, ...)  WINDMI_LOG(windmi::LogLevel::TRACE, tag, fmt, ##__VA_ARGS__)
-#define WINDMI_LOG_DEBUG(tag, fmt, ...)  WINDMI_LOG(windmi::LogLevel::DEBUG, tag, fmt, ##__VA_ARGS__)
-#define WINDMI_LOG_INFO(tag, fmt, ...)   WINDMI_LOG(windmi::LogLevel::INFO, tag, fmt, ##__VA_ARGS__)
-#define WINDMI_LOG_WARN(tag, fmt, ...)   WINDMI_LOG(windmi::LogLevel::WARN, tag, fmt, ##__VA_ARGS__)
-#define WINDMI_LOG_ERROR(tag, fmt, ...)  WINDMI_LOG(windmi::LogLevel::ERROR, tag, fmt, ##__VA_ARGS__)
-#define WINDMI_LOG_FATAL(tag, fmt, ...)  WINDMI_LOG(windmi::LogLevel::FATAL, tag, fmt, ##__VA_ARGS__)
+#define WINDMI_LOG_TRACE(tag, fmt, ...)  WINDMI_LOG(windmi::LogLevel::Trace, tag, fmt, ##__VA_ARGS__)
+#define WINDMI_LOG_DEBUG(tag, fmt, ...)  WINDMI_LOG(windmi::LogLevel::Debug, tag, fmt, ##__VA_ARGS__)
+#define WINDMI_LOG_INFO(tag, fmt, ...)   WINDMI_LOG(windmi::LogLevel::Info, tag, fmt, ##__VA_ARGS__)
+#define WINDMI_LOG_WARN(tag, fmt, ...)   WINDMI_LOG(windmi::LogLevel::Warn, tag, fmt, ##__VA_ARGS__)
+#define WINDMI_LOG_ERROR(tag, fmt, ...)  WINDMI_LOG(windmi::LogLevel::Error, tag, fmt, ##__VA_ARGS__)
+#define WINDMI_LOG_FATAL(tag, fmt, ...)  WINDMI_LOG(windmi::LogLevel::Fatal, tag, fmt, ##__VA_ARGS__)
 
-#endif // WINDMI_UTILS_LOGGER_HPP
+#endif  // WINDMI_UTILS_LOGGER_HPP

@@ -10,12 +10,11 @@
 #define WINDMI_CORE_CONTROL_LOOP_HPP
 
 #include <cstdint>
-#include <thread>
+#include <memory>
 #include <atomic>
-#include <mutex>
-#include <condition_variable>
 #include <functional>
 #include <string>
+#include "utils/Platform.hpp"
 
 namespace windmi {
 
@@ -216,13 +215,13 @@ private:
     StatusQueue* status_queue_;
 
     // Thread management
-    std::unique_ptr<std::thread> thread_;
+    std::unique_ptr<windmi::Thread> thread_;
     std::atomic<bool> running_;
     std::atomic<bool> stop_requested_;
 
     // Kick mechanism
-    std::mutex kick_mutex_;
-    std::condition_variable kick_cond_;
+    windmi::Mutex kick_mutex_;
+    windmi::ConditionVariable kick_cond_;
     uint64_t kick_generation_;
 
     // Control state (matches master branch)

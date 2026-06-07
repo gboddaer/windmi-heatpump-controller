@@ -4,5 +4,7 @@ add_library(windmi_utils STATIC
     SpscQueue.cpp
     Logger.cpp
     LoggerC.cpp
+    Platform.cpp
 )
 target_include_directories(windmi_utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+target_link_libraries(windmi_utils PUBLIC Threads::Threads)

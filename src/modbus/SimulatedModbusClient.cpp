@@ -35,25 +35,25 @@ SimulatedModbusClient::SimulatedModbusClient()
 }
 
 bool SimulatedModbusClient::connect() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    windmi::LockGuard lock(mutex_);
     connected_ = true;
     last_error_ = "No error";
     return true;
 }
 
 void SimulatedModbusClient::disconnect() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    windmi::LockGuard lock(mutex_);
     connected_ = false;
     last_error_ = "Not connected";
 }
 
 bool SimulatedModbusClient::isConnected() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    windmi::LockGuard lock(mutex_);
     return connected_;
 }
 
 int16_t SimulatedModbusClient::readRegister(uint16_t address) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    windmi::LockGuard lock(mutex_);
     
     if (!connected_) {
         last_error_ = "Not connected";
@@ -73,7 +73,7 @@ int16_t SimulatedModbusClient::readRegister(uint16_t address) {
 }
 
 void SimulatedModbusClient::writeRegister(uint16_t address, uint16_t value) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    windmi::LockGuard lock(mutex_);
     
     if (!connected_) {
         last_error_ = "Not connected";
@@ -93,7 +93,7 @@ void SimulatedModbusClient::flushBuffer() {
 }
 
 std::string SimulatedModbusClient::getLastError() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    windmi::LockGuard lock(mutex_);
     return last_error_;
 }
 

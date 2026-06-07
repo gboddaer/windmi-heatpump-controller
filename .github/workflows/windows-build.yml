@@ -1,0 +1,44 @@
+name: Windows Cross-Build
+
+on:
+  push:
+    branches:
+      - feature/windows-support
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  mingw-cross-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install MinGW-w64 (POSIX threads)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix
+
+      - name: Configure
+        run: |
+          mkdir -p build-win64
+          cd build-win64
+          cmake .. -G "Unix Makefiles" \
+            -DCMAKE_TOOLCHAIN_FILE=../mingw-w64-x86_64.cmake \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          cd build-win64
+          make -j$(nproc)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windmi-control-windows
+          path: build-win64/windmi-control.exe
+          retention-days: 7

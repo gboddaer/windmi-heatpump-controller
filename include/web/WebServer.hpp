@@ -10,6 +10,7 @@
 
 #include "core/ControlLoop.hpp"
 #include <mongoose.h>
+#undef poll  // Mongoose defines poll(a,b,c) as WSAPoll on Windows; conflicts with our method name
 #include <string>
 #include <atomic>
 #include <csignal>
@@ -51,7 +52,7 @@ public:
      * @brief Poll the web server once.
      * @param timeout_ms Poll timeout in milliseconds.
      */
-    void poll(int timeout_ms = 100);
+    void pollOnce(int timeout_ms = 100);
 
     void stop();
     bool isShuttingDown() const;

@@ -8,10 +8,10 @@
 #include "core/StatusMonitor.hpp"
 #include "modbus/IModbusClient.hpp"
 #include "config.h"
+#include "utils/Platform.hpp"
 
 #include <chrono>
 #include <map>
-#include <thread>
 
 using namespace windmi;
 
@@ -51,7 +51,7 @@ bool waitForLatest(StatusQueue& queue, StatusSnapshot& snapshot) {
         if (queue.latest(snapshot)) {
             return true;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        windmi::platform::sleep_ms(10);
     }
     return false;
 }

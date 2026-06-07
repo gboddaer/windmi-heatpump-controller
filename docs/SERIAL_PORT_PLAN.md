@@ -454,7 +454,7 @@ Currently `build_read_frame()`, `build_write_frame()` are `static` in `modbus_cl
    2. Re-open the serial device path
    3. Re-configure termios
    4. Set `connected = true`
-   
+
    This way, the existing ControlLoop reconnect logic works without changes.
 
 ### Phase 5: Main Application Changes

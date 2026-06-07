@@ -9,6 +9,7 @@
 #include "config.h"
 
 #include <mongoose.h>
+#undef poll  // Mongoose defines poll(a,b,c) as WSAPoll on Windows
 #include <cstdio>
 
 #include <cstring>
@@ -84,11 +85,11 @@ WebServer::~WebServer() {
 
 void WebServer::run() {
     while (running_.load()) {
-        poll(100);
+        pollOnce(100);
     }
 }
 
-void WebServer::poll(int timeout_ms) {
+void WebServer::pollOnce(int timeout_ms) {
     if (running_.load()) {
         mg_mgr_poll(&mgr_, timeout_ms);
     }

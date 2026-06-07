@@ -5,7 +5,6 @@
 #include "utils/LoggerC.h"
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 // Convert temperature to raw register value (multiply by 10)
 static inline int16_t temp_to_raw(float temp) {

@@ -11,11 +11,11 @@
 
 #include <cstdint>
 #include <unordered_map>
-#include <mutex>
 #include <chrono>
 #include <string>
 
 #include "modbus/IModbusClient.hpp"
+#include "utils/Platform.hpp"
 
 namespace windmi {
 
@@ -52,7 +52,7 @@ private:
     bool connected_;
     
     // Simulation state
-    mutable std::mutex mutex_;
+    mutable windmi::Mutex mutex_;
     std::chrono::steady_clock::time_point last_update_;
     
     // Ambient temperature for drift simulation (degrees C * 10)

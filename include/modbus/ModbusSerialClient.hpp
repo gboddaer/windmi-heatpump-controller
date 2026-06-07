@@ -37,7 +37,7 @@ class ModbusSerialClient : public IModbusClient {
 public:
     /**
      * @brief Create a new Modbus serial client
-     * 
+     *
      * @param device Serial device path (e.g., "/dev/ttyUSB0")
      * @param baud Baud rate (9600, 19200, 38400, 57600, 115200)
      * @param parity Parity character: 'N' (none), 'E' (even), 'O' (odd)
