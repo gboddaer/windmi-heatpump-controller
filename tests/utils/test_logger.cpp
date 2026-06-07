@@ -61,13 +61,13 @@ protected:
         // Replace default console output with test output
         test_output_ = new TestLogOutput();
         Logger::instance().setOutput(std::unique_ptr<ILogOutput>(test_output_));
-        Logger::instance().setLevel(LogLevel::TRACE);  // Allow all levels
+        Logger::instance().setLevel(LogLevel::Trace);  // Allow all levels
     }
 
     void TearDown() override {
         // Restore default console output
         Logger::instance().setOutput(std::make_unique<ConsoleLogOutput>());
-        Logger::instance().setLevel(LogLevel::INFO);
+        Logger::instance().setLevel(LogLevel::Info);
     }
 
     TestLogOutput* test_output_;  // Owned by Logger via unique_ptr
@@ -77,7 +77,7 @@ protected:
 // Level filtering
 // ─────────────────────────────────────────────────────────────────────────
 TEST_F(LoggerTest, LevelFilteringSuppressesBelowThreshold) {
-    Logger::instance().setLevel(LogLevel::WARN);
+    Logger::instance().setLevel(LogLevel::Warn);
     test_output_->clear();
 
     WINDMI_LOG_TRACE(LOG_TAG_MAIN, "trace");
@@ -88,12 +88,12 @@ TEST_F(LoggerTest, LevelFilteringSuppressesBelowThreshold) {
 
     // Only WARN and ERROR should be captured
     ASSERT_EQ(test_output_->entries.size(), 2u);
-    EXPECT_EQ(test_output_->entries[0].level, LogLevel::WARN);
-    EXPECT_EQ(test_output_->entries[1].level, LogLevel::ERROR);
+    EXPECT_EQ(test_output_->entries[0].level, LogLevel::Warn);
+    EXPECT_EQ(test_output_->entries[1].level, LogLevel::Error);
 }
 
 TEST_F(LoggerTest, LevelFilteringAllowsAllAtTrace) {
-    Logger::instance().setLevel(LogLevel::TRACE);
+    Logger::instance().setLevel(LogLevel::Trace);
     test_output_->clear();
 
     WINDMI_LOG_TRACE(LOG_TAG_MAIN, "trace");
@@ -107,13 +107,13 @@ TEST_F(LoggerTest, LevelFilteringAllowsAllAtTrace) {
 }
 
 TEST_F(LoggerTest, ShouldLogMatchesSetLevel) {
-    Logger::instance().setLevel(LogLevel::INFO);
-    EXPECT_FALSE(Logger::instance().shouldLog(LogLevel::TRACE));
-    EXPECT_FALSE(Logger::instance().shouldLog(LogLevel::DEBUG));
-    EXPECT_TRUE(Logger::instance().shouldLog(LogLevel::INFO));
-    EXPECT_TRUE(Logger::instance().shouldLog(LogLevel::WARN));
-    EXPECT_TRUE(Logger::instance().shouldLog(LogLevel::ERROR));
-    EXPECT_TRUE(Logger::instance().shouldLog(LogLevel::FATAL));
+    Logger::instance().setLevel(LogLevel::Info);
+    EXPECT_FALSE(Logger::instance().shouldLog(LogLevel::Trace));
+    EXPECT_FALSE(Logger::instance().shouldLog(LogLevel::Debug));
+    EXPECT_TRUE(Logger::instance().shouldLog(LogLevel::Info));
+    EXPECT_TRUE(Logger::instance().shouldLog(LogLevel::Warn));
+    EXPECT_TRUE(Logger::instance().shouldLog(LogLevel::Error));
+    EXPECT_TRUE(Logger::instance().shouldLog(LogLevel::Fatal));
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -148,7 +148,7 @@ TEST_F(LoggerTest, MultipleArgs) {
 }
 
 TEST_F(LoggerTest, CBridgeLogsFormattedMessage) {
-    Logger::instance().setLevel(LogLevel::INFO);
+    Logger::instance().setLevel(LogLevel::Info);
 
     EXPECT_TRUE(windmi_should_log(WINDMI_LOG_INFO));
     EXPECT_FALSE(windmi_should_log(WINDMI_LOG_DEBUG));
@@ -157,9 +157,9 @@ TEST_F(LoggerTest, CBridgeLogsFormattedMessage) {
                "C bridge value %d", 17);
 
     ASSERT_EQ(test_output_->entries.size(), 1u);
-    EXPECT_EQ(test_output_->entries[0].level, LogLevel::INFO);
+    EXPECT_EQ(test_output_->entries[0].level, LogLevel::Info);
     EXPECT_EQ(test_output_->entries[0].tag, std::string(LOG_TAG_MODBUS));
-    EXPECT_EQ(test_output_->entries[0].message, "C bridge value 17");
+    EXPECT_STREQ(test_output_->entries[0].message, "C bridge value 17");
     EXPECT_EQ(test_output_->entries[0].file, std::string("test.c"));
     EXPECT_EQ(test_output_->entries[0].line, 123);
 }
@@ -217,12 +217,12 @@ TEST_F(LoggerTest, FileLogOutputWritesToFile) {
 // Format helpers
 // ─────────────────────────────────────────────────────────────────────────
 TEST_F(LoggerTest, FormatLevelReturnsCorrectStrings) {
-    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::TRACE), "TRACE");
-    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::DEBUG), "DEBUG");
-    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::INFO),  "INFO ");
-    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::WARN),  "WARN ");
-    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::ERROR), "ERROR");
-    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::FATAL), "FATAL");
+    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::Trace), "Trace");
+    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::Debug), "Debug");
+    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::Info),  "Info ");
+    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::Warn),  "Warn ");
+    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::Error), "Error");
+    EXPECT_EQ(Logger::instance().formatLevel(LogLevel::Fatal), "Fatal");
 }
 
 TEST_F(LoggerTest, FormatTimestampContainsYear) {
@@ -239,7 +239,7 @@ TEST_F(LoggerTest, FormatTimestampContainsYear) {
 // ─────────────────────────────────────────────────────────────────────────
 TEST_F(LoggerTest, ConcurrentLoggingDoesNotCrash) {
     test_output_->clear();
-    Logger::instance().setLevel(LogLevel::INFO);
+    Logger::instance().setLevel(LogLevel::Info);
 
     const int num_threads = 4;
     const int messages_per_thread = 100;

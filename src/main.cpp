@@ -86,7 +86,7 @@ static bool parse_args(int argc, char* argv[],
     web_ip = WEB_SERVER_IP;
     web_port = WEB_SERVER_PORT;
     static_dir = "./static";
-    log_level = windmi::LogLevel::INFO;
+    log_level = windmi::LogLevel::Info;
     log_file = "";
     demo_mode = false;
     run_selftest = false;
@@ -105,11 +105,11 @@ static bool parse_args(int argc, char* argv[],
             static_dir = argv[++i];
         } else if (strcmp(argv[i], "--log-level") == 0 && i + 1 < argc) {
             const char* level_str = argv[++i];
-            if (strcmp(level_str, "TRACE") == 0) log_level = windmi::LogLevel::TRACE;
-            else if (strcmp(level_str, "DEBUG") == 0) log_level = windmi::LogLevel::DEBUG;
-            else if (strcmp(level_str, "INFO") == 0) log_level = windmi::LogLevel::INFO;
-            else if (strcmp(level_str, "WARN") == 0) log_level = windmi::LogLevel::WARN;
-            else if (strcmp(level_str, "ERROR") == 0) log_level = windmi::LogLevel::ERROR;
+            if (strcmp(level_str, "Trace") == 0) log_level = windmi::LogLevel::Trace;
+            else if (strcmp(level_str, "Debug") == 0) log_level = windmi::LogLevel::Debug;
+            else if (strcmp(level_str, "Info") == 0) log_level = windmi::LogLevel::Info;
+            else if (strcmp(level_str, "Warn") == 0) log_level = windmi::LogLevel::Warn;
+            else if (strcmp(level_str, "Error") == 0) log_level = windmi::LogLevel::Error;
             else {
                 fprintf(stderr, "Unknown log level: %s\n", level_str);
                 return false;
