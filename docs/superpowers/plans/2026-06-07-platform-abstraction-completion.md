@@ -45,6 +45,17 @@
 
 ## Design: Platform Abstraction Classes
 
+### Design Rationale: Separate Classes
+
+**Thread and ConditionVariable must be separate classes**, not combined into Thread. Reasons:
+
+1. **Different responsibilities**: Thread ≈ execution; ConditionVariable ≈ synchronization/notification. They're orthogonal.
+2. **One-to-many**: Multiple threads can wait on the same CV. One thread can use multiple CVs. A CV isn't "owned" by a thread.
+3. **Existing code demonstrates this**: `ControlLoop` has `kick_mutex_` + `kick_cond_` as separate members. The `kick()` method notifies the CV from *outside* the thread (classic producer-consumer). The CV belongs to shared state, not the thread.
+4. **Every threading library separates them**: `std::thread`/`std::condition_variable`, `pthread_t`/`pthread_cond_t`, `HANDLE`/`CONDITION_VARIABLE`.
+
+The five classes — `Mutex`, `LockGuard`, `UniqueLock`, `ConditionVariable`, `Thread` — mirror the standard library but avoid the MinGW-incompatible `<thread>`, `<mutex>`, `<condition_variable>` headers.
+
 ### Thread
 
 ```cpp
@@ -55,16 +66,15 @@ public:
     Thread() = default;
     ~Thread();
 
-    // Prevent copying
     Thread(const Thread&) = delete;
     Thread& operator=(const Thread&) = delete;
 
-    // Move semantics
     Thread(Thread&& other) noexcept;
     Thread& operator=(Thread&& other) noexcept;
 
-    template<typename Func, typename... Args>
-    explicit Thread(Func&& func, Args&&... args);
+    /// Creates a thread that executes the given callable.
+    /// Type-erases to std::function<void()> internally.
+    explicit Thread(std::function<void()> callable);
 
     bool joinable() const;
     void join();
@@ -85,10 +95,11 @@ private:
 ```
 
 **Implementation notes:**
-- On POSIX: wraps `pthread_create`/`pthread_join`/`pthread_detach`
-- On Windows: wraps `_beginthreadex`/`WaitForSingleObject`/`CloseHandle`
-- Template constructor uses `std::function<void()>` internally to store the callable
-- Move semantics transfer ownership of the underlying handle
+- Constructor takes `std::function<void()>` — no templates in the `.cpp` file, avoids header bloat.
+- On POSIX: `pthread_create`/`pthread_join`/`pthread_detach`
+- On Windows: `_beginthreadex`/`WaitForSingleObject`/`CloseHandle`
+- Move transfers ownership; source becomes non-joinable.
+- Destructor joins if joinable (safe default, matches `std::thread` behavior if you don't `std::terminate`)
 
 ### ConditionVariable
 
@@ -103,19 +114,27 @@ public:
     void notify_one();
     void notify_all();
 
-    // Wait until notified
+    /// Block until notified. Lock must be held on entry; released during wait, reacquired on return.
     void wait(UniqueLock& lock);
 
-    // Wait with predicate
-    template<typename Predicate>
-    bool wait(UniqueLock& lock, Predicate pred);
-
-    // Wait for duration, returns true if notified, false on timeout
+    /// Block until notified or timeout. Returns false on timeout.
     bool wait_for(UniqueLock& lock, unsigned int ms);
 
-    // Wait for duration with predicate
+    /// Block until predicate returns true. Spurious-wakeup safe.
     template<typename Predicate>
-    bool wait_for(UniqueLock& lock, unsigned int ms, Predicate pred);
+    void wait(UniqueLock& lock, Predicate pred) {
+        while (!pred()) wait(lock);
+    }
+
+    /// Block until predicate returns true or timeout. Returns true if pred satisfied, false on timeout.
+    template<typename Predicate>
+    bool wait_for(UniqueLock& lock, unsigned int ms, Predicate pred) {
+        auto deadline = platform::sleep_ms(0) + ms; // monotonic base — see implementation
+        while (!pred()) {
+            if (!wait_for(lock, ms)) return pred();
+        }
+        return true;
+    }
 
     ConditionVariable(const ConditionVariable&) = delete;
     ConditionVariable& operator=(const ConditionVariable&) = delete;
@@ -132,10 +151,11 @@ private:
 ```
 
 **Implementation notes:**
-- On POSIX: wraps `pthread_cond_init`/`pthread_cond_signal`/`pthread_cond_broadcast`/`pthread_cond_timedwait`
-- On Windows: wraps `InitializeConditionVariable`/`WakeConditionVariable`/`WakeAllConditionVariable`/`SleepConditionVariableCS`
-- `wait_for` takes milliseconds, not `std::chrono` — avoids `<chrono>` dependency issues on MinGW
-- Windows `CONDITION_VARIABLE` is a lightweight struct available since Vista, no dynamic allocation
+- On POSIX: `pthread_cond_init`/`pthread_cond_signal`/`pthread_cond_broadcast`/`pthread_cond_timedwait`
+- On Windows: `InitializeConditionVariable`/`WakeConditionVariable`/`WakeAllConditionVariable`/`SleepConditionVariableCS`
+- `wait_for` takes **milliseconds** (not `std::chrono`), avoiding `<chrono>` header portability issues on MinGW
+- Windows `CONDITION_VARIABLE` is a lightweight struct (Vista+), no dynamic allocation needed
+- Template methods `wait(lock, pred)` and `wait_for(lock, ms, pred)` are defined inline in the header — they only need `UniqueLock`, not the platform internals
 
 ### UniqueLock (needed for ConditionVariable::wait)
 
@@ -149,8 +169,8 @@ public:
 
     void lock();
     void unlock();
-    Mutex* mutex() const;
-    bool owns_lock() const;
+    Mutex* mutex() const noexcept;
+    bool owns_lock() const noexcept;
 
     UniqueLock(const UniqueLock&) = delete;
     UniqueLock& operator=(const UniqueLock&) = delete;
@@ -164,10 +184,9 @@ private:
 ```
 
 **Implementation notes:**
-- Necessary because `ConditionVariable::wait` needs a lock/unlock interface
-- Simpler than `std::unique_lock` — no deferred locking, no swap, etc.
-- On POSIX, `pthread_cond_wait` requires `pthread_mutex_t*`, which our `Mutex` already wraps
-- On Windows, `SleepConditionVariableCS` requires `CRITICAL_SECTION*`, which our `Mutex` already wraps
+- Constructor locks, destructor unlocks — RAII.
+- `mutex()` returns raw pointer so `ConditionVariable` can access the underlying platform mutex.
+- Minimal: no deferred locking, no swap, no adoption-from-unlocked. Can be extended later if needed.
 
 ---
 
@@ -435,14 +454,16 @@ Tasks 4-7 are independent of each other and could be done in parallel, but must 
 
 ## Key Design Decisions
 
-1. **`Thread` uses `std::function<void()>` internally** — avoids template specialization in `Platform.cpp`. The callable is type-erased at the call site.
+1. **ConditionVariable is a separate class from Thread** — they have orthogonal responsibilities (execution vs. synchronization). Multiple threads can wait on the same CV; one thread can use multiple CVs. Every standard library (C++, POSIX, Win32) separates them. The existing `ControlLoop` code already uses them as separate objects (`kick_mutex_` + `kick_cond_`).
 
-2. **`wait_for` takes `unsigned int ms`** — avoids `<chrono>` dependency issues on MinGW. This is a simpler, more portable API.
+2. **`Thread` takes `std::function<void()>` in constructor** — no template specialization in `Platform.cpp`. The callable is type-erased at the call site. This keeps the implementation file simple and avoids header bloat.
 
-3. **`UniqueLock` is minimal** — only provides what `ConditionVariable::wait` needs. No deferred locking, no swap, no release/reacquire. If needed later, it can be extended.
+3. **`wait_for` takes `unsigned int ms`** — avoids `<chrono>` dependency issues on MinGW. Milliseconds are the universal time unit across both POSIX and Windows APIs. Callers convert `std::chrono` durations to ms at the call site.
 
-4. **`Thread` move semantics** — follows `std::thread` semantics: move transfers ownership, source becomes non-joinable.
+4. **`UniqueLock` is minimal** — only provides what `ConditionVariable::wait` needs. No deferred locking, no swap, no release/reacquire. Can be extended later if needed.
 
-5. **Lock fd leak fix** — the current POSIX `acquire_instance_lock()` leaks the file descriptor because it never stores it. This is a real bug, not just a Windows issue.
+5. **`Thread` move semantics** — follows `std::thread` semantics: move transfers ownership, source becomes non-joinable.
 
-6. **No `<thread>`, `<mutex>`, `<condition_variable>` outside `Platform.*`** — this is the invariant. All thread/mutex/condvar usage goes through `windmi::Thread`, `windmi::Mutex`, `windmi::ConditionVariable`.
+6. **Lock fd leak fix** — the current POSIX `acquire_instance_lock()` opens a file descriptor but never stores it for release. This is a real bug, not just a Windows issue.
+
+7. **No `<thread>`, `<mutex>`, `<condition_variable>` outside `Platform.*`** — this is the invariant. All thread/mutex/condvar usage goes through `windmi::Thread`, `windmi::Mutex`, `windmi::ConditionVariable`. This ensures the entire codebase compiles on MinGW without those C++17 headers.
