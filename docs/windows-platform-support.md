@@ -122,13 +122,16 @@ grep -r "std::filesystem\|filesystem" src/ include/
 
 ## Build Instructions for Windows
 
-### Prerequisites
+Detailed build instructions are available in `docs/windows-build-instructions.md`.
 
-1. **Visual Studio 2019+** or **MinGW-w64**
-2. **CMake 3.16+**
-3. **vcpkg** (recommended for dependencies)
+This document covers:
+- Visual Studio 2022 build steps (recommended)
+- MinGW-w64 build steps
+- Cross-compilation on Linux with MinGW
+- Testing instructions
+- Known Windows-specific code paths
 
-### Build with vcpkg (Recommended)
+### Quick Start (Visual Studio 2022)
 
 ```powershell
 # Install dependencies
