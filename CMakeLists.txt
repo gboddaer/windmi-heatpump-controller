@@ -13,6 +13,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Compiler warnings
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     add_compile_options(-Wall -Wextra)
+elseif(MSVC)
+    add_compile_options(/W4)
 endif()
 
 # Options
@@ -74,7 +76,7 @@ target_include_directories(windmi-control PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_link_libraries(windmi-control PRIVATE
+set(EXTRA_LIBS
     windmi_core
     windmi_modbus
     windmi_web
@@ -83,6 +85,10 @@ target_link_libraries(windmi-control PRIVATE
     mongoose
     Threads::Threads
 )
+if(WIN32)
+    list(APPEND EXTRA_LIBS ws2_32)
+endif()
+target_link_libraries(windmi-control PRIVATE ${EXTRA_LIBS})
 
 # Unit tests
 if(WINDMI_BUILD_TESTS)
