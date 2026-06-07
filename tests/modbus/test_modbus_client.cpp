@@ -37,13 +37,6 @@ TEST(ModbusClientTest, DestructorDoesNotCrash) {
     // Should not crash
 }
 
-TEST(ModbusClientTest, GetCClient) {
-    ModbusClient client(MODBUS_GATEWAY_IP, MODBUS_GATEWAY_PORT, MODBUS_SLAVE_ID);
-    void* c_client = client.getCClient();
-    // Should return non-null even when not connected (client struct exists)
-    EXPECT_NE(c_client, nullptr);
-}
-
 // Simulator tests
 TEST(SimulatedModbusClientTest, Connect) {
     SimulatedModbusClient client;

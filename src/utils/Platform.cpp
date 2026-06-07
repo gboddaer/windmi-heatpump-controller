@@ -1,4 +1,5 @@
 #include "utils/Platform.hpp"
+#include "utils/PlatformC.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1009,4 +1010,41 @@ int SerialPort::write(const uint8_t* buffer, size_t len) {
 
 extern "C" void windmi_sleep_ms(unsigned int ms) {
     windmi::platform::sleep_ms(ms);
+}
+
+extern "C" WindmiSerialPort *windmi_serial_open(const char *device, int baud, char parity,
+                                                 int stop_bits, bool rs485_enabled) {
+    if (!device) return nullptr;
+    auto *port = new windmi::platform::SerialPort();
+    if (!port->open(device, baud, parity, stop_bits, rs485_enabled)) {
+        delete port;
+        return nullptr;
+    }
+    return reinterpret_cast<WindmiSerialPort*>(port);
+}
+
+extern "C" void windmi_serial_close(WindmiSerialPort *port) {
+    if (!port) return;
+    auto *p = reinterpret_cast<windmi::platform::SerialPort*>(port);
+    p->close();
+    delete p;
+}
+
+extern "C" int windmi_serial_read(WindmiSerialPort *port, uint8_t *buffer, size_t len,
+                                   unsigned int timeout_ms) {
+    if (!port) return -1;
+    auto *p = reinterpret_cast<windmi::platform::SerialPort*>(port);
+    return p->read(buffer, len, timeout_ms);
+}
+
+extern "C" int windmi_serial_write(WindmiSerialPort *port, const uint8_t *buffer, size_t len) {
+    if (!port) return -1;
+    auto *p = reinterpret_cast<windmi::platform::SerialPort*>(port);
+    return p->write(buffer, len);
+}
+
+extern "C" void windmi_serial_flush(WindmiSerialPort *port) {
+    if (!port) return;
+    auto *p = reinterpret_cast<windmi::platform::SerialPort*>(port);
+    p->flush();
 }

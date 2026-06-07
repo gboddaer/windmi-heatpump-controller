@@ -59,13 +59,12 @@ add_subdirectory(src/modbus)
 # Web library sources
 add_subdirectory(src/web)
 
-# Self-test library (C code)
+# Self-test library (C++ code using IModbusClient interface)
 add_library(windmi_selftest STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/selftest.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/selftest.cpp
 )
 target_include_directories(windmi_selftest PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_link_libraries(windmi_selftest PUBLIC windmi_modbus windmi_utils)
 
@@ -91,9 +90,14 @@ if(WINDMI_BUILD_TESTS)
     add_subdirectory(tests/modbus)
     add_subdirectory(tests/web)
     add_subdirectory(tests/utils)
-    
+
     # Add CRC16 to utils tests
     target_link_libraries(test_utils PRIVATE windmi_utils GTest::gtest_main)
+
+    # Register all test executables
+    add_test(NAME test_modbus_client COMMAND test_modbus_client)
+    add_test(NAME test_modbus_rtu_frame COMMAND test_modbus_rtu_frame)
+    add_test(NAME test_modbus_serial_client COMMAND test_modbus_serial_client)
 endif()
 
 # Documentation

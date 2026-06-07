@@ -7,4 +7,4 @@ windmi-controller (1.0.0-1) unstable; urgency=medium
     - Self-test for hardware register verification.
     - License: GPL-2.0.
 
- -- Windmi Controller Maintainer <maintainer@example.com>  Sun, 01 Jun 2026 00:00:00 +0000
+ -- Windmi Controller Maintainer <maintainer@example.com>  Mon, 01 Jun 2026 00:00:00 +0000

@@ -6,6 +6,9 @@
 
 typedef struct modbus_client modbus_client_t;
 
+// Include RTU frame building utilities (shared between TCP and serial)
+#include "modbus/modbus_rtu_frame.h"
+
 modbus_client_t *modbus_client_create(const char *ip, int port, uint8_t slave_id);
 void modbus_client_destroy(modbus_client_t *client);
 bool modbus_client_connect(modbus_client_t *client);

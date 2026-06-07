@@ -1,6 +1,8 @@
 # Makefile
 CC = gcc
+CXX = g++
 CFLAGS = -Wall -Wextra -std=c99 -O2 -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE
+CXXFLAGS = -Wall -Wextra -std=c++17 -O2 -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE
 LDFLAGS = -lpthread
 
 # Mongoose library (single-file v7.x)
@@ -16,9 +18,14 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/modbus_client.c \
           $(SRC_DIR)/control_loop.c \
           $(SRC_DIR)/selftest.c \
-          $(SRC_DIR)/crc16.c
+          $(SRC_DIR)/crc16.c \
+          $(SRC_DIR)/modbus/modbus_rtu_frame.c
+
+CXX_SOURCES = $(SRC_DIR)/utils/Logger.cpp \
+              $(SRC_DIR)/utils/LoggerC.cpp
 
 OBJECTS = $(SOURCES:.c=.o)
+CXX_OBJECTS = $(CXX_SOURCES:.cpp=.o)
 MONGOOSE_OBJ = mongoose/mongoose.o
 TARGET = windmi-control
 
@@ -26,17 +33,20 @@ TARGET = windmi-control
 
 all: $(TARGET)
 
-$(TARGET): $(OBJECTS) $(MONGOOSE_OBJ)
-	$(CC) $(OBJECTS) $(MONGOOSE_OBJ) $(LDFLAGS) -o $(TARGET)
+$(TARGET): $(OBJECTS) $(CXX_OBJECTS) $(MONGOOSE_OBJ)
+	$(CXX) $(OBJECTS) $(CXX_OBJECTS) $(MONGOOSE_OBJ) $(LDFLAGS) -o $(TARGET)
 
 $(SRC_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -I$(MONGOOSE_INC) -Iinclude -I$(SRC_DIR) -c $< -o $@
+
+$(SRC_DIR)/%.o: $(SRC_DIR)/%.cpp
+	$(CXX) $(CXXFLAGS) -I$(MONGOOSE_INC) -Iinclude -I$(SRC_DIR) -c $< -o $@
 
 mongoose/mongoose.o: mongoose/mongoose.c
 	$(CC) $(CFLAGS) -I$(MONGOOSE_INC) -c $< -o $@
 
 clean:
-	rm -f $(OBJECTS) $(MONGOOSE_OBJ) $(TARGET)
+	rm -f $(OBJECTS) $(CXX_OBJECTS) $(MONGOOSE_OBJ) $(TARGET)
 	rm -f $(TEST_DIR)/*.o $(TEST_DIR)/test_crc16 $(TEST_DIR)/test_modbus_frames $(TEST_DIR)/test_control $(TEST_DIR)/test_spsc
 
 run: $(TARGET)

@@ -17,6 +17,7 @@ This project provides a web-based interface for monitoring and controlling Roten
 - **Web Interface**: Built-in HTTP server with static HTML page for local control
 - **REST API**: JSON-based endpoints for status, mode control, and temperature setpoints
 - **Modbus TCP**: Direct TCP communication with Waveshare gateway (transparent mode)
+- **Modbus RTU over Serial (RS-485)**: Serial port communication for devices without TCP gateway
 - **Multi-threaded**: Separate threads for HTTP server and Modbus operations
 - **Thread-safe**: Lock-free SPSC queues for inter-thread communication
 - **Comprehensive Logging**: Structured logging with levels, timestamps, and component tags
@@ -138,6 +139,35 @@ make
 ./build/windmi-control --help
 ```
 
+### Serial Port (Modbus RTU over RS-485)
+
+For devices connected via RS-485 without a TCP gateway, use the serial port mode. The controller uses **9600 8N1** as the default configuration (matching Windmi device defaults).
+
+```bash
+# Connect via serial device with default 9600 8N1
+./build/windmi-control --serial /dev/ttyUSB0
+
+# Connect with custom baud rate
+./build/windmi-control --serial /dev/ttyUSB0 --baud 19200
+
+# Connect with 8E1 configuration
+./build/windmi-control --serial /dev/ttyUSB0 --parity E
+
+# Connect with 8N2 configuration
+./build/windmi-control --serial /dev/ttyUSB0 --stop-bits 2
+
+# Enable RS-485 direction control
+./build/windmi-control --serial /dev/ttyUSB0 --rs485
+```
+
+**Note:** Serial mode (`--serial`) is mutually exclusive with TCP mode (`--ip`, `--port`). You cannot specify both.
+
+**Supported baud rates:** 9600, 19200, 38400, 57600, 115200
+
+**Parity options:** `N` (none/8N1), `E` (even/8E1), `O` (odd/8O1)
+
+**Stop bits:** 1 or 2
+
 ### Command-Line Options
 
 | Option | Long Form | Description | Default |
@@ -149,6 +179,11 @@ make
 | `-l <level>` | `--log-level <level>` | Logging level (TRACE/DEBUG/INFO/WARN/ERROR/FATAL) | INFO |
 | `-o <file>` | `--log-file <file>` | Log file path (default: console only) | none |
 | `-t` | `--selftest` | Run self-test suite | disabled |
+| `--serial <device>` | - | Serial device for Modbus RTU (e.g., /dev/ttyUSB0) | none |
+| `--baud <rate>` | - | Baud rate | 9600 |
+| `--parity <N|E|O>` | - | Parity: N(none), E(even), O(odd) | N |
+| `--stop-bits <1|2>` | - | Stop bits: 1 or 2 | 1 |
+| `--rs485` | - | Enable RS-485 direction control | disabled |
 | `-h` | `--help` | Show help message | - |
 
 ## REST API
