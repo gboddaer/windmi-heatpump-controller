@@ -5,7 +5,7 @@
 To build Windmi Controller for Windows, you need:
 
 1. **Windows 10/11**
-2. **Visual Studio 2022** or **MinGW-w64** (64-bit)
+2. **Visual Studio 2022** or **MinGW-w64** (64-bit) with complete C++17 support
 3. **CMake 3.16+**
 4. **Git**
 
@@ -40,26 +40,25 @@ cmake .. -G "Visual Studio 17 2022" -A x64
 cmake --build . --config Release
 
 # Run tests
-ctest --build-and-test . . --build-generator "Visual Studio 17 2022" -A x64 --build-config Release
+ctest --test-dir build --output-on-failure
 ```
 
-### Build Output
+## Option 2: MinGW-w64 with Complete C++17
 
-The executable will be at:
-```
-build\Release\windmi-control.exe
-```
+### Install MinGW-w64 with pthreads
 
-## Option 2: MinGW-w64
+Note: The MinGW version currently installed on the build system (10-win32) lacks:
+- `std::thread` support
+- Some C++17 features
 
-### Install MinGW-w64
+You need a MinGW-w64 with **pthreads-win32** support. Options:
 
-Download from [mingw-w64.org](https://www.mingw-w64.org/) or use MSYS2:
-
+1. **MSYS2** (recommended):
 ```bash
-# Using MSYS2
 pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake
 ```
+
+2. **Win64 Seh** build from [mingw-w64.org](https://www.mingw-w64.org/)
 
 ### Build Steps
 
@@ -82,19 +81,12 @@ make
 ctest
 ```
 
-### Build Output
-
-The executable will be at:
-```
-build\windmi-control.exe
-```
-
 ## Cross-Compilation on Linux (for maintainers)
 
-If you have MinGW installed on Linux:
+If you have MinGW installed on Linux with pthread support:
 
 ```bash
-# Install MinGW-w64 (Debian/Ubuntu)
+# Install MinGW-w64 with pthreads (Debian/Ubuntu)
 sudo apt-get install g++-mingw-w64-x86-64 gcc-mingw-w64-x86-64
 
 # Use the provided build script
@@ -102,17 +94,27 @@ cd windmi-heatpump-controller
 ./build_windows.sh
 ```
 
-Or manually:
+Or manually with proper toolchain:
 
 ```bash
 mkdir -p build-win64
 cd build-win64
 
-cmake .. \
-  -G "Unix Makefiles" \
-  -DCMAKE_TOOLCHAIN_FILE=../mingw-w64-x86_64.cmake \
-  -DCMAKE_BUILD_TYPE=Release
+# Create toolchain file with pthread support
+cat > toolchain.cmake << 'EOF'
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)
+set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)
+set(CMAKE_FIND_ROOT_PATH /usr/x86_64-w64-mingw32)
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+# Ensure pthread is available
+add_compile_definitions(_REENTRANT)
+EOF
 
+cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=toolchain.cmake -DCMAKE_BUILD_TYPE=Release
 make
 ```
 
@@ -124,8 +126,8 @@ The codebase uses these Windows APIs:
 - **Instance locking**: `CreateMutexA()` instead of `flock()`
 - **PID checking**: `OpenProcess()` + `GetExitCodeProcess()` instead of `/proc/<pid>/stat`
 - **Path resolution**: `GetModuleFileNameA()` + `_fullpath()` instead of `readlink("/proc/self/exe")`
-- **Sockets**: Winsock2 (`ws2_32.lib`) instead of POSIX sockets
 - **Sleep**: `Sleep(ms)` instead of `usleep()`
+- **Mutex/Threading**: Platform abstraction using `CRITICAL_SECTION` (Windows) or `pthread_mutex_t` (MinGW)
 
 ## Testing on Windows
 
@@ -141,14 +143,6 @@ Run the executable:
 ```powershell
 .\Release\windmi-control.exe --help
 ```
-
-## Debugging Windows Builds
-
-Common issues:
-
-1. **Linker errors**: Ensure `ws2_32.lib` is linked (CMake handles this)
-2. **Missing DLLs**: MinGW builds may need `libwinpthread-1.dll`
-3. **Firewall prompts**: Windows Defender may block the server - allow access
 
 ## CI/CD
 

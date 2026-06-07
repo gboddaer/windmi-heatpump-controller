@@ -1,0 +1,44 @@
+# Multi-stage build for Windows target using MinGW
+FROM ubuntu:22.04 AS build
+
+# Install MinGW-w64 with pthread support
+RUN apt-get update && apt-get install -y \
+    g++-mingw-w64-x86-64 \
+    gcc-mingw-w64-x86-64 \
+    binutils-mingw-w64-x86-64 \
+    cmake \
+    make \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy source
+COPY . /build/
+
+# Create build directory
+RUN mkdir -p build-win64 && cd build-win64
+
+# Configure with MinGW toolchain
+RUN cd build-win64 && \
+    cmake .. \
+    -G "Unix Makefiles" \
+    -DCMAKE_TOOLCHAIN_FILE=/build/mingw-w64-x86_64.cmake \
+    -DCMAKE_BUILD_TYPE=Release
+
+# Build
+RUN cd build-win64 && make windmi-control
+
+# Stage 2: Minimal runtime image
+FROM ubuntu:22.04 AS runtime
+
+RUN apt-get update && apt-get install -y \
+    mingw-w64-winsup \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy built executable
+COPY --from=build /build/build-win64/windmi-control.exe /app/
+
+CMD ["/app/windmi-control.exe", "--help"]
