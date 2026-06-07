@@ -2,11 +2,39 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the Windmi Controller compile and run on Windows by extracting all POSIX-specific code from `src/main.cpp` into a platform abstraction layer (`Platform.hpp`/`Platform.cpp`), then providing Windows implementations behind `#ifdef _WIN32`.
+**Goal:** Make the Windmi Controller compile on Windows by removing POSIX-only assumptions from built code while preserving current Linux behavior.
 
-**Architecture:** Create `windmi::platform` namespace in `include/utils/Platform.hpp` + `src/utils/Platform.cpp`. The header is pure interface (no `#ifdef`). The .cpp has `#ifdef _WIN32` blocks for Windows vs POSIX. `src/main.cpp` is refactored to call platform functions instead of directly using `flock`, `/proc`, `readlink`, `usleep`, `signal`, etc. This removes all `#ifdef` from main.cpp — platform differences live only in Platform.cpp.
+**Architecture:** Add a small `windmi::platform` abstraction for process/signal/lock/path/sleep behavior used by `src/main.cpp`. Port the built C Modbus TCP client (`src/modbus_client.c`) to use Winsock on Windows while keeping the current POSIX socket path on Linux. Keep platform conditionals localized in `src/utils/Platform.cpp` and `src/modbus_client.c` instead of spreading `#ifdef _WIN32` through application logic.
 
-**Tech Stack:** C++17, CMake 3.16+, Google Test, Mongoose
+**Tech Stack:** C++17, C99, CMake 3.16+, Google Test, Mongoose, Winsock2 on Windows
+
+---
+
+## Scope and Non-Goals
+
+### In scope
+
+Built code that currently blocks Windows compilation:
+
+| File | Why it matters |
+|------|----------------|
+| `src/main.cpp` | Built executable; uses POSIX signal, lock, `/proc`, `readlink`, `realpath`, `usleep` |
+| `src/modbus_client.c` | Built into `windmi_modbus`; uses POSIX sockets and `usleep` |
+| `CMakeLists.txt` / `src/modbus/CMakeLists.txt` | Need Windows socket libraries |
+| `src/utils/CMakeLists.txt` / `tests/utils/CMakeLists.txt` | Need platform abstraction and tests |
+
+### Out of scope
+
+These files are POSIX-heavy but are not built by current CMake targets:
+
+| File | Reason excluded |
+|------|-----------------|
+| `src/main.c` | Not referenced by `CMakeLists.txt` |
+| `src/main.c.bak` | Backup file, not built |
+| `src/control_loop.c` | Not built; C++ `src/core/ControlLoop.cpp` is used |
+| `src/web_server.c` | Not built; C++ `src/web/WebServer.cpp` is used |
+
+Do not port unbuilt legacy C files in this PR.
 
 ---
 
@@ -14,41 +42,39 @@
 
 | File | Action | Responsibility |
 |------|--------|----------------|
-| `include/utils/Platform.hpp` | Create | Platform-abstracted function declarations |
-| `src/utils/Platform.cpp` | Create | POSIX + Windows implementations |
-| `tests/utils/test_platform.cpp` | Create | Unit tests for platform layer |
-| `src/main.cpp` | Modify | Remove POSIX-only code, call `windmi::platform::*` |
-| `src/utils/CMakeLists.txt` | Modify | Add `Platform.cpp` to utils library |
+| `include/utils/Platform.hpp` | Create | Platform-independent C++ interface |
+| `src/utils/Platform.cpp` | Create | POSIX + Windows implementations behind `#ifdef _WIN32` |
+| `tests/utils/test_platform.cpp` | Create | Linux-run tests for platform abstraction; Windows CI later validates Windows code path |
+| `src/main.cpp` | Modify | Remove direct POSIX APIs and call `windmi::platform::*` |
+| `src/modbus_client.c` | Modify | Add Winsock-compatible socket/sleep wrappers |
+| `src/utils/CMakeLists.txt` | Modify | Add `Platform.cpp` to `windmi_utils` |
 | `tests/utils/CMakeLists.txt` | Modify | Add `test_platform.cpp` |
-| `CMakeLists.txt` | Modify | Add Windows system libs |
+| `src/modbus/CMakeLists.txt` | Modify | Link `ws2_32` for `windmi_modbus` on Windows |
+| `CMakeLists.txt` | Modify | Link `ws2_32` for `mongoose` on Windows; add MSVC flags |
+| `docs/windows-platform-support.md` | Modify | Update status and exact implementation notes |
 
 ---
 
-### POSIX-only code in current `src/main.cpp` that must be abstracted
+## Known Windows blockers to fix
 
-| Lines | Code | POSIX API | Windows Equivalent |
-|-------|------|-----------|-------------------|
-| 22 | `#include <unistd.h>` | `readlink`, `getpid`, `usleep` | `<process.h>`, `<io.h>`, `GetModuleFileName` |
-| 23 | `#include <fcntl.h>` | `open`, `O_CREAT\|O_RDWR` | `<io.h>`, `_open` |
-| 24 | `#include <sys/file.h>` | `flock`, `LOCK_EX\|LOCK_NB` | Named mutex (`CreateMutexA`) |
-| 25-26 | `#include <sys/stat.h>`, `<sys/types.h>` | `stat`, `S_ISDIR` | `<sys/stat.h>` works on MSVC too |
-| 44 | `#define LOCK_FILE "/tmp/..."` | `/tmp` exists only on POSIX | `%TEMP%` or `%LOCALAPPDATA%` |
-| 62-86 | `resolve_static_dir()` | `readlink("/proc/self/exe")`, `realpath` | `GetModuleFileName`, `_fullpath` |
-| 105-110 | `signal_handler()` | `signal(SIGINT, ...)` | `SetConsoleCtrlHandler` |
-| 112-118 | `is_pid_alive()` | `/proc/<pid>/stat` | `OpenProcess` + `GetExitCodeProcess` |
-| 120-165 | `acquire_lock()` / `release_lock()` | `flock`, `open`, `fcntl` | `CreateMutexA`, `ReleaseMutex`, `CloseHandle` |
-| 283-286 | Signal setup | `signal(SIGINT/SIGTERM/SIGPIPE)` | `SetConsoleCtrlHandler` |
-| 397 | `usleep(150000)` | `usleep` | `Sleep(ms)` |
-| 421 | `usleep(100000)` | `usleep` | `Sleep(ms)` |
+| Code | Current API | Windows fix |
+|------|-------------|-------------|
+| `src/main.cpp` signal handling | `signal(SIGINT/SIGTERM/SIGPIPE)` | `SetConsoleCtrlHandler`; ignore SIGPIPE only on POSIX |
+| `src/main.cpp` instance lock | `/tmp` + `open` + `flock` + `fcntl` | Named mutex via `CreateMutexA`; check `GetLastError()==ERROR_ALREADY_EXISTS` after non-null handle |
+| `src/main.cpp` process check | `/proc/<pid>/stat` | `OpenProcess` + `GetExitCodeProcess` |
+| `src/main.cpp` executable path | `readlink("/proc/self/exe")`, `realpath` | `GetModuleFileNameA`, `_fullpath` |
+| `src/main.cpp` sleeps | `usleep` | `Sleep(ms)` |
+| `src/modbus_client.c` sockets | POSIX headers, `int fd`, `close`, `MSG_DONTWAIT`, `errno` | Winsock headers, `SOCKET`, `closesocket`, `WSAGetLastError`, `WSAStartup/WSACleanup` |
+| CMake | no Windows socket libs | link `ws2_32` to targets that use sockets |
 
 ---
 
-## Task 1: Create Platform.hpp Interface
+## Task 1: Add Platform Abstraction Interface
 
 **Files:**
 - Create: `include/utils/Platform.hpp`
 
-- [ ] **Step 1: Create the header file**
+- [ ] **Step 1: Create `include/utils/Platform.hpp`**
 
 ```cpp
 #pragma once
@@ -58,80 +84,61 @@
 
 namespace windmi::platform {
 
-/**
- * Install platform-specific signal handlers for graceful shutdown.
- * On POSIX: catches SIGINT, SIGTERM, ignores SIGPIPE.
- * On Windows: installs SetConsoleCtrlHandler for Ctrl+C/Break/Close.
- * When triggered, sets *running_flag = 0.
- */
+/** Install Ctrl+C / termination handlers and set *running_flag = 0 on shutdown request. */
 void install_signal_handlers(volatile sig_atomic_t* running_flag);
 
-/**
- * Acquire exclusive instance lock to prevent multiple running instances.
- * On POSIX: uses flock() on /tmp/windmi-controller.lock.
- * On Windows: uses named mutex Global\\windmi-controller.
- * @param force  If true, remove stale lock before attempting (POSIX only).
- * @return true if lock acquired, false if another instance is running.
- */
+/** Acquire exclusive instance lock. Returns false when another instance is running. */
 bool acquire_instance_lock(bool force = false);
 
-/**
- * Release the instance lock acquired by acquire_instance_lock().
- * Safe to call even if no lock is held (no-op).
- */
+/** Release instance lock if currently held. Safe to call more than once. */
 void release_instance_lock();
 
-/**
- * Check if a process with the given PID is alive.
- * On POSIX: checks /proc/<pid>/stat.
- * On Windows: uses OpenProcess + GetExitCodeProcess.
- */
+/** Check whether a PID appears alive on the current platform. */
 bool is_pid_alive(int pid);
 
-/**
- * Resolve the static files directory.
- * If @p dir exists as-is, returns its absolute path.
- * Otherwise tries relative to the executable, then one level up.
- * Returns @p dir as-is if nothing is found.
- */
+/** Resolve static directory as-is, relative to executable, or one level above executable. */
 std::string resolve_static_dir(const std::string& dir);
 
-/**
- * Sleep for the specified number of milliseconds.
- * On POSIX: calls usleep(ms * 1000).
- * On Windows: calls Sleep(ms).
- */
+/** Cross-platform millisecond sleep. */
 void sleep_ms(unsigned int ms);
+
+/** Test hook: override lock path/name so tests do not use the production lock. */
+void set_instance_lock_name_for_test(const std::string& lock_name);
+
+/** Test hook: clear lock override. */
+void clear_instance_lock_name_for_test();
 
 }  // namespace windmi::platform
 ```
 
-- [ ] **Step 2: Verify header compiles standalone**
+- [ ] **Step 2: Verify header syntax**
+
+Run:
 
 ```bash
 echo '#include "utils/Platform.hpp"' | g++ -x c++ -std=c++17 -I include -fsyntax-only -
 ```
 
-Expected: No errors.
+Expected: command exits 0.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add include/utils/Platform.hpp
-git commit -m "feat: add Platform.hpp cross-platform abstraction interface"
+git commit -m "feat: add cross-platform Platform interface"
 ```
 
 ---
 
-## Task 2: Write Failing Tests for Platform
+## Task 2: Add Failing Platform Tests
 
 **Files:**
 - Create: `tests/utils/test_platform.cpp`
 - Modify: `tests/utils/CMakeLists.txt`
 
-- [ ] **Step 1: Add test file to CMakeLists.txt**
+- [ ] **Step 1: Add `test_platform.cpp` to `tests/utils/CMakeLists.txt`**
 
-Append to `tests/utils/CMakeLists.txt` (add `test_platform.cpp` to the `add_executable` sources):
+Change the `add_executable(test_utils ...)` source list to:
 
 ```cmake
 add_executable(test_utils
@@ -143,10 +150,11 @@ add_executable(test_utils
 )
 ```
 
-- [ ] **Step 2: Create test file**
+- [ ] **Step 2: Create `tests/utils/test_platform.cpp`**
 
 ```cpp
 #include <gtest/gtest.h>
+
 #include <csignal>
 #include <string>
 
@@ -158,82 +166,100 @@ add_executable(test_utils
 
 #include "utils/Platform.hpp"
 
-TEST(PlatformTest, InstallSignalHandlersDoesNotCrash) {
+namespace {
+
+int current_pid() {
+#ifdef _WIN32
+    return _getpid();
+#else
+    return getpid();
+#endif
+}
+
+}  // namespace
+
+class PlatformTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        windmi::platform::set_instance_lock_name_for_test("windmi-controller-test-lock");
+    }
+
+    void TearDown() override {
+        windmi::platform::release_instance_lock();
+        windmi::platform::clear_instance_lock_name_for_test();
+    }
+};
+
+TEST_F(PlatformTest, InstallSignalHandlersDoesNotChangeFlagImmediately) {
     volatile sig_atomic_t running = 1;
     windmi::platform::install_signal_handlers(&running);
-    // Just verify it doesn't crash; running should still be 1
     EXPECT_EQ(running, 1);
 }
 
-TEST(PlatformTest, IsPidAliveCurrentProcess) {
-#ifdef _WIN32
-    int pid = _getpid();
-#else
-    int pid = getpid();
-#endif
-    EXPECT_TRUE(windmi::platform::is_pid_alive(pid));
+TEST_F(PlatformTest, IsPidAliveCurrentProcess) {
+    EXPECT_TRUE(windmi::platform::is_pid_alive(current_pid()));
 }
 
-TEST(PlatformTest, IsPidAliveInvalidPid) {
-    EXPECT_FALSE(windmi::platform::is_pid_alive(999999));
+TEST_F(PlatformTest, IsPidAliveRejectsInvalidPid) {
+    EXPECT_FALSE(windmi::platform::is_pid_alive(-1));
 }
 
-TEST(PlatformTest, AcquireAndReleaseLock) {
-    EXPECT_TRUE(windmi::platform::acquire_instance_lock());
+TEST_F(PlatformTest, AcquireReleaseAndReacquireLock) {
+    EXPECT_TRUE(windmi::platform::acquire_instance_lock(false));
     windmi::platform::release_instance_lock();
-    // After release, should be able to acquire again
-    EXPECT_TRUE(windmi::platform::acquire_instance_lock());
+    EXPECT_TRUE(windmi::platform::acquire_instance_lock(false));
+}
+
+TEST_F(PlatformTest, ReleaseLockWithoutAcquireIsNoop) {
     windmi::platform::release_instance_lock();
+    SUCCEED();
 }
 
-TEST(PlatformTest, ReleaseLockWhenNotHeldIsNoop) {
-    // Should not crash when releasing without having acquired
-    windmi::platform::release_instance_lock();
+TEST_F(PlatformTest, ResolveStaticDirDotReturnsNonEmptyPath) {
+    std::string resolved = windmi::platform::resolve_static_dir(".");
+    EXPECT_FALSE(resolved.empty());
 }
 
-TEST(PlatformTest, ResolveStaticDirDot) {
-    std::string result = windmi::platform::resolve_static_dir(".");
-    EXPECT_FALSE(result.empty());
+TEST_F(PlatformTest, ResolveStaticDirMissingPathReturnsInput) {
+    const std::string missing = "/nonexistent/windmi/path/xyz";
+    EXPECT_EQ(windmi::platform::resolve_static_dir(missing), missing);
 }
 
-TEST(PlatformTest, ResolveStaticDirNonExistent) {
-    std::string result = windmi::platform::resolve_static_dir("/nonexistent/path/xyz");
-    EXPECT_EQ(result, "/nonexistent/path/xyz");
-}
-
-TEST(PlatformTest, SleepMsDoesNotCrash) {
-    windmi::platform::sleep_ms(10);  // 10ms smoke test
+TEST_F(PlatformTest, SleepMsReturns) {
+    windmi::platform::sleep_ms(1);
+    SUCCEED();
 }
 ```
 
-- [ ] **Step 3: Verify tests fail (linker error — Platform.cpp not yet built)**
+- [ ] **Step 3: Run build and verify expected failure**
+
+Run:
 
 ```bash
-cmake --build build 2>&1 | grep -c "undefined reference"
+cmake --build build 2>&1 | tee /tmp/windmi-platform-test-build.log
+grep -E "undefined reference|unresolved external" /tmp/windmi-platform-test-build.log | head
 ```
 
-Expected: Multiple "undefined reference" errors for `windmi::platform::*` functions.
+Expected: linker errors for missing `windmi::platform::*` functions.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Commit failing tests**
 
 ```bash
 git add tests/utils/test_platform.cpp tests/utils/CMakeLists.txt
-git commit -m "test: add failing Platform abstraction tests"
+git commit -m "test: add Platform abstraction tests"
 ```
 
 ---
 
-## Task 3: Implement Platform.cpp (POSIX)
+## Task 3: Implement Platform.cpp and Wire Into Utils
 
 **Files:**
 - Create: `src/utils/Platform.cpp`
 - Modify: `src/utils/CMakeLists.txt`
 
-This is the POSIX implementation. Windows `#ifdef _WIN32` blocks will be added in Task 6.
+- [ ] **Step 1: Add `Platform.cpp` to `src/utils/CMakeLists.txt`**
 
-- [ ] **Step 1: Add Platform.cpp to utils CMakeLists.txt**
-
-Modify `src/utils/CMakeLists.txt` — add `Platform.cpp` to the source list:
+Change the source list to:
 
 ```cmake
 add_library(windmi_utils STATIC
@@ -247,26 +273,29 @@ add_library(windmi_utils STATIC
 target_include_directories(windmi_utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 ```
 
-- [ ] **Step 2: Create Platform.cpp with POSIX implementation**
+- [ ] **Step 2: Create `src/utils/Platform.cpp`**
 
 ```cpp
 #include "utils/Platform.hpp"
 
 #include <cstdio>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
 
 #ifdef _WIN32
-// Windows implementation will be added in a later commit
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <direct.h>
+#include <process.h>
 #else
-#include <signal.h>
-#include <unistd.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <signal.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <errno.h>
-#include <limits.h>
+#include <unistd.h>
 #endif
 
 #include "utils/Logger.hpp"
@@ -275,30 +304,58 @@ target_include_directories(windmi_utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../..
 namespace {
 
 volatile sig_atomic_t* g_running_flag = nullptr;
+std::string g_test_lock_name;
 
 #ifdef _WIN32
 static HANDLE g_lock_mutex = NULL;
-static const char* LOCK_MUTEX_NAME = "Global\\windmi-controller";
+
+static std::string lock_name() {
+    return g_test_lock_name.empty() ? std::string("Global\\windmi-controller") : g_test_lock_name;
+}
+
+static BOOL WINAPI console_ctrl_handler(DWORD dwCtrlType) {
+    if (dwCtrlType == CTRL_C_EVENT ||
+        dwCtrlType == CTRL_BREAK_EVENT ||
+        dwCtrlType == CTRL_CLOSE_EVENT) {
+        if (g_running_flag) *g_running_flag = 0;
+        return TRUE;
+    }
+    return FALSE;
+}
+
 #else
 static int g_lock_fd = -1;
-static const char* LOCK_FILE_PATH = "/tmp/windmi-controller.lock";
+
+static std::string lock_file_path() {
+    return g_test_lock_name.empty() ? std::string("/tmp/windmi-controller.lock") : g_test_lock_name;
+}
+
+static void posix_signal_handler(int) {
+    if (g_running_flag) *g_running_flag = 0;
+}
 #endif
 
 }  // anonymous namespace
 
 namespace windmi::platform {
 
+void set_instance_lock_name_for_test(const std::string& lock_name) {
+    g_test_lock_name = lock_name;
+}
+
+void clear_instance_lock_name_for_test() {
+    g_test_lock_name.clear();
+}
+
 void install_signal_handlers(volatile sig_atomic_t* running_flag) {
     g_running_flag = running_flag;
 #ifdef _WIN32
-    // Windows implementation added in Task 6
+    SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
 #else
     struct sigaction sa;
-    sa.sa_handler = [](int) {
-        if (g_running_flag) *g_running_flag = 0;
-    };
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = posix_signal_handler;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
     sigaction(SIGINT, &sa, nullptr);
     sigaction(SIGTERM, &sa, nullptr);
     signal(SIGPIPE, SIG_IGN);
@@ -306,10 +363,14 @@ void install_signal_handlers(volatile sig_atomic_t* running_flag) {
 }
 
 bool is_pid_alive(int pid) {
+    if (pid <= 0) return false;
 #ifdef _WIN32
-    // Windows implementation added in Task 6
-    (void)pid;
-    return false;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    if (process == NULL) return false;
+    DWORD exit_code = 0;
+    bool alive = GetExitCodeProcess(process, &exit_code) && exit_code == STILL_ACTIVE;
+    CloseHandle(process);
+    return alive;
 #else
     char proc_path[64];
     snprintf(proc_path, sizeof(proc_path), "/proc/%d/stat", pid);
@@ -320,30 +381,39 @@ bool is_pid_alive(int pid) {
 
 bool acquire_instance_lock(bool force) {
 #ifdef _WIN32
-    // Windows implementation added in Task 6
     (void)force;
-    return false;
+    const std::string name = lock_name();
+    g_lock_mutex = CreateMutexA(NULL, TRUE, name.c_str());
+    if (g_lock_mutex == NULL) {
+        WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to create lock mutex: error %lu", GetLastError());
+        return false;
+    }
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Another instance is already running");
+        CloseHandle(g_lock_mutex);
+        g_lock_mutex = NULL;
+        return false;
+    }
+    WINDMI_LOG_INFO(LOG_TAG_MAIN, "Lock acquired (PID: %d)", _getpid());
+    return true;
 #else
+    const std::string path = lock_file_path();
     if (force) {
         struct stat st;
-        if (stat(LOCK_FILE_PATH, &st) == 0) {
-            WINDMI_LOG_INFO(LOG_TAG_MAIN, "--force: removing stale lock file %s", LOCK_FILE_PATH);
-            unlink(LOCK_FILE_PATH);
+        if (stat(path.c_str(), &st) == 0) {
+            WINDMI_LOG_INFO(LOG_TAG_MAIN, "--force: removing stale lock file %s", path.c_str());
+            unlink(path.c_str());
         }
     }
 
-    g_lock_fd = open(LOCK_FILE_PATH, O_CREAT | O_RDWR, 0644);
+    g_lock_fd = open(path.c_str(), O_CREAT | O_RDWR, 0644);
     if (g_lock_fd < 0) {
-        WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to open lock file %s: %s",
-               LOCK_FILE_PATH, strerror(errno));
+        WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to open lock file %s: %s", path.c_str(), strerror(errno));
         return false;
     }
 
-    // Set close-on-exec so child processes don't inherit the lock
     int flags = fcntl(g_lock_fd, F_GETFD);
-    if (flags >= 0) {
-        fcntl(g_lock_fd, F_SETFD, flags | FD_CLOEXEC);
-    }
+    if (flags >= 0) fcntl(g_lock_fd, F_SETFD, flags | FD_CLOEXEC);
 
     if (flock(g_lock_fd, LOCK_EX | LOCK_NB) < 0) {
         if (errno == EWOULDBLOCK) {
@@ -353,12 +423,10 @@ bool acquire_instance_lock(bool force) {
             (void)n;
             int existing_pid = atoi(pid_buf);
             if (existing_pid > 0 && is_pid_alive(existing_pid)) {
-                WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Another instance is already running (PID %d)",
-                       existing_pid);
+                WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Another instance is already running (PID %d)", existing_pid);
             } else if (existing_pid > 0) {
-                WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Lock held by stale process %d (not running)",
-                       existing_pid);
-                WINDMI_LOG_WARN(LOG_TAG_MAIN, "Remove %s or use --force to override", LOCK_FILE_PATH);
+                WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Lock held by stale process %d (not running)", existing_pid);
+                WINDMI_LOG_WARN(LOG_TAG_MAIN, "Remove %s or use --force to override", path.c_str());
             } else {
                 WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Another instance is already running");
             }
@@ -370,7 +438,6 @@ bool acquire_instance_lock(bool force) {
         return false;
     }
 
-    // Write PID to lock file for diagnostics
     char pid_buf[32];
     int len = snprintf(pid_buf, sizeof(pid_buf), "%d\n", getpid());
     if (len > 0) {
@@ -386,7 +453,12 @@ bool acquire_instance_lock(bool force) {
 
 void release_instance_lock() {
 #ifdef _WIN32
-    // Windows implementation added in Task 6
+    if (g_lock_mutex != NULL) {
+        ReleaseMutex(g_lock_mutex);
+        CloseHandle(g_lock_mutex);
+        g_lock_mutex = NULL;
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "Lock released");
+    }
 #else
     if (g_lock_fd >= 0) {
         flock(g_lock_fd, LOCK_UN);
@@ -399,19 +471,43 @@ void release_instance_lock() {
 
 std::string resolve_static_dir(const std::string& dir) {
 #ifdef _WIN32
-    // Windows implementation added in Task 6
-    return dir;
+    DWORD attrs = GetFileAttributesA(dir.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        char resolved[_MAX_PATH];
+        if (_fullpath(resolved, dir.c_str(), _MAX_PATH)) return resolved;
+        return dir;
+    }
+
+    char exe_path[_MAX_PATH];
+    if (GetModuleFileNameA(NULL, exe_path, _MAX_PATH) > 0) {
+        char* last_slash = strrchr(exe_path, '\\');
+        if (!last_slash) last_slash = strrchr(exe_path, '/');
+        if (last_slash) {
+            *last_slash = '\0';
+            std::string candidate = std::string(exe_path) + "\\" + dir;
+            attrs = GetFileAttributesA(candidate.c_str());
+            if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+                char resolved[_MAX_PATH];
+                if (_fullpath(resolved, candidate.c_str(), _MAX_PATH)) return resolved;
+                return candidate;
+            }
+            std::string candidate2 = std::string(exe_path) + "\\..\\" + dir;
+            attrs = GetFileAttributesA(candidate2.c_str());
+            if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+                char resolved[_MAX_PATH];
+                if (_fullpath(resolved, candidate2.c_str(), _MAX_PATH)) return resolved;
+                return candidate2;
+            }
+        }
+    }
 #else
     struct stat st;
     if (stat(dir.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
         char resolved[PATH_MAX];
-        if (realpath(dir.c_str(), resolved)) {
-            return resolved;
-        }
+        if (realpath(dir.c_str(), resolved)) return resolved;
         return dir;
     }
 
-    // Try relative to the executable's directory
     char exe_path[PATH_MAX];
     ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
     if (len > 0) {
@@ -422,31 +518,26 @@ std::string resolve_static_dir(const std::string& dir) {
             std::string candidate = std::string(exe_path) + "/" + dir;
             if (stat(candidate.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
                 char resolved[PATH_MAX];
-                if (realpath(candidate.c_str(), resolved)) {
-                    return resolved;
-                }
+                if (realpath(candidate.c_str(), resolved)) return resolved;
                 return candidate;
             }
-            // Try one more level up (e.g. build/ -> project root)
             std::string candidate2 = std::string(exe_path) + "/../" + dir;
             if (stat(candidate2.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
                 char resolved[PATH_MAX];
-                if (realpath(candidate2.c_str(), resolved)) {
-                    return resolved;
-                }
+                if (realpath(candidate2.c_str(), resolved)) return resolved;
                 return candidate2;
             }
         }
     }
+#endif
 
     WINDMI_LOG_WARN(LOG_TAG_MAIN, "Static directory not found: %s", dir.c_str());
     return dir;
-#endif
 }
 
 void sleep_ms(unsigned int ms) {
 #ifdef _WIN32
-    // Windows implementation added in Task 6
+    Sleep(ms);
 #else
     usleep(ms * 1000);
 #endif
@@ -455,39 +546,20 @@ void sleep_ms(unsigned int ms) {
 }  // namespace windmi::platform
 ```
 
-- [ ] **Step 3: Build and run tests**
+- [ ] **Step 3: Run tests**
 
 ```bash
 cmake --build build --clean-first
 cd build && ctest --output-on-failure
 ```
 
-Expected: All tests pass (4 existing + new platform tests).
+Expected: all tests pass.
 
-- [ ] **Step 4: Verify existing binary still works**
-
-```bash
-pkill windmi-control 2>/dev/null; sleep 1
-cd build && ./windmi-control --ip 192.168.123.10 --web 10000 &
-sleep 3
-curl -s http://localhost:10000/api/status | grep -o '"deviceOnline":[^,]*'
-pkill windmi-control
-```
-
-Expected: `"deviceOnline":true` or similar valid response.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/utils/Platform.cpp src/utils/CMakeLists.txt
-git commit -m "feat: implement Platform abstraction (POSIX)
-
-- install_signal_handlers: sigaction for SIGINT/SIGTERM, ignore SIGPIPE
-- acquire_instance_lock: flock on /tmp lock file with PID diagnostics
-- is_pid_alive: /proc/<pid>/stat check
-- resolve_static_dir: readlink /proc/self/exe + realpath fallback
-- sleep_ms: usleep wrapper
-- Windows stubs return false/dir (filled in next task)"
+git commit -m "feat: implement cross-platform Platform abstraction"
 ```
 
 ---
@@ -497,28 +569,11 @@ git commit -m "feat: implement Platform abstraction (POSIX)
 **Files:**
 - Modify: `src/main.cpp`
 
-Remove all POSIX-only code and replace with `windmi::platform::*` calls.
+- [ ] **Step 1: Replace POSIX headers with Platform include**
 
-- [ ] **Step 1: Replace headers**
-
-Replace lines 19-28 of `src/main.cpp`:
+In `src/main.cpp`, keep standard headers and add `utils/Platform.hpp`:
 
 ```cpp
-// BEFORE:
-#include <csignal>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <memory>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <errno.h>
-#include <climits>
-
-// AFTER:
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -529,364 +584,495 @@ Replace lines 19-28 of `src/main.cpp`:
 #include "utils/Platform.hpp"
 ```
 
-Note: `<csignal>` stays because `volatile sig_atomic_t g_running` uses it.
-
-- [ ] **Step 2: Remove LOCK_FILE define and g_lock_fd**
-
-Delete line 44:
+Delete these POSIX-only includes from `src/main.cpp`:
 
 ```cpp
-// DELETE this line:
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <errno.h>
+```
+
+- [ ] **Step 2: Delete main.cpp-local POSIX helpers**
+
+Delete these from `src/main.cpp`:
+
+```cpp
 #define LOCK_FILE "/tmp/windmi-controller.lock"
-```
-
-Delete line 47:
-
-```cpp
-// DELETE this line:
 static int g_lock_fd = -1;
+static std::string resolve_static_dir(const std::string& dir) { ... }
+static void signal_handler(int sig) { ... }
+static bool is_pid_alive(pid_t pid) { ... }
+static int acquire_lock() { ... }
+static void release_lock() { ... }
 ```
 
-- [ ] **Step 3: Keep g_running, remove signal_handler/is_pid_alive/acquire_lock/release_lock/atexit_release_lock**
+Keep:
 
-Delete the following functions entirely (lines ~62-165):
-- `resolve_static_dir()` — replaced by `windmi::platform::resolve_static_dir()`
-- `signal_handler()` — replaced by `windmi::platform::install_signal_handlers()`
-- `is_pid_alive()` — replaced by `windmi::platform::is_pid_alive()`
-- `acquire_lock()` — replaced by `windmi::platform::acquire_instance_lock()`
-- `release_lock()` — replaced by `windmi::platform::release_instance_lock()`
-- `atexit_release_lock()` — rewritten to call Platform
-
-Keep only:
 ```cpp
 static volatile sig_atomic_t g_running = 1;
 ```
 
-Add simplified atexit handler:
+Replace the old `atexit_release_lock()` body with:
+
 ```cpp
 static void atexit_release_lock() {
     windmi::platform::release_instance_lock();
 }
 ```
 
-- [ ] **Step 4: Update main() — replace acquire_lock call**
+- [ ] **Step 3: Replace lock acquisition and force handling**
 
 Replace:
+
 ```cpp
-    if (force_lock) {
-        struct stat st;
-        if (stat(LOCK_FILE, &st) == 0) {
-            WINDMI_LOG_INFO(LOG_TAG_MAIN, "--force: removing stale lock file %s", LOCK_FILE);
-            unlink(LOCK_FILE);
-        }
+if (force_lock) {
+    struct stat st;
+    if (stat(LOCK_FILE, &st) == 0) {
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "--force: removing stale lock file %s", LOCK_FILE);
+        unlink(LOCK_FILE);
     }
-    if (acquire_lock() != 0) {
-        return 1;
-    }
+}
+if (acquire_lock() != 0) {
+    return 1;
+}
 ```
 
 With:
+
 ```cpp
-    if (!windmi::platform::acquire_instance_lock(force_lock)) {
-        return 1;
-    }
+if (!windmi::platform::acquire_instance_lock(force_lock)) {
+    return 1;
+}
 ```
 
-- [ ] **Step 5: Replace signal setup**
+- [ ] **Step 4: Replace signal setup**
 
 Replace:
+
 ```cpp
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-    signal(SIGPIPE, SIG_IGN);  // Ignore SIGPIPE (client disconnects)
+signal(SIGINT, signal_handler);
+signal(SIGTERM, signal_handler);
+signal(SIGPIPE, SIG_IGN);
 ```
 
 With:
+
 ```cpp
-    windmi::platform::install_signal_handlers(&g_running);
+windmi::platform::install_signal_handlers(&g_running);
 ```
 
-- [ ] **Step 6: Replace resolve_static_dir call**
+- [ ] **Step 5: Replace static-dir resolution**
 
 Replace:
+
 ```cpp
-    std::string resolved_static_dir = resolve_static_dir(static_dir);
+std::string resolved_static_dir = resolve_static_dir(static_dir);
 ```
 
 With:
+
 ```cpp
-    std::string resolved_static_dir = windmi::platform::resolve_static_dir(static_dir);
+std::string resolved_static_dir = windmi::platform::resolve_static_dir(static_dir);
 ```
 
-- [ ] **Step 7: Replace usleep calls**
+- [ ] **Step 6: Replace lock release calls**
+
+Replace every remaining:
+
+```cpp
+release_lock();
+```
+
+With:
+
+```cpp
+windmi::platform::release_instance_lock();
+```
+
+- [ ] **Step 7: Replace `usleep` calls**
 
 Replace:
+
 ```cpp
-    usleep(150000);  // 150ms
+usleep(150000);
 ```
 
 With:
+
 ```cpp
-    windmi::platform::sleep_ms(150);  // 150ms
+windmi::platform::sleep_ms(150);
 ```
 
 Replace:
+
 ```cpp
-                usleep(100000);  // 100ms retry delay
+usleep(100000);
 ```
 
 With:
+
 ```cpp
-                windmi::platform::sleep_ms(100);  // 100ms retry delay
+windmi::platform::sleep_ms(100);
 ```
 
-- [ ] **Step 8: Replace release_lock calls**
+- [ ] **Step 8: Verify no POSIX-only symbols remain in `src/main.cpp`**
 
-Replace all `release_lock();` calls with `windmi::platform::release_instance_lock();`
+Run:
 
-There should be several in the error paths and the shutdown sequence.
+```bash
+grep -nE 'flock|readlink|realpath|usleep|SIGPIPE|SIGTERM|SIGINT|/proc/|/tmp/|<unistd.h>|<fcntl.h>|<sys/file.h>' src/main.cpp || true
+```
 
-- [ ] **Step 9: Build and run all tests**
+Expected: no matches, except comments if any were intentionally retained. Remove matching comments if they imply stale implementation details.
+
+- [ ] **Step 9: Build and test**
 
 ```bash
 cmake --build build --clean-first
 cd build && ctest --output-on-failure
 ```
 
-Expected: All tests pass.
+Expected: all tests pass.
 
-- [ ] **Step 10: Verify binary still works**
-
-```bash
-pkill windmi-control 2>/dev/null; sleep 1
-cd build && ./windmi-control --ip 192.168.123.10 --web 10000 &
-sleep 3
-curl -s http://localhost:10000/api/status | grep -o '"deviceOnline":[^,]*'
-pkill windmi-control
-```
-
-Expected: `"deviceOnline":true`
-
-- [ ] **Step 11: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add src/main.cpp
-git commit -m "refactor: replace POSIX calls in main.cpp with Platform abstraction
-
-- Remove direct flock/open/fcntl/SIGINT/readlink/usleep calls
-- Use windmi::platform::install_signal_handlers()
-- Use windmi::platform::acquire_instance_lock/release_instance_lock()
-- Use windmi::platform::resolve_static_dir()
-- Use windmi::platform::sleep_ms()
-- main.cpp now has zero #ifdef or POSIX-only headers"
+git commit -m "refactor: move main platform calls behind Platform abstraction"
 ```
 
 ---
 
-## Task 5: Add Windows Implementation to Platform.cpp
+## Task 5: Port Built C Modbus Client to Winsock
 
 **Files:**
-- Modify: `src/utils/Platform.cpp`
+- Modify: `src/modbus_client.c`
 
-Fill in all the `#ifdef _WIN32` stub blocks with real Windows implementations.
+This file is built into `windmi_modbus`, so Windows support is incomplete until this task is done.
 
-- [ ] **Step 1: Add Windows headers at top of Platform.cpp**
+- [ ] **Step 1: Add platform socket headers and wrappers**
 
-In the `#ifdef _WIN32` block at the top, replace the comment with:
+Replace the current POSIX socket include block near the top:
 
-```cpp
+```c
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+```
+
+With:
+
+```c
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
-#include <io.h>
-#include <process.h>
-#include <direct.h>
+typedef SOCKET windmi_socket_t;
+#define WINDMI_INVALID_SOCKET INVALID_SOCKET
+#define windmi_close_socket closesocket
+#define windmi_socket_error WSAGetLastError()
+#ifndef MSG_DONTWAIT
+#define MSG_DONTWAIT 0
+#endif
 #else
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+typedef int windmi_socket_t;
+#define WINDMI_INVALID_SOCKET (-1)
+#define windmi_close_socket close
+#define windmi_socket_error errno
+#endif
 ```
 
-- [ ] **Step 2: Implement install_signal_handlers for Windows**
+- [ ] **Step 2: Add sleep wrapper**
 
-Replace the Windows stub in `install_signal_handlers` with:
+Near constants/macros, add:
 
-```cpp
-    // Windows: SetConsoleCtrlHandler for Ctrl+C, Ctrl+Break, window close
-    SetConsoleCtrlHandler(
-        [](DWORD dwCtrlType) -> BOOL {
-            if (dwCtrlType == CTRL_C_EVENT ||
-                dwCtrlType == CTRL_BREAK_EVENT ||
-                dwCtrlType == CTRL_CLOSE_EVENT) {
-                if (g_running_flag) *g_running_flag = 0;
-                return TRUE;
-            }
-            return FALSE;
-        },
-        TRUE
-    );
+```c
+static void windmi_sleep_ms(int ms) {
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    usleep((useconds_t)ms * 1000);
+#endif
+}
 ```
 
-- [ ] **Step 3: Implement is_pid_alive for Windows**
+- [ ] **Step 3: Update socket field type and Windows init flag**
 
-Replace the Windows stub in `is_pid_alive` with:
+Change struct field:
 
-```cpp
-    (void)pid;
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
-                                 static_cast<DWORD>(pid));
-    if (process == NULL) {
-        return false;
-    }
-    DWORD exit_code = 0;
-    if (!GetExitCodeProcess(process, &exit_code)) {
-        CloseHandle(process);
-        return false;
-    }
-    CloseHandle(process);
-    return (exit_code == STILL_ACTIVE);
+```c
+int socket_fd;
 ```
 
-- [ ] **Step 4: Implement acquire_instance_lock for Windows**
+To:
 
-Replace the Windows stub in `acquire_instance_lock` with:
+```c
+windmi_socket_t socket_fd;
+#ifdef _WIN32
+bool wsa_started;
+#endif
+```
 
-```cpp
-    (void)force;
-    g_lock_mutex = CreateMutexA(NULL, TRUE, LOCK_MUTEX_NAME);
-    if (g_lock_mutex == NULL) {
-        DWORD err = GetLastError();
-        if (err == ERROR_ALREADY_EXISTS) {
-            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Another instance is already running");
-        } else {
-            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to create lock mutex: error %lu", err);
+In `modbus_client_create`, replace:
+
+```c
+client->socket_fd = -1;
+```
+
+With:
+
+```c
+client->socket_fd = WINDMI_INVALID_SOCKET;
+#ifdef _WIN32
+client->wsa_started = false;
+#endif
+```
+
+- [ ] **Step 4: Initialize Winsock in `modbus_client_connect`**
+
+At the start of `modbus_client_connect`, before `socket(...)`, add:
+
+```c
+#ifdef _WIN32
+    if (!client->wsa_started) {
+        WSADATA wsa_data;
+        int wsa_ret = WSAStartup(MAKEWORD(2, 2), &wsa_data);
+        if (wsa_ret != 0) {
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "WSAStartup failed: %d", wsa_ret);
+            return false;
         }
-        return false;
+        client->wsa_started = true;
     }
-    WINDMI_LOG_INFO(LOG_TAG_MAIN, "Lock acquired (PID: %d)", _getpid());
-    return true;
+#endif
 ```
 
-- [ ] **Step 5: Implement release_instance_lock for Windows**
+- [ ] **Step 5: Replace socket create/error checks**
 
-Replace the Windows stub in `release_instance_lock` with:
+Replace:
 
-```cpp
-    if (g_lock_mutex != NULL) {
-        ReleaseMutex(g_lock_mutex);
-        CloseHandle(g_lock_mutex);
-        g_lock_mutex = NULL;
-        WINDMI_LOG_INFO(LOG_TAG_MAIN, "Lock released");
-    }
+```c
+int sock = socket(AF_INET, SOCK_STREAM, 0);
+if (sock < 0) {
+    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "socket failed: %s", strerror(errno));
+    return false;
+}
 ```
 
-- [ ] **Step 6: Implement resolve_static_dir for Windows**
+With:
 
-Replace the Windows stub in `resolve_static_dir` with:
-
-```cpp
-    DWORD attrs = GetFileAttributesA(dir.c_str());
-    if (attrs != INVALID_FILE_ATTRIBUTES &&
-        (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-        char resolved[_MAX_PATH];
-        if (_fullpath(resolved, dir.c_str(), _MAX_PATH)) {
-            return resolved;
-        }
-        return dir;
+```c
+windmi_socket_t sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+if (sock == WINDMI_INVALID_SOCKET) {
+#ifdef _WIN32
+    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "socket failed: %d", windmi_socket_error);
+    if (client->wsa_started) {
+        WSACleanup();
+        client->wsa_started = false;
     }
-
-    // Try relative to executable directory
-    char exe_path[_MAX_PATH];
-    if (GetModuleFileNameA(NULL, exe_path, _MAX_PATH) > 0) {
-        char* last_slash = strrchr(exe_path, '\\');
-        if (!last_slash) last_slash = strrchr(exe_path, '/');
-        if (last_slash) {
-            *last_slash = '\0';
-            std::string candidate = std::string(exe_path) + "\\" + dir;
-            attrs = GetFileAttributesA(candidate.c_str());
-            if (attrs != INVALID_FILE_ATTRIBUTES &&
-                (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-                char resolved[_MAX_PATH];
-                if (_fullpath(resolved, candidate.c_str(), _MAX_PATH)) {
-                    return resolved;
-                }
-                return candidate;
-            }
-            // Try one more level up
-            std::string candidate2 = std::string(exe_path) + "\\..\\" + dir;
-            attrs = GetFileAttributesA(candidate2.c_str());
-            if (attrs != INVALID_FILE_ATTRIBUTES &&
-                (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-                char resolved[_MAX_PATH];
-                if (_fullpath(resolved, candidate2.c_str(), _MAX_PATH)) {
-                    return resolved;
-                }
-                return candidate2;
-            }
-        }
-    }
-
-    WINDMI_LOG_WARN(LOG_TAG_MAIN, "Static directory not found: %s", dir.c_str());
-    return dir;
+#else
+    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "socket failed: %s", strerror(errno));
+#endif
+    return false;
+}
 ```
 
-- [ ] **Step 7: Implement sleep_ms for Windows**
+- [ ] **Step 6: Replace `inet_addr` with `inet_pton` compatible block**
 
-Replace the Windows stub in `sleep_ms` with:
+Replace:
 
-```cpp
-    Sleep(ms);
+```c
+server_addr.sin_addr.s_addr = inet_addr(client->ip);
 ```
 
-- [ ] **Step 8: Build and verify on Linux (no regressions)**
+With:
+
+```c
+if (inet_pton(AF_INET, client->ip, &server_addr.sin_addr) != 1) {
+    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "invalid IP address: %s", client->ip);
+    windmi_close_socket(sock);
+#ifdef _WIN32
+    if (client->wsa_started) {
+        WSACleanup();
+        client->wsa_started = false;
+    }
+#endif
+    return false;
+}
+```
+
+- [ ] **Step 7: Replace `close` and connect error handling**
+
+Replace `close(sock)` with `windmi_close_socket(sock)`.
+
+Replace connect error logging:
+
+```c
+WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %s", strerror(errno));
+```
+
+With:
+
+```c
+#ifdef _WIN32
+WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %d", windmi_socket_error);
+#else
+WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %s", strerror(errno));
+#endif
+```
+
+- [ ] **Step 8: Update disconnect and connect-failure cleanup**
+
+Replace the whole `modbus_client_disconnect` function with:
+
+```c
+void modbus_client_disconnect(modbus_client_t *client) {
+    if (!client) return;
+
+    if (client->socket_fd != WINDMI_INVALID_SOCKET) {
+        windmi_close_socket(client->socket_fd);
+        client->socket_fd = WINDMI_INVALID_SOCKET;
+    }
+
+    client->connected = false;
+
+#ifdef _WIN32
+    if (client->wsa_started) {
+        WSACleanup();
+        client->wsa_started = false;
+    }
+#endif
+}
+```
+
+For the connect failure block, replace the whole block:
+
+```c
+if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %s", strerror(errno));
+    close(sock);
+    return false;
+}
+```
+
+With:
+
+```c
+if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+#ifdef _WIN32
+    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %d", windmi_socket_error);
+#else
+    WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %s", strerror(errno));
+#endif
+    windmi_close_socket(sock);
+#ifdef _WIN32
+    if (client->wsa_started) {
+        WSACleanup();
+        client->wsa_started = false;
+    }
+#endif
+    return false;
+}
+```
+
+This prevents failed Windows connection attempts from leaking a `WSAStartup` reference.
+
+- [ ] **Step 9: Update socket validity checks and select nfds**
+
+Replace:
+
+```c
+if (!client || client->socket_fd < 0) return 0;
+```
+
+With:
+
+```c
+if (!client || client->socket_fd == WINDMI_INVALID_SOCKET) return 0;
+```
+
+For `select`, use:
+
+```c
+int nfds = 0;
+#ifndef _WIN32
+nfds = client->socket_fd + 1;
+#endif
+int ready = select(nfds, &fds, NULL, NULL, &tv);
+```
+
+Apply this pattern in both `modbus_client_flush_buffer` and the receive loop.
+
+- [ ] **Step 10: Fix send/recv types**
+
+Replace `ssize_t sent` with:
+
+```c
+int sent = send(client->socket_fd, (const char *)frame, (int)len, 0);
+```
+
+Replace `ssize_t received` with:
+
+```c
+int received = recv(client->socket_fd, (char *)buffer + total_received,
+                    (int)(expected_len - total_received), 0);
+```
+
+Keep existing logic that checks `sent < 0` and `received <= 0`.
+
+- [ ] **Step 11: Replace retry sleep**
+
+Replace:
+
+```c
+usleep(MODBUS_RETRY_DELAY_MS * 1000);
+```
+
+With:
+
+```c
+windmi_sleep_ms(MODBUS_RETRY_DELAY_MS);
+```
+
+- [ ] **Step 12: Build and test on Linux**
 
 ```bash
 cmake --build build --clean-first
 cd build && ctest --output-on-failure
 ```
 
-Expected: All tests pass — POSIX code paths are unchanged, Windows blocks are not compiled.
+Expected: all tests pass; Linux socket behavior unchanged.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 13: Commit**
 
 ```bash
-git add src/utils/Platform.cpp
-git commit -m "feat: add Windows implementation to Platform abstraction
-
-- SetConsoleCtrlHandler for signal handling
-- Named mutex for instance locking
-- OpenProcess + GetExitCodeProcess for PID detection
-- GetModuleFileName + _fullpath for static dir resolution
-- Sleep() for millisecond delay"
+git add src/modbus_client.c
+git commit -m "feat: make C Modbus TCP client portable to Winsock"
 ```
 
 ---
 
-## Task 6: Update CMakeLists.txt for Windows
+## Task 6: Update CMake for Windows Libraries and MSVC
 
 **Files:**
 - Modify: `CMakeLists.txt`
+- Modify: `src/modbus/CMakeLists.txt`
 
-- [ ] **Step 1: Add Windows system libraries**
+- [ ] **Step 1: Add MSVC compiler flags**
 
-After the `find_package(Threads REQUIRED)` line, add:
-
-```cmake
-# Windows-specific system libraries
-if(WIN32)
-    find_package(Threads REQUIRED)
-    # Mongoose links ws2_32 automatically, but we need it for Platform.cpp too
-endif()
-```
-
-After the `add_executable(windmi-control ...)` section, add Windows link libraries:
-
-```cmake
-if(WIN32)
-    target_link_libraries(windmi-control PRIVATE ws2_32)
-    target_link_libraries(windmi_utils PUBLIC ws2_32)
-endif()
-```
-
-- [ ] **Step 2: Suppress MSVC-specific warnings**
-
-Inside the existing compiler warning block, add:
+Replace the compiler warning block in root `CMakeLists.txt` with:
 
 ```cmake
 # Compiler warnings
@@ -894,138 +1080,145 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang
     add_compile_options(-Wall -Wextra)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     add_compile_options(/W4 /permissive-)
-    # Disable POSIX deprecation warnings on MSVC
-    add_compile_definitions(_CRT_NONSTDC_NO_WARNINGS)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
 endif()
 ```
 
-- [ ] **Step 3: Build and verify on Linux (no regressions)**
+- [ ] **Step 2: Link Winsock to Mongoose on Windows**
+
+After the `mongoose` target is created in root `CMakeLists.txt`, add:
+
+```cmake
+if(WIN32)
+    target_link_libraries(mongoose PUBLIC ws2_32)
+endif()
+```
+
+- [ ] **Step 3: Link Winsock to `windmi_modbus`**
+
+Append to `src/modbus/CMakeLists.txt`:
+
+```cmake
+if(WIN32)
+    target_link_libraries(windmi_modbus PUBLIC ws2_32)
+endif()
+```
+
+- [ ] **Step 4: Build and test on Linux**
 
 ```bash
 cmake --build build --clean-first
 cd build && ctest --output-on-failure
 ```
 
-Expected: All tests pass.
+Expected: all tests pass.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add CMakeLists.txt
-git commit -m "build: add Windows support to CMakeLists.txt
-
-- Link ws2_32 on Windows for sockets
-- Add MSVC compiler flags (/W4, /permissive-)
-- Define _CRT_NONSTDC_NO_WARNINGS for MSVC"
+git add CMakeLists.txt src/modbus/CMakeLists.txt
+git commit -m "build: add Windows socket libraries and MSVC flags"
 ```
 
 ---
 
-## Task 7: Update Documentation
+## Task 7: Update Windows Support Documentation
 
 **Files:**
 - Modify: `docs/windows-platform-support.md`
 
-- [ ] **Step 1: Update the implementation status section**
+- [ ] **Step 1: Replace the old “only signal handling” conclusion**
 
-Replace the existing "Code Changes Required" section in `docs/windows-platform-support.md` with:
+Update the report to say Windows support requires and implements two areas:
 
 ```markdown
-## Code Changes Implemented
+## Implementation Plan Status
 
-A platform abstraction layer (`windmi::platform` namespace) has been added:
+Windows support is not only signal handling. The built code contains two portability areas:
 
-| File | Purpose |
-|------|---------|
-| `include/utils/Platform.hpp` | Platform-independent interface |
-| `src/utils/Platform.cpp` | POSIX + Windows implementations via `#ifdef _WIN32` |
+1. `src/main.cpp` platform APIs: signals, instance lock, PID check, executable path resolution, sleep.
+2. `src/modbus_client.c` sockets: POSIX sockets must become Winsock-compatible.
 
-### Functions abstracted
+The implementation plan adds:
 
-| Function | POSIX | Windows |
-|----------|-------|---------|
-| `install_signal_handlers()` | `sigaction(SIGINT/SIGTERM)`, ignore SIGPIPE | `SetConsoleCtrlHandler` |
-| `acquire_instance_lock()` | `flock()` on `/tmp/windmi-controller.lock` | `CreateMutexA` named mutex |
-| `release_instance_lock()` | `flock(LOCK_UN)`, close | `ReleaseMutex`, `CloseHandle` |
-| `is_pid_alive()` | `/proc/<pid>/stat` | `OpenProcess + GetExitCodeProcess` |
-| `resolve_static_dir()` | `readlink("/proc/self/exe")`, `realpath` | `GetModuleFileName`, `_fullpath` |
-| `sleep_ms()` | `usleep(ms * 1000)` | `Sleep(ms)` |
-
-### main.cpp refactored
-
-All POSIX-only headers and direct system calls have been removed from `src/main.cpp`.
-It now includes only `utils/Platform.hpp` and calls `windmi::platform::*` functions.
+| Area | Solution |
+|------|----------|
+| Main platform APIs | `include/utils/Platform.hpp` + `src/utils/Platform.cpp` |
+| C Modbus sockets | Winsock wrappers inside `src/modbus_client.c` |
+| Build system | Link `ws2_32` for Mongoose and Modbus on Windows |
 ```
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add docs/windows-platform-support.md
-git commit -m "docs: update Windows platform support with implementation details"
+git commit -m "docs: correct Windows support report for Modbus socket portability"
 ```
 
 ---
 
 ## Task 8: Final Verification
 
-- [ ] **Step 1: Clean build on Linux**
+- [ ] **Step 1: Clean Linux build**
 
 ```bash
 cmake --build build --clean-first
 ```
 
-Expected: No errors, no warnings.
+Expected: exits 0.
 
-- [ ] **Step 2: Run all tests**
+- [ ] **Step 2: Run tests**
 
 ```bash
 cd build && ctest --output-on-failure
 ```
 
-Expected: All tests pass (4 existing + Platform tests).
+Expected: all tests pass.
 
-- [ ] **Step 3: Verify binary runs correctly**
+- [ ] **Step 3: Verify POSIX-only code is localized**
 
-```bash
-pkill windmi-control 2>/dev/null; sleep 1
-cd build && ./windmi-control --ip 192.168.123.10 --web 10000 &
-sleep 3
-curl -s http://localhost:10000/api/status | grep -o '"deviceOnline":[^,]*'
-pkill windmi-control
-```
-
-Expected: `"deviceOnline":true`, Ctrl+C shuts down cleanly.
-
-- [ ] **Step 4: Verify no POSIX-only code remains in main.cpp**
+Run:
 
 ```bash
-grep -n "flock\|readlink\|usleep\|SIGPIPE\|/proc/\|/tmp/" src/main.cpp
+grep -RIn --include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
+  -E '#include <(unistd|sys/socket|arpa/inet|netinet/in|sys/file|fcntl|pthread|signal)|flock|readlink|realpath|usleep|SIGPIPE|/proc/|/tmp/' \
+  src include tests | grep -v 'src/utils/Platform.cpp' | grep -v 'src/modbus_client.c' | grep -v 'src/main.c' | grep -v 'src/control_loop.c' | grep -v 'src/web_server.c' || true
 ```
 
-Expected: No matches — all POSIX-specific code is now in Platform.cpp.
+Expected: no matches in currently built modern C++ entrypoint code outside the intended platform-specific files. `src/modbus_client.c` may still contain POSIX code under `#ifndef _WIN32`.
 
-- [ ] **Step 5: Push to remote**
+- [ ] **Step 4: Push branch**
 
 ```bash
 git push origin feature/windows-support
 ```
 
-- [ ] **Step 6: Commit**
+---
 
-```bash
-git commit --allow-empty -m "verify: Windows build plan — all tasks verified on Linux"
+## Windows Validation Checklist
+
+Run on a Windows machine or CI runner after implementation:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
 ```
+
+Expected:
+- Build succeeds.
+- `test_utils` includes and passes `PlatformTest` tests.
+- Link succeeds without unresolved Winsock symbols.
 
 ---
 
 ## Execution Handoff
 
-**Plan saved to `docs/superpowers/plans/2026-06-06-windows-build-implementation.md`.**
+Plan saved to `docs/superpowers/plans/2026-06-06-windows-build-implementation.md`.
 
-**Two execution options:**
+Two execution options:
 
-**1. Subagent-Driven (recommended)** - I dispatch a fresh subagent per task, review between tasks, fast iteration
-
-**2. Inline Execution** - Execute tasks in this session using executing-plans, batch execution with checkpoints for review
+1. **Subagent-Driven (recommended)** — fresh subagent per task, review between tasks.
+2. **Inline Execution** — execute in this session with checkpoints.
 
 Which approach?
