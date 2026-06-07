@@ -7,7 +7,7 @@
 #define WINDMI_CORE_STATUS_MONITOR_HPP
 
 #include "core/ControlLoop.hpp"
-#include <mutex>
+#include "utils/Platform.hpp"
 #include <atomic>
 
 namespace windmi {
@@ -32,7 +32,7 @@ public:
 
 private:
     StatusSnapshot status_;
-    mutable std::mutex mutex_;
+    mutable windmi::Mutex mutex_;
     std::atomic<bool> valid_;
 };
 

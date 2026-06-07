@@ -7,6 +7,7 @@
 #include <direct.h>
 #include <process.h>
 #include <windows.h>
+#include <pthread.h>
 #else
 #include <cerrno>
 #include <fcntl.h>
@@ -26,6 +27,14 @@ namespace windmi::platform {
 // Test hook for lock path override
 static std::string g_lock_name_override;
 static bool g_lock_name_override_set = false;
+
+// Instance lock state tracking
+#ifdef _WIN32
+static int g_lock_fd = -1;
+static HANDLE g_lock_handle = nullptr;
+#else
+static int g_lock_fd = -1;
+#endif
 
 static std::string get_lock_path() {
     if (g_lock_name_override_set) {
@@ -72,6 +81,7 @@ void install_signal_handlers(volatile sig_atomic_t* running_flag) {
 }
 
 bool acquire_instance_lock(bool force) {
+#ifdef _WIN32
     std::string lock_path = get_lock_path();
     // Convert path to Windows format (replace /tmp with a valid Windows temp path)
     std::string win_lock_path = lock_path;
@@ -81,10 +91,22 @@ bool acquire_instance_lock(bool force) {
         win_lock_path = std::string(temp_path) + "windmi-controller.lock";
     }
 
+    // Windows doesn't have flock() - use file mapping for exclusive lock
+    // Open the file, then create a named mutex for exclusive access
+    HANDLE hFile = CreateFileA(win_lock_path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                               OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Failed to open lock file %s", win_lock_path.c_str());
+        return false;
+    }
+
     // Create a named mutex for instance locking
-    HANDLE mutex = CreateMutexA(nullptr, FALSE, "Global\\windmi_controller_lock");
-    if (mutex == nullptr) {
+    // The mutex name should be unique per application
+    HANDLE hMutex = CreateMutexA(nullptr, FALSE, "Global\\windmi_controller_lock");
+    if (hMutex == nullptr) {
         WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Failed to create mutex: %lu", GetLastError());
+        CloseHandle(hFile);
         return false;
     }
 
@@ -92,25 +114,87 @@ bool acquire_instance_lock(bool force) {
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         if (!force) {
             WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Another instance is already running");
-            CloseHandle(mutex);
+            CloseHandle(hMutex);
+            CloseHandle(hFile);
             return false;
         }
         WINDMI_LOG_WARN(LOG_TAG_PLATFORM, "--force: overriding existing instance lock");
     }
 
-    // Store the mutex handle somewhere - we need a global for this
-    // For simplicity, we'll just return success for now
-    // In a full implementation, you'd store the handle in a thread-safe manner
+    // Store both handles for later release
+    g_lock_fd = _open_osfhandle((intptr_t)hFile, 0);
+    g_lock_handle = hMutex;
     return true;
+#else
+    std::string lock_path = get_lock_path();
+
+    int fd = open(lock_path.c_str(), O_CREAT | O_RDWR, 0644);
+    if (fd < 0) {
+        WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Failed to open lock file %s: %s", lock_path.c_str(), strerror(errno));
+        return false;
+    }
+
+    // Set FD_CLOEXEC
+    int flags = fcntl(fd, F_GETFD);
+    if (flags >= 0) {
+        fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+    }
+
+    // Try to acquire exclusive lock
+    if (flock(fd, LOCK_EX | LOCK_NB) < 0) {
+        if (!force) {
+            WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Failed to acquire lock on %s: %s", lock_path.c_str(), strerror(errno));
+            close(fd);
+            return false;
+        }
+        WINDMI_LOG_WARN(LOG_TAG_PLATFORM, "--force: overriding existing instance lock");
+
+        // Force override: truncate and rewrite PID
+        lseek(fd, 0, SEEK_SET);
+        if (ftruncate(fd, 0) < 0) {
+            WINDMI_LOG_WARN(LOG_TAG_PLATFORM, "Failed to truncate lock file: %s", strerror(errno));
+        }
+    }
+
+    // Write our PID to the lock file
+    pid_t pid = getpid();
+    char pid_buf[32];
+    ssize_t len = snprintf(pid_buf, sizeof(pid_buf), "%d\n", pid);
+    if (len > 0) {
+        lseek(fd, 0, SEEK_SET);
+        if (write(fd, pid_buf, static_cast<size_t>(len)) != len) {
+            WINDMI_LOG_WARN(LOG_TAG_PLATFORM, "Failed to write PID to lock file: %s", strerror(errno));
+        }
+        ftruncate(fd, len);
+    }
+
+    g_lock_fd = fd;
+    return true;
+#endif
 }
 
 void release_instance_lock() {
-    // On Windows, closing the handle releases the mutex
-    // We need to track the mutex handle globally
-    // For now, this is a no-op placeholder
+#ifdef _WIN32
+    if (g_lock_handle) {
+        CloseHandle(g_lock_handle);
+        g_lock_handle = nullptr;
+    }
+    if (g_lock_fd >= 0) {
+        _close(g_lock_fd);
+        g_lock_fd = -1;
+    }
+#else
+    if (g_lock_fd >= 0) {
+        close(g_lock_fd);
+        g_lock_fd = -1;
+    }
+#endif
 }
 
 bool is_pid_alive(int pid) {
+#ifdef _WIN32
+    // Use /proc/<pid>/stat equivalent on Windows by checking if process exists
+    // OpenProcess returns a handle if process exists
     HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
     if (process == nullptr) {
         return false;
@@ -125,6 +209,23 @@ bool is_pid_alive(int pid) {
 
     CloseHandle(process);
     return false;
+#else
+    if (pid <= 0) {
+        return false;
+    }
+
+    char proc_path[64];
+    snprintf(proc_path, sizeof(proc_path), "/proc/%d/stat", pid);
+
+    FILE* f = fopen(proc_path, "r");
+    if (!f) {
+        return false;
+    }
+
+    // Read and close - if we can open it, the process exists
+    fclose(f);
+    return true;
+#endif
 }
 
 std::string resolve_static_dir(const std::string& dir) {
@@ -251,14 +352,23 @@ bool acquire_instance_lock(bool force) {
         ftruncate(fd, len);
     }
 
-    // Keep fd open to hold the lock
-    // In a full implementation, this would be stored globally
+    // Store the fd globally to hold the lock and release it later
+    g_lock_fd = fd;
     return true;
 }
 
 void release_instance_lock() {
-    // This would need to track the fd globally
-    // For now, this is a no-op placeholder
+#ifdef _WIN32
+    if (g_lock_handle) {
+        CloseHandle(g_lock_handle);
+        g_lock_handle = nullptr;
+    }
+#else
+    if (g_lock_fd >= 0) {
+        close(g_lock_fd);
+        g_lock_fd = -1;
+    }
+#endif
 }
 
 bool is_pid_alive(int pid) {
@@ -341,35 +451,146 @@ void sleep_ms(unsigned int ms) {
 namespace windmi {
 
 Mutex::Mutex() {
-#ifdef _WIN32
-    InitializeCriticalSection(&handle_);
-#else
     pthread_mutex_init(&mutex_, nullptr);
-#endif
 }
 
 Mutex::~Mutex() {
-#ifdef _WIN32
-    DeleteCriticalSection(&handle_);
-#else
     pthread_mutex_destroy(&mutex_);
-#endif
 }
 
 void Mutex::lock() {
-#ifdef _WIN32
-    EnterCriticalSection(&handle_);
-#else
     pthread_mutex_lock(&mutex_);
-#endif
 }
 
 void Mutex::unlock() {
-#ifdef _WIN32
-    LeaveCriticalSection(&handle_);
-#else
     pthread_mutex_unlock(&mutex_);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Windmi Platform Thread Implementation
+// ─────────────────────────────────────────────────────────────────────
+
+Thread::Thread(std::function<void()> callable) {
+#ifdef _WIN32
+    // Windows MinGW uses pthread_create with a wrapper
+    // Store the callable in a shared_ptr on the heap
+    auto* func_ptr = new std::function<void()>(std::move(callable));
+    int ret = pthread_create(&thread_, nullptr, thread_entry, func_ptr);
+    if (ret != 0) {
+        delete func_ptr;
+        thread_ = {};
+        joined_ = true;  // mark as non-joinable
+    } else {
+        joined_ = false;
+        detached_ = false;
+    }
+#else
+    // Store the callable in a shared_ptr on the heap
+    auto* func_ptr = new std::function<void()>(std::move(callable));
+    int ret = pthread_create(&thread_, nullptr, thread_entry, func_ptr);
+    if (ret != 0) {
+        delete func_ptr;
+        thread_ = {};
+        joined_ = true;  // mark as non-joinable
+    } else {
+        joined_ = false;
+        detached_ = false;
+    }
 #endif
+}
+
+Thread::~Thread() {
+    if (joinable()) {
+        join();
+    }
+}
+
+Thread::Thread(Thread&& other) noexcept
+    : thread_(other.thread_), joined_(other.joined_), detached_(other.detached_)
+{
+    other.thread_ = {};
+    other.joined_ = true;
+    other.detached_ = false;
+}
+
+Thread& Thread::operator=(Thread&& other) noexcept {
+    if (this != &other) {
+        if (joinable()) {
+            join();
+        }
+        thread_ = other.thread_;
+        joined_ = other.joined_;
+        detached_ = other.detached_;
+        other.thread_ = {};
+        other.joined_ = true;
+        other.detached_ = false;
+    }
+    return *this;
+}
+
+bool Thread::joinable() const {
+    return !joined_ && !detached_;
+}
+
+void Thread::join() {
+    if (!joined_ && !detached_ && thread_ != 0) {
+        pthread_join(thread_, nullptr);
+        joined_ = true;
+    }
+}
+
+void Thread::detach() {
+    if (!joined_ && !detached_ && thread_ != 0) {
+        pthread_detach(thread_);
+        detached_ = true;
+    }
+}
+
+void* Thread::thread_entry(void* arg) {
+    auto* func_ptr = static_cast<std::function<void()>*>(arg);
+    try {
+        (*func_ptr)();
+    } catch (...) {
+        // Catch all exceptions to prevent thread crash
+    }
+    delete func_ptr;
+    return nullptr;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Windmi Platform UniqueLock Implementation
+// ─────────────────────────────────────────────────────────────────────
+
+UniqueLock::UniqueLock(Mutex& mutex) : mutex_(&mutex), owns_(true) {
+    mutex_->lock();
+}
+
+UniqueLock::~UniqueLock() {
+    if (owns_) {
+        mutex_->unlock();
+    }
+}
+
+void UniqueLock::lock() {
+    if (!owns_) {
+        mutex_->lock();
+        owns_ = true;
+    }
+}
+
+void UniqueLock::unlock() {
+    if (owns_) {
+        mutex_->unlock();
+        owns_ = false;
+    }
+}
+
+Mutex* UniqueLock::mutex() const noexcept {
+    return mutex_;
+}
+
+bool UniqueLock::owns_lock() const noexcept {
+    return owns_;
 }
 
 }  // namespace windmi

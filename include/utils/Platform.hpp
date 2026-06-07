@@ -1,15 +1,18 @@
 #pragma once
 
 #include <csignal>
+#include <functional>
 #include <string>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <pthread.h>
 #else
 #include <pthread.h>
 #include <sys/file.h>
 #include <unistd.h>
+#include <unistd.h>  // for close()
 #endif
 
 namespace windmi::platform {
@@ -58,12 +61,14 @@ public:
     Mutex(const Mutex&) = delete;
     Mutex& operator=(const Mutex&) = delete;
 
+    // Friend for ConditionVariable access to underlying mutex
+    friend class ConditionVariable;
+
+    // Public accessor for ConditionVariable
+    pthread_mutex_t* native_handle() { return &mutex_; }
+
 private:
-#ifdef _WIN32
-    CRITICAL_SECTION handle_;
-#else
     pthread_mutex_t mutex_;
-#endif
 };
 
 /**
@@ -78,6 +83,148 @@ public:
 
 private:
     Mutex& mutex_;
+};
+
+// ─────────────────────────────────────────────────────────────────────
+// Platform Abstraction for Threading
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * @brief Platform-agnostic thread wrapper
+ *
+ * Wraps pthread_t (POSIX) or HANDLE/_beginthreadex (Windows).
+ * Takes std::function<void()> to avoid template bloat in .cpp file.
+ */
+class Thread {
+public:
+    Thread() = default;
+    ~Thread();
+
+    Thread(const Thread&) = delete;
+    Thread& operator=(const Thread&) = delete;
+
+    Thread(Thread&& other) noexcept;
+    Thread& operator=(Thread&& other) noexcept;
+
+    /** Creates a thread that executes the given callable. */
+    explicit Thread(std::function<void()> callable);
+
+    bool joinable() const;
+    void join();
+    void detach();
+
+private:
+    static void* thread_entry(void* arg);
+
+    pthread_t thread_{};
+    bool joined_ = false;
+    bool detached_ = false;
+};
+
+/**
+ * @brief RAII unique lock for Mutex (needed for ConditionVariable)
+ *
+ * Simpler than std::unique_lock - just lock/unlock/owns_lock.
+ * Required by ConditionVariable::wait() for RAII semantics.
+ */
+class UniqueLock {
+public:
+    explicit UniqueLock(Mutex& mutex);
+    ~UniqueLock();
+
+    void lock();
+    void unlock();
+    Mutex* mutex() const noexcept;
+    bool owns_lock() const noexcept;
+
+    UniqueLock(const UniqueLock&) = delete;
+    UniqueLock& operator=(const UniqueLock&) = delete;
+
+private:
+    Mutex* mutex_;
+    bool owns_;
+};
+
+/**
+ * @brief Platform-agnostic condition variable wrapper
+ *
+ * Wraps pthread_cond_t (POSIX) or CONDITION_VARIABLE (Windows).
+ * wait_for() takes milliseconds (not std::chrono) to avoid <chrono> issues on MinGW.
+ */
+class ConditionVariable {
+public:
+    /** Constructor - initializes condition variable */
+    ConditionVariable() {
+        pthread_cond_init(&cond_, nullptr);
+    }
+
+    /** Destructor - destroys condition variable */
+    ~ConditionVariable() {
+        pthread_cond_destroy(&cond_);
+    }
+
+    /** Wake one waiting thread */
+    void notify_one() {
+        pthread_cond_signal(&cond_);
+    }
+
+    /** Wake all waiting threads */
+    void notify_all() {
+        pthread_cond_broadcast(&cond_);
+    }
+
+    /** Block until notified. Lock must be held on entry. */
+    inline void wait(UniqueLock& lock) {
+        pthread_cond_wait(&cond_, lock.mutex()->native_handle());
+    }
+
+    /** Block until notified or timeout. Returns false on timeout. */
+    inline bool wait_for(UniqueLock& lock, unsigned int ms) {
+#ifdef _WIN32
+        // Windows MinGW pthread doesn't have clock_gettime - use system time
+        struct timespec ts;
+        struct timeval tv;
+        gettimeofday(&tv, nullptr);
+        ts.tv_sec = tv.tv_sec;
+        ts.tv_nsec = tv.tv_usec * 1000;
+        ts.tv_nsec += (ms % 1000) * 1000000;
+        ts.tv_sec += ms / 1000 + (ts.tv_nsec >= 1000000000 ? 1 : 0);
+        if (ts.tv_nsec >= 1000000000) {
+            ts.tv_nsec -= 1000000000;
+        }
+#else
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        ts.tv_nsec += (ms % 1000) * 1000000;
+        ts.tv_sec += ms / 1000 + (ts.tv_nsec >= 1000000000 ? 1 : 0);
+        if (ts.tv_nsec >= 1000000000) {
+            ts.tv_nsec -= 1000000000;
+        }
+#endif
+        int rc = pthread_cond_timedwait(&cond_, lock.mutex()->native_handle(), &ts);
+        return rc == 0;
+    }
+
+    /** Block until predicate returns true. Spurious-wakeup safe. */
+    template<typename Predicate>
+    void wait(UniqueLock& lock, Predicate pred) {
+        while (!pred()) wait(lock);
+    }
+
+    /** Block until predicate returns true or timeout. */
+    template<typename Predicate>
+    bool wait_for(UniqueLock& lock, unsigned int ms, Predicate pred) {
+        while (!pred()) {
+            if (!wait_for(lock, ms)) return pred();
+        }
+        return true;
+    }
+
+    ConditionVariable(const ConditionVariable&) = delete;
+    ConditionVariable& operator=(const ConditionVariable&) = delete;
+
+private:
+    pthread_cond_t cond_;
 };
 
 }  // namespace windmi

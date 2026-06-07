@@ -4,16 +4,17 @@
  */
 
 #include <gtest/gtest.h>
+#include <vector>
 
 #include "utils/Logger.hpp"
 #include "utils/LoggerC.h"
 #include "utils/LogTags.hpp"
+#include "utils/Platform.hpp"
 
 #include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 using windmi::LogLevel;
@@ -243,7 +244,7 @@ TEST_F(LoggerTest, ConcurrentLoggingDoesNotCrash) {
 
     const int num_threads = 4;
     const int messages_per_thread = 100;
-    std::vector<std::thread> threads;
+    std::vector<windmi::Thread> threads;
 
     for (int t = 0; t < num_threads; t++) {
         threads.emplace_back([t]() {

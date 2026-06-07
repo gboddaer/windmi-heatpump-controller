@@ -12,7 +12,6 @@
 #include <cstring>
 #include <cmath>
 #include <chrono>
-#include <thread>
 
 namespace windmi {
 
@@ -135,7 +134,7 @@ bool ControlLoop::start(IModbusClient* client, CmdQueue* cmd_queue, StatusQueue*
     stop_requested_.store(false);
     running_.store(true);
 
-    thread_ = std::make_unique<std::thread>(&ControlLoop::threadFunc, this);
+    thread_ = std::make_unique<windmi::Thread>([this]() { threadFunc(); });
     return true;
 }
 
@@ -158,7 +157,7 @@ bool ControlLoop::isRunning() const {
 }
 
 void ControlLoop::kick() {
-    std::lock_guard<std::mutex> lock(kick_mutex_);
+    windmi::LockGuard lock(kick_mutex_);
     ++kick_generation_;
     kick_cond_.notify_one();
 }
@@ -664,15 +663,15 @@ void ControlLoop::threadFunc() {
                     break;
                 }
                 retries++;
-                std::unique_lock<std::mutex> lock(kick_mutex_);
-                kick_cond_.wait_for(lock, std::chrono::seconds(MODBUS_RECONNECT_INTERVAL_S),
+                windmi::UniqueLock lock(kick_mutex_);
+                kick_cond_.wait_for(lock, MODBUS_RECONNECT_INTERVAL_S * 1000,
                                     [this]() { return stop_requested_.load(); });
             }
 
             if (retries >= MODBUS_MAX_RETRIES) {
                 WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to reconnect after %d attempts", retries);
-                std::unique_lock<std::mutex> lock(kick_mutex_);
-                kick_cond_.wait_for(lock, std::chrono::seconds(MODBUS_RECONNECT_INTERVAL_S),
+                windmi::UniqueLock lock(kick_mutex_);
+                kick_cond_.wait_for(lock, MODBUS_RECONNECT_INTERVAL_S * 1000,
                                     [this]() { return stop_requested_.load(); });
                 continue;
             }
@@ -711,9 +710,9 @@ void ControlLoop::threadFunc() {
         auto sleep_ms = static_cast<long>(CONTROL_LOOP_INTERVAL_S) * 1000 - elapsed_ms;
 
         if (sleep_ms > 0) {
-            std::unique_lock<std::mutex> lock(kick_mutex_);
+            windmi::UniqueLock lock(kick_mutex_);
             const uint64_t observed_generation = kick_generation_;
-            kick_cond_.wait_for(lock, std::chrono::milliseconds(sleep_ms),
+            kick_cond_.wait_for(lock, static_cast<unsigned int>(sleep_ms),
                                 [this, observed_generation]() {
                                     return stop_requested_.load()
                                         || kick_generation_ != observed_generation
