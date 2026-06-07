@@ -200,7 +200,23 @@ void release_instance_lock() {
 #endif
 }
 
+bool is_pid_alive(int pid) {
+    // Windows: Use OpenProcess to check if a process exists
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (process == nullptr) {
+        return false;
+    }
 
+    DWORD exit_code;
+    if (GetExitCodeProcess(process, &exit_code)) {
+        bool alive = (exit_code == STILL_ACTIVE);
+        CloseHandle(process);
+        return alive;
+    }
+
+    CloseHandle(process);
+    return false;
+}
 
 std::string resolve_static_dir(const std::string& dir) {
     char exe_path[MAX_PATH];
@@ -343,6 +359,24 @@ void release_instance_lock() {
         g_lock_fd = -1;
     }
 #endif
+}
+
+bool is_pid_alive(int pid) {
+    if (pid <= 0) {
+        return false;
+    }
+
+    char proc_path[64];
+    snprintf(proc_path, sizeof(proc_path), "/proc/%d/stat", pid);
+
+    FILE* f = fopen(proc_path, "r");
+    if (!f) {
+        return false;
+    }
+
+    // Read and close - if we can open it, the process exists
+    fclose(f);
+    return true;
 }
 
 std::string resolve_static_dir(const std::string& dir) {
@@ -546,7 +580,23 @@ Mutex* UniqueLock::mutex() const noexcept {
 }
 
 bool UniqueLock::owns_lock() const noexcept {
-    return owns_;  
+    return owns_;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// ConditionVariable Implementation
+// ─────────────────────────────────────────────────────────────────────
+
+ConditionVariable::ConditionVariable() {
+    pthread_condattr_t attr;
+    pthread_condattr_init(&attr);
+    pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+    pthread_cond_init(&cond_, &attr);
+    pthread_condattr_destroy(&attr);
+}
+
+ConditionVariable::~ConditionVariable() {
+    pthread_cond_destroy(&cond_);
 }
 
 }  // namespace windmi
@@ -611,7 +661,8 @@ bool SerialPort::open(const std::string& device, int baud, char parity, int stop
     }
 
     // Set timeout parameters
-    COMMTIMEOUTS timeouts = {0};
+    COMMTIMEOUTS timeouts;
+    memset(&timeouts, 0, sizeof(timeouts));
     timeouts.ReadIntervalTimeout = 100;  // 100ms between characters
     timeouts.ReadTotalTimeoutConstant = 1000;  // 1 second total timeout
     timeouts.ReadTotalTimeoutMultiplier = 10;  // 10ms per character
@@ -620,7 +671,8 @@ bool SerialPort::open(const std::string& device, int baud, char parity, int stop
     SetCommTimeouts(handle_, &timeouts);
 
     // Configure port
-    DCB dcb = {0};
+    DCB dcb;
+    memset(&dcb, 0, sizeof(dcb));
     dcb.DCBlength = sizeof(DCB);
 
     if (!GetCommState(handle_, &dcb)) {
@@ -715,7 +767,8 @@ int SerialPort::read(uint8_t* buffer, size_t len, unsigned int timeout_ms) {
     }
 
     // Set timeout
-    COMMTIMEOUTS timeouts = {0};
+    COMMTIMEOUTS timeouts;
+    memset(&timeouts, 0, sizeof(timeouts));
     timeouts.ReadIntervalTimeout = 100;
     timeouts.ReadTotalTimeoutConstant = timeout_ms;
     timeouts.ReadTotalTimeoutMultiplier = 0;
@@ -768,7 +821,7 @@ SerialPort& SerialPort::operator=(SerialPort&& other) noexcept {
 }
 
 bool SerialPort::open(const std::string& device, int baud, char parity, int stop_bits, bool rs485_enabled) {
-    (void)rs485_enabled;  // RS-485 not implemented on Windows yet
+    (void)rs485_enabled;  // TODO: RS-485 direction control not yet implemented on any platform
     close();
 
     // Open device in read-write mode (non-blocking to avoid hanging on open)
@@ -948,7 +1001,7 @@ int SerialPort::write(const uint8_t* buffer, size_t len) {
 
 #endif  // _WIN32 (outer from line 601)
 
-}  // namespace windmi
+}  // namespace windmi::platform
 
 // ──────────────────────────────────────────────────────────────────
 // C-linkage bridge functions (callable from .c files)

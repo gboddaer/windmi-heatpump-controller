@@ -27,42 +27,7 @@ bool acquire_instance_lock(bool force = false);
 void release_instance_lock();
 
 /** Check whether a PID appears alive on the current platform. */
-inline bool is_pid_alive(int pid) {
-#ifdef _WIN32
-    // Use /proc/<pid>/stat equivalent on Windows by checking if process exists
-    // OpenProcess returns a handle if process exists
-    HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
-    if (process == nullptr) {
-        return false;
-    }
-
-    DWORD exit_code;
-    if (GetExitCodeProcess(process, &exit_code)) {
-        bool alive = (exit_code == STILL_ACTIVE);
-        CloseHandle(process);
-        return alive;
-    }
-
-    CloseHandle(process);
-    return false;
-#else
-    if (pid <= 0) {
-        return false;
-    }
-
-    char proc_path[64];
-    snprintf(proc_path, sizeof(proc_path), "/proc/%d/stat", pid);
-
-    FILE* f = fopen(proc_path, "r");
-    if (!f) {
-        return false;
-    }
-
-    // Read and close - if we can open it, the process exists
-    fclose(f);
-    return true;
-#endif
-}
+bool is_pid_alive(int pid);
 
 /** Resolve static directory as-is, relative to executable, or one level above executable. */
 std::string resolve_static_dir(const std::string& dir);
@@ -229,18 +194,10 @@ private:
 class ConditionVariable {
 public:
     /** Constructor - initializes condition variable with CLOCK_MONOTONIC timeout clock */
-    ConditionVariable() {
-        pthread_condattr_t attr;
-        pthread_condattr_init(&attr);
-        pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
-        pthread_cond_init(&cond_, &attr);
-        pthread_condattr_destroy(&attr);
-    }
+    ConditionVariable();
 
     /** Destructor - destroys condition variable */
-    ~ConditionVariable() {
-        pthread_cond_destroy(&cond_);
-    }
+    ~ConditionVariable();
 
     /** Wake one waiting thread */
     void notify_one() {
