@@ -127,11 +127,6 @@ main {
     gap: 12px;
 }
 
-.status-row-power {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 12px;
-}
 
 .status-item {
     background: rgba(255, 255, 255, 0.03);
@@ -380,10 +375,6 @@ footer {
     .status-row-main {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-
-    .status-row-power {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
 }
 
 @media (max-width: 600px) {
@@ -406,11 +397,6 @@ footer {
     .status-row-main {
         grid-template-columns: 1fr;
     }
-
-    .status-row-power {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
     .status-bar {
         flex-direction: column;
         gap: 10px;
@@ -425,7 +411,3 @@ footer {
     }
 }
 
-/* Power values — amber color */
-.power-value {
-    color: #fbbf24 !important;
-}

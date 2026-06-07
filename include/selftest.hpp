@@ -6,33 +6,35 @@
  * heat pump using any IModbusClient transport (TCP, serial, or demo).
  */
 
-#ifndef WINDMI_SELFTEST_HPP
-#define WINDMI_SELFTEST_HPP
+#ifndef WINDMI_SELFTEST_HPP_
+#define WINDMI_SELFTEST_HPP_
 
 #include <cstdint>
 #include <string>
 
 namespace windmi {
 
-class IModbusClient;  // forward declaration
+class IModbusClient; // forward declaration
 
 /// Result of a single self-test step
-struct SelftestResult {
-    std::string name;
-    uint16_t address = 0;
-    bool read_ok = false;
-    bool write_ok = false;
-    bool verify_ok = false;
-    int16_t read_value = 0;
+struct SelftestResult
+{
+  std::string name;
+  uint16_t address = 0;
+  bool read_ok = false;
+  bool write_ok = false;
+  bool verify_ok = false;
+  int16_t read_value = 0;
 };
 
 /// Aggregate report from a self-test run
-struct SelftestReport {
-    int total = 0;
-    int passed = 0;
-    int failed = 0;
-    bool all_critical_passed = false;
-    SelftestResult results[6];
+struct SelftestReport
+{
+  int total = 0;
+  int passed = 0;
+  int failed = 0;
+  bool all_critical_passed = false;
+  SelftestResult results[6];
 };
 
 /**

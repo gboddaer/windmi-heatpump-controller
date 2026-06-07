@@ -262,7 +262,7 @@ private:
   #include <thread>
   #include <mutex>
   #include <condition_variable>
-  
+
   // Add:
   #include "utils/Platform.hpp"
   ```
@@ -272,7 +272,7 @@ private:
   std::unique_ptr<std::thread> thread_;
   std::mutex kick_mutex_;
   std::condition_variable kick_cond_;
-  
+
   // After:
   std::unique_ptr<Thread> thread_;
   Mutex kick_mutex_;
@@ -288,14 +288,14 @@ private:
   ```cpp
   // Remove:
   #include <thread>
-  
+
   // No new include needed (Platform.hpp via ControlLoop.hpp)
   ```
 - [ ] **Step 2:** Replace thread creation:
   ```cpp
   // Before:
   thread_ = std::make_unique<std::thread>(&ControlLoop::threadFunc, this);
-  
+
   // After:
   thread_ = std::make_unique<Thread>([this]() { threadFunc(); });
   ```
@@ -305,12 +305,12 @@ private:
   std::lock_guard<std::mutex> lock(kick_mutex_);
   // After:
   LockGuard lock(kick_mutex_);
-  
+
   // Before:
   std::unique_lock<std::mutex> lock(kick_mutex_);
   // After:
   UniqueLock lock(kick_mutex_);
-  
+
   // Before:
   kick_cond_.wait_for(lock, std::chrono::seconds(...), predicate);
   // After:
@@ -330,7 +330,7 @@ private:
   ```cpp
   // Remove:
   #include <mutex>
-  
+
   // Add:
   #include "utils/Platform.hpp"
   ```
@@ -338,7 +338,7 @@ private:
   ```cpp
   // Before:
   mutable std::mutex mutex_;
-  
+
   // After:
   mutable Mutex mutex_;
   ```
@@ -346,7 +346,7 @@ private:
   ```cpp
   // Before:
   std::lock_guard<std::mutex> lock(mutex_);
-  
+
   // After:
   LockGuard lock(mutex_);
   ```
@@ -361,7 +361,7 @@ private:
   ```cpp
   // Remove:
   #include <mutex>
-  
+
   // Add:
   #include "utils/Platform.hpp"
   ```
@@ -369,7 +369,7 @@ private:
   ```cpp
   // Before:
   mutable std::mutex mutex_;
-  
+
   // After:
   mutable Mutex mutex_;
   ```
@@ -377,7 +377,7 @@ private:
   ```cpp
   // Before:
   std::lock_guard<std::mutex> lock(mutex_);
-  
+
   // After:
   LockGuard lock(mutex_);
   ```
@@ -394,7 +394,7 @@ Current POSIX `acquire_instance_lock()` opens a file descriptor but never stores
   ```cpp
   // POSIX:
   static int g_lock_fd = -1;
-  
+
   // Windows:
   static HANDLE g_lock_handle = nullptr;
   ```

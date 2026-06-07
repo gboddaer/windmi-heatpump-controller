@@ -42,11 +42,6 @@ const elements = {
     dhwPriorityBtn: document.getElementById('dhwPriorityBtn'),
     heatingPriorityBtn: document.getElementById('heatingPriorityBtn'),
     refreshCountdown: document.getElementById('refreshCountdown'),
-    acCurrentValue: document.getElementById('acCurrentValue'),
-    dcCurrentValue: document.getElementById('dcCurrentValue'),
-    acVoltageValue: document.getElementById('acVoltageValue'),
-    dcVoltageValue: document.getElementById('dcVoltageValue'),
-    acPowerValue: document.getElementById('acPowerValue')
 };
 
 // State
@@ -78,15 +73,15 @@ elements.setDhwBtn.addEventListener('click', async () => {
         alert('DHW temperature must be between 40 and 63°C');
         return;
     }
-    
+
     // Set pending value immediately to update UI
     pendingDhwTarget = temperature;
     elements.setDhwBtn.disabled = true;
     elements.setDhwBtn.textContent = 'Setting...';
-    
+
     // Safety: clear pending after 15s if server never confirms
     const dhwTimeout = setTimeout(() => { pendingDhwTarget = null; }, 15000);
-    
+
     try {
         await apiPost(API_SET_DHW_URL, { temperature });
         showNotification('DHW temperature set successfully', 'success');
@@ -107,15 +102,15 @@ elements.setHeatingBtn.addEventListener('click', async () => {
         alert('Heating temperature must be between 25 and 63°C');
         return;
     }
-    
+
     // Set pending value immediately to update UI
     pendingHeatingTarget = temperature;
     elements.setHeatingBtn.disabled = true;
     elements.setHeatingBtn.textContent = 'Setting...';
-    
+
     // Safety: clear pending after 15s if server never confirms
     const heatingTimeout = setTimeout(() => { pendingHeatingTarget = null; }, 15000);
-    
+
     try {
         await apiPost(API_SET_HEATING_URL, { temperature });
         showNotification('Heating temperature set successfully', 'success');
@@ -132,20 +127,20 @@ elements.setHeatingBtn.addEventListener('click', async () => {
 // Working mode buttons
 function setWorkingMode(mode) {
     if (mode === currentMode) return;
-    
+
     currentMode = mode;
     pendingMode = mode;  // Block status poll from reverting until server confirms
     setTimeout(() => { pendingMode = null; }, 10000);  // Safety: clear after 10s if server never confirms
-    
+
     // Update button states
     elements.modeOffBtn.classList.toggle('active', mode === 'off');
     elements.modeDhwBtn.classList.toggle('active', mode === 'dhw');
     elements.modeHeatBtn.classList.toggle('active', mode === 'heat');
     elements.modeBothBtn.classList.toggle('active', mode === 'both');
-    
+
     // Show/hide priority section based on mode
     elements.prioritySection.style.display = (mode === 'both') ? 'block' : 'none';
-    
+
     // Send mode command to server
     const modeMap = {
         'off': 0,
@@ -153,7 +148,7 @@ function setWorkingMode(mode) {
         'heat': 2, // Will be mapped to Heating-only on backend
         'both': 2  // DHW + Heating
     };
-    
+
     apiPost('/api/set-mode', { mode: modeMap[mode], priority: currentPriority })
         .then(() => showNotification('Mode set to ' + mode, 'success'))
         .catch(error => {
@@ -189,11 +184,11 @@ elements.heatingPriorityBtn.addEventListener('click', () => {
 
 function setPriority(priority) {
     if (priority === currentPriority || currentMode !== 'both') return;
-    
+
     currentPriority = priority;
     elements.dhwPriorityBtn.classList.toggle('active', priority === 'dhw');
     elements.heatingPriorityBtn.classList.toggle('active', priority === 'heating');
-    
+
     apiPost(API_SET_PRIORITY_URL, { priority })
         .then(() => showNotification('Priority set to ' + priority, 'success'))
         .catch(error => showNotification('Failed to set priority: ' + error.message, 'error'));
@@ -224,12 +219,12 @@ async function apiPost(url, data) {
         },
         body: JSON.stringify(data)
     });
-    
+
     if (!response.ok) {
         const error = await response.json().catch(() => ({ error: 'Unknown error' }));
         throw new Error(error.error || 'HTTP ' + response.status);
     }
-    
+
     return await response.json();
 }
 
@@ -247,7 +242,7 @@ function updateUI(status) {
         elements.deviceStatus.textContent = 'Offline';
         elements.deviceStatus.className = 'status-indicator offline';
     }
-    
+
     // Run status — based on actual device running status
     const isRunning = status.runningStatus && status.runningStatus !== 'off';
     if (status.deviceOnline && isRunning) {
@@ -257,7 +252,7 @@ function updateUI(status) {
         elements.runStatus.textContent = 'Stopped';
         elements.runStatus.style.color = '#9ca3af';
     }
-    
+
     // Mode display — show the set mode (0x002C) and actual running status (0x002D)
     // If running status differs from set mode (e.g. defrost, anti-freeze), show both
     const setModeStr = status.mode.toUpperCase();
@@ -268,14 +263,14 @@ function updateUI(status) {
     } else {
         elements.modeValue.textContent = setModeStr;
     }
-    
+
     // Priority display
     elements.priorityValue.textContent = status.priority.toUpperCase();
-    
+
     // Map working mode from server (0=off, 1=dhw, 2=heat, 3=both)
     const modeMap = ['off', 'dhw', 'heat', 'both'];
     const displayMode = modeMap[status.workingMode] || 'both';
-    
+
     // If we have a pending mode change, only accept server state once it matches
     if (pendingMode !== null) {
         if (displayMode === pendingMode) {
@@ -287,15 +282,15 @@ function updateUI(status) {
     } else {
         currentMode = displayMode;
     }
-    
+
     currentPriority = status.priority.toLowerCase();
-    
+
     // Update mode button active states (always reflect currentMode)
     elements.modeOffBtn.classList.toggle('active', currentMode === 'off');
     elements.modeDhwBtn.classList.toggle('active', currentMode === 'dhw');
     elements.modeHeatBtn.classList.toggle('active', currentMode === 'heat');
     elements.modeBothBtn.classList.toggle('active', currentMode === 'both');
-    
+
     // Update power button
     if (currentMode === 'off') {
         elements.powerBtn.textContent = 'ON';
@@ -304,19 +299,19 @@ function updateUI(status) {
         elements.powerBtn.textContent = 'OFF';
         elements.powerBtn.className = 'power-btn on';
     }
-    
+
     // Show/hide priority section based on mode
     elements.prioritySection.style.display = (currentMode === 'both') ? 'block' : 'none';
-    
+
     // Update priority buttons
     elements.dhwPriorityBtn.classList.toggle('active', currentPriority === 'dhw');
     elements.heatingPriorityBtn.classList.toggle('active', currentPriority === 'heating');
-    
+
     // Temperatures
     elements.outdoorTempValue.textContent = status.outdoorTemperature + '°C';
     elements.dhwTempValue.textContent = status.dhwTemperature + '°C';
     elements.heatingTempValue.textContent = status.heatingTemperature + '°C';
-    
+
     // Use pending values if set, otherwise use server values
     if (pendingDhwTarget !== null) {
         // Clear pending once server confirms the value (allow for rounding)
@@ -331,22 +326,13 @@ function updateUI(status) {
     }
     const dhwTargetDisplay = pendingDhwTarget !== null ? pendingDhwTarget : status.dhwTarget;
     const heatingTargetDisplay = pendingHeatingTarget !== null ? pendingHeatingTarget : status.heatingTarget;
-    
+
     elements.dhwTargetValue.textContent = dhwTargetDisplay + '°C';
     elements.heatingTargetValue.textContent = heatingTargetDisplay + '°C';
-    
-    // Power monitoring — always displayed in status row
-    elements.acCurrentValue.textContent = status.acCurrent.toFixed(2) + ' A';
-    elements.dcCurrentValue.textContent = status.dcCurrent.toFixed(2) + ' A';
-    elements.acVoltageValue.textContent = status.acVoltage.toFixed(1) + ' V';
-    elements.dcVoltageValue.textContent = status.dcVoltage.toFixed(1) + ' V';
-    // Show AC real power (W) if valid, otherwise show apparent power (VA)
-    const acPowerDisplay = status.powerValid ? status.acPowerW : status.acPowerVA;
-    elements.acPowerValue.textContent = acPowerDisplay.toFixed(1) + ' W';
-    
+
     // Last update
     const now = new Date();
-    
+
     // Update sliders if values are within range (use pending values if set)
     if (dhwTargetDisplay >= 40 && dhwTargetDisplay <= 63) {
         elements.dhwSlider.value = dhwTargetDisplay;
@@ -356,7 +342,7 @@ function updateUI(status) {
         elements.heatingSlider.value = heatingTargetDisplay;
         elements.heatingInput.value = heatingTargetDisplay;
     }
-    
+
 }
 
 function formatMode(mode) {
@@ -391,9 +377,9 @@ function showNotification(message, type) {
         animation: slideIn 0.3s ease;
         background: ${type === 'success' ? '#10b981' : '#ef4444'};
     `;
-    
+
     document.body.appendChild(notification);
-    
+
     // Remove after 3 seconds
     setTimeout(() => {
         notification.style.animation = 'slideOut 0.3s ease';
@@ -404,9 +390,9 @@ function showNotification(message, type) {
 // Fetch and update
 async function fetchStatus() {
     if (isUpdating) return;
-    
+
     isUpdating = true;
-    
+
     try {
         const status = await apiGet(API_STATUS_URL);
         updateUI(status);

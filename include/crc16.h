@@ -3,8 +3,8 @@
  * @brief CRC16 checksum utilities
  */
 
-#ifndef WINDMI_CRC16_H
-#define WINDMI_CRC16_H
+#ifndef WINDMI_CRC16_H_
+#define WINDMI_CRC16_H_
 
 #include <stdint.h>
 #include <stddef.h>
@@ -19,7 +19,7 @@ extern "C" {
  * @param len Length of data
  * @return CRC16 checksum
  */
-uint16_t crc16(const uint8_t *data, size_t len);
+uint16_t crc16(const uint8_t* data, size_t len);
 
 /**
  * @brief Backward-compatible Modbus CRC16 API used by legacy C tests.
@@ -27,7 +27,7 @@ uint16_t crc16(const uint8_t *data, size_t len);
  * @param len Length of data
  * @return CRC16 checksum
  */
-uint16_t crc16_modbus(const uint8_t *data, size_t len);
+uint16_t crc16_modbus(const uint8_t* data, size_t len);
 
 #ifdef __cplusplus
 }

@@ -11,8 +11,8 @@
  *   int16_t temp = client.readRegister(REG_OUTDOOR_TEMP);
  */
 
-#ifndef WINDMI_MODBUS_MODBUSSERIALCLIENT_HPP
-#define WINDMI_MODBUS_MODBUSSERIALCLIENT_HPP
+#ifndef WINDMI_MODBUS_MODBUSSERIALCLIENT_HPP_
+#define WINDMI_MODBUS_MODBUSSERIALCLIENT_HPP_
 
 #include "modbus/IModbusClient.hpp"
 #include <cstdint>
@@ -33,45 +33,46 @@ namespace windmi {
  *
  * @note This class is not copyable.
  */
-class ModbusSerialClient : public IModbusClient {
+class ModbusSerialClient : public IModbusClient
+{
 public:
-    /**
-     * @brief Create a new Modbus serial client
-     *
-     * @param device Serial device path (e.g., "/dev/ttyUSB0")
-     * @param baud Baud rate (9600, 19200, 38400, 57600, 115200)
-     * @param parity Parity character: 'N' (none), 'E' (even), 'O' (odd)
-     * @param stop_bits Stop bits: 1 or 2 (default: 1)
-     * @param rs485_enabled Enable RS-485 direction control (default: false)
-     * @param slave_id Modbus slave ID (0-255)
-     * @throws ModbusException on invalid parameters
-     */
-    ModbusSerialClient(const std::string& device, int baud, char parity,
-                       int stop_bits, bool rs485_enabled, uint8_t slave_id);
+  /**
+   * @brief Create a new Modbus serial client
+   *
+   * @param device Serial device path (e.g., "/dev/ttyUSB0")
+   * @param baud Baud rate (9600, 19200, 38400, 57600, 115200)
+   * @param parity Parity character: 'N' (none), 'E' (even), 'O' (odd)
+   * @param stop_bits Stop bits: 1 or 2 (default: 1)
+   * @param rs485_enabled Enable RS-485 direction control (default: false)
+   * @param slave_id Modbus slave ID (0-255)
+   * @throws ModbusException on invalid parameters
+   */
+  ModbusSerialClient(const std::string& device, int baud, char parity, int stop_bits,
+                     bool rs485_enabled, uint8_t slave_id);
 
-    /**
-     * @brief Destroy the Modbus serial client
-     */
-    ~ModbusSerialClient() override;
+  /**
+   * @brief Destroy the Modbus serial client
+   */
+  ~ModbusSerialClient() override;
 
-    // Non-copyable
-    ModbusSerialClient(const ModbusSerialClient&) = delete;
-    ModbusSerialClient& operator=(const ModbusSerialClient&) = delete;
+  // Non-copyable
+  ModbusSerialClient(const ModbusSerialClient&) = delete;
+  ModbusSerialClient& operator=(const ModbusSerialClient&) = delete;
 
-    // IModbusClient interface implementation
-    bool connect() override;
-    void disconnect() override;
-    bool isConnected() const override;
+  // IModbusClient interface implementation
+  bool connect() override;
+  void disconnect() override;
+  bool isConnected() const override;
 
-    int16_t readRegister(uint16_t address) override;
-    void writeRegister(uint16_t address, uint16_t value) override;
+  int16_t readRegister(uint16_t address) override;
+  void writeRegister(uint16_t address, uint16_t value) override;
 
-    void flushBuffer() override;
-    std::string getLastError() const override;
+  void flushBuffer() override;
+  std::string getLastError() const override;
 
 private:
-    struct Impl;
-    Impl* impl_;
+  struct Impl;
+  Impl* impl_;
 };
 
 } // namespace windmi

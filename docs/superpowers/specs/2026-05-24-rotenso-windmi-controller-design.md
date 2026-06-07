@@ -1,7 +1,7 @@
 # Rotenso Windmi Heat Pump Web Controller
 
-**Date:** 2026-05-24  
-**Version:** 0.2 (Draft)  
+**Date:** 2026-05-24
+**Version:** 0.2 (Draft)
 **Status:** Design Phase
 
 ## Overview
@@ -261,7 +261,7 @@ Example: 0B 83 04 XX XX (Exception code 4: Slave Device Failure)
 ```c
 void control_loop(void) {
     Status status = read_all_registers();
-    
+
     if (config.priority == DHW_PRIORITY) {
         if (needs_dhw_heating(status)) {
             // tank_temp < dhw_target - 3°C: switch to DHW mode
