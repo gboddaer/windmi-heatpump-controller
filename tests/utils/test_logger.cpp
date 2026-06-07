@@ -247,7 +247,7 @@ TEST_F(LoggerTest, ConcurrentLoggingDoesNotCrash) {
     std::vector<windmi::Thread> threads;
 
     for (int t = 0; t < num_threads; t++) {
-        threads.emplace_back([t]() {
+        threads.emplace_back([t, messages_per_thread]() {
             for (int i = 0; i < messages_per_thread; i++) {
                 WINDMI_LOG_INFO(LOG_TAG_MAIN, "thread %d msg %d", t, i);
             }
