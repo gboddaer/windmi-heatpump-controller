@@ -1,57 +1,42 @@
-name: Windows Build
+name: Windows Cross-Build
 
 on:
   push:
     branches:
       - feature/windows-support
-      - main
   pull_request:
     branches:
       - main
 
 jobs:
-  windows-build:
-    runs-on: windows-latest
+  mingw-cross-build:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup CMake
-        uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: '3.20'
-
-      - name: Setup vcpkg
-        uses: lukka/setup-vcpkg@v11
-        with:
-          version: '2023.04.15'
-
-      - name: Install dependencies via vcpkg
+      - name: Install MinGW-w64 (POSIX threads)
         run: |
-          vcpkg install gtest:x64-windows
-        shell: pwsh
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix
 
       - name: Configure
         run: |
-          cmake -S . -B build `
-            -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake `
+          mkdir -p build-win64
+          cd build-win64
+          cmake .. -G "Unix Makefiles" \
+            -DCMAKE_TOOLCHAIN_FILE=../mingw-w64-x86_64.cmake \
             -DCMAKE_BUILD_TYPE=Release
-        shell: pwsh
 
       - name: Build
         run: |
-          cmake --build build --config Release
-        shell: pwsh
-
-      - name: Run tests
-        run: |
-          ctest --test-dir build --output-on-failure
-        shell: pwsh
+          cd build-win64
+          make -j$(nproc)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windmi-control-windows
-          path: build/Release/windmi-control.exe
+          path: build-win64/windmi-control.exe
           retention-days: 7

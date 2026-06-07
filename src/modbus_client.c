@@ -1,7 +1,34 @@
+/**
+ * @file src/modbus_client.c
+ * @brief Modbus TCP client implementation with cross-platform socket support
+ */
+
 #include "modbus_client.h"
 #include "crc16.h"
 #include "utils/LogTags.hpp"
 #include "utils/LoggerC.h"
+#include "utils/PlatformC.h"
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <io.h>
+#include <time.h>
+typedef SOCKET windmi_socket_t;
+#define WINDMI_INVALID_SOCKET INVALID_SOCKET
+#define windmi_close_socket closesocket
+#define windmi_socket_error WSAGetLastError()
+#ifndef MSG_DONTWAIT
+#define MSG_DONTWAIT 0
+#endif
+/* Winsock recv/send expect char* but we use uint8_t* — cast transparently */
+#define windmi_recv(fd, buf, len, flags) recv((fd), (char*)(buf), (len), (flags))
+#define windmi_send(fd, buf, len, flags) send((fd), (const char*)(buf), (len), (flags))
+/* Winsock select: nfds is ignored (must be 0 on Windows) */
+#define windmi_select(nfds, rfds, wfds, efds, tv) select(0, (rfds), (wfds), (efds), (tv))
+#else
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +41,19 @@
 #include <fcntl.h>
 #include <sys/select.h>
 #include <time.h>
+typedef int windmi_socket_t;
+#define WINDMI_INVALID_SOCKET (-1)
+#define windmi_close_socket close
+#define windmi_socket_error errno
+#define windmi_recv(fd, buf, len, flags) recv((fd), (buf), (len), (flags))
+#define windmi_send(fd, buf, len, flags) send((fd), (buf), (len), (flags))
+#define windmi_select select
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
 
 #define MODBUS_MAX_FRAME 256
 #define MODBUS_RECV_TIMEOUT_MS 2000  // 2 second timeout for receives
@@ -33,14 +73,26 @@ struct modbus_client {
     char ip[16];
     int port;
     uint8_t slave_id;
-    int socket_fd;
+    windmi_socket_t socket_fd;
     bool connected;
+#ifdef _WIN32
+    bool ws_started;
+#endif
 };
 
 #ifdef TEST_BUILD
 #define STATIC_FOR_TEST
 #else
 #define STATIC_FOR_TEST static
+#endif
+
+#ifdef _WIN32
+static void cleanup_winsock_if_started(modbus_client_t *client) {
+    if (client && client->ws_started) {
+        WSACleanup();
+        client->ws_started = false;
+    }
+}
 #endif
 
 static uint16_t bytes_to_uint16(const uint8_t *bytes) {
@@ -83,8 +135,11 @@ modbus_client_t *modbus_client_create(const char *ip, int port, uint8_t slave_id
     client->ip[sizeof(client->ip) - 1] = '\0';
     client->port = port;
     client->slave_id = slave_id;
-    client->socket_fd = -1;
+    client->socket_fd = WINDMI_INVALID_SOCKET;
     client->connected = false;
+#ifdef _WIN32
+    client->ws_started = false;
+#endif
     
     return client;
 }
@@ -94,6 +149,9 @@ void modbus_client_destroy(modbus_client_t *client) {
         if (client->connected) {
             modbus_client_disconnect(client);
         }
+#ifdef _WIN32
+        cleanup_winsock_if_started(client);
+#endif
         free(client);
     }
 }
@@ -102,10 +160,26 @@ bool modbus_client_connect(modbus_client_t *client) {
     if (!client || client->connected) {
         return false;
     }
-    
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
+
+#ifdef _WIN32
+    if (!client->ws_started) {
+        WSADATA wsa_data;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
+            WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "WSAStartup failed");
+            return false;
+        }
+        client->ws_started = true;
+    }
+#endif
+
+    windmi_socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == WINDMI_INVALID_SOCKET) {
+#ifndef _WIN32
         WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "socket failed: %s", strerror(errno));
+#else
+        WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "socket failed: %d", WSAGetLastError());
+        cleanup_winsock_if_started(client);
+#endif
         return false;
     }
     
@@ -116,13 +190,23 @@ bool modbus_client_connect(modbus_client_t *client) {
     
     if (inet_pton(AF_INET, client->ip, &server_addr.sin_addr) <= 0) {
         WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Invalid address");
-        close(sock);
+        windmi_close_socket(sock);
+#ifdef _WIN32
+        cleanup_winsock_if_started(client);
+#endif
         return false;
     }
     
     if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+#ifndef _WIN32
         WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %s", strerror(errno));
-        close(sock);
+#else
+        WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "connect failed: %d", WSAGetLastError());
+#endif
+        windmi_close_socket(sock);
+#ifdef _WIN32
+        cleanup_winsock_if_started(client);
+#endif
         return false;
     }
     
@@ -133,10 +217,13 @@ bool modbus_client_connect(modbus_client_t *client) {
 }
 
 void modbus_client_disconnect(modbus_client_t *client) {
-    if (client && client->connected && client->socket_fd >= 0) {
-        close(client->socket_fd);
-        client->socket_fd = -1;
+    if (client && client->connected && client->socket_fd != WINDMI_INVALID_SOCKET) {
+        windmi_close_socket(client->socket_fd);
+        client->socket_fd = WINDMI_INVALID_SOCKET;
         client->connected = false;
+#ifdef _WIN32
+        cleanup_winsock_if_started(client);
+#endif
     }
 }
 
@@ -147,7 +234,7 @@ bool modbus_client_is_connected(modbus_client_t *client) {
 // Flush any pending data in the socket read buffer
 // Returns number of bytes flushed
 static int flush_read_buffer(modbus_client_t *client) {
-    if (!client || client->socket_fd < 0) return 0;
+    if (!client || client->socket_fd == WINDMI_INVALID_SOCKET) return 0;
     
     uint8_t dummy[128];
     fd_set fds;
@@ -157,9 +244,9 @@ static int flush_read_buffer(modbus_client_t *client) {
     while (1) {
         FD_ZERO(&fds);
         FD_SET(client->socket_fd, &fds);
-        int ready = select(client->socket_fd + 1, &fds, NULL, NULL, &tv);
+        int ready = windmi_select(client->socket_fd + 1, &fds, NULL, NULL, &tv);
         if (ready <= 0) break;
-        ssize_t n = recv(client->socket_fd, dummy, sizeof(dummy), MSG_DONTWAIT);
+        int n = windmi_recv(client->socket_fd, dummy, sizeof(dummy), MSG_DONTWAIT);
         if (n <= 0) break;
         flushed += n;
     }
@@ -179,8 +266,8 @@ static int send_frame(modbus_client_t *client, const uint8_t *frame, size_t len)
     // Flush any stale data before sending
     flush_read_buffer(client);
     
-    ssize_t sent = send(client->socket_fd, frame, len, 0);
-    return (sent == (ssize_t)len) ? 0 : -1;
+    int sent = windmi_send(client->socket_fd, frame, len, 0);
+    return (sent == (int)len) ? 0 : -1;
 }
 
 static int receive_exact(modbus_client_t *client, uint8_t *buffer, size_t expected_len) {
@@ -195,7 +282,7 @@ static int receive_exact(modbus_client_t *client, uint8_t *buffer, size_t expect
         tv.tv_sec = MODBUS_RECV_TIMEOUT_MS / 1000;
         tv.tv_usec = (MODBUS_RECV_TIMEOUT_MS % 1000) * 1000;
         
-        int ready = select(client->socket_fd + 1, &fds, NULL, NULL, &tv);
+        int ready = windmi_select(client->socket_fd + 1, &fds, NULL, NULL, &tv);
         if (ready <= 0) {
             if (ready == 0) {
                 WINDMI_C_LOG(WINDMI_LOG_ERROR, LOG_TAG_MODBUS, "Receive timeout (got %zu/%zu bytes)",
@@ -204,7 +291,7 @@ static int receive_exact(modbus_client_t *client, uint8_t *buffer, size_t expect
             return -1;
         }
         
-        ssize_t received = recv(client->socket_fd, buffer + total_received, 
+        int received = windmi_recv(client->socket_fd, buffer + total_received, 
                                 expected_len - total_received, 0);
         
         if (received <= 0) {
@@ -317,7 +404,7 @@ int modbus_write_register(modbus_client_t *client, uint16_t address, uint16_t va
         if (retry > 0) {
             WINDMI_C_LOG(WINDMI_LOG_DEBUG, LOG_TAG_MODBUS, "Write retry %d/%d for address 0x%04X",
                    retry, MODBUS_WRITE_MAX_RETRIES, address);
-            usleep(MODBUS_RETRY_DELAY_MS * 1000);
+            windmi_sleep_ms(MODBUS_RETRY_DELAY_MS);
         }
         
         uint8_t frame[MODBUS_MAX_FRAME];

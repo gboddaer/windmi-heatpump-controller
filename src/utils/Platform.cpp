@@ -56,7 +56,7 @@ void clear_instance_lock_name_for_test() {
 #ifdef _WIN32
 
 // Windows signal handling via Console Control Handler
-static volatile sig_atomic_t g_running_flag = 1;
+static volatile sig_atomic_t* g_running_flag_ptr = nullptr;
 static BOOL WINAPI console_control_handler(DWORD dwCtrlType) {
     switch (dwCtrlType) {
         case CTRL_C_EVENT:
@@ -64,7 +64,9 @@ static BOOL WINAPI console_control_handler(DWORD dwCtrlType) {
         case CTRL_CLOSE_EVENT:
         case CTRL_LOGOFF_EVENT:
         case CTRL_SHUTDOWN_EVENT:
-            g_running_flag = 0;
+            if (g_running_flag_ptr) {
+                *g_running_flag_ptr = 0;
+            }
             return TRUE;
         default:
             return FALSE;
@@ -72,10 +74,11 @@ static BOOL WINAPI console_control_handler(DWORD dwCtrlType) {
 }
 
 void install_signal_handlers(volatile sig_atomic_t* running_flag) {
-    g_running_flag = 1;
-    if (SetConsoleCtrlHandler(console_control_handler, TRUE)) {
+    g_running_flag_ptr = running_flag;
+    if (running_flag) {
         *running_flag = 1;
-    } else {
+    }
+    if (!SetConsoleCtrlHandler(console_control_handler, TRUE)) {
         WINDMI_LOG_ERROR(LOG_TAG_PLATFORM, "Failed to install console control handler");
     }
 }
@@ -594,3 +597,11 @@ bool UniqueLock::owns_lock() const noexcept {
 }
 
 }  // namespace windmi
+
+// ──────────────────────────────────────────────────────────────────
+// C-linkage bridge functions (callable from .c files)
+// ──────────────────────────────────────────────────────────────────
+
+extern "C" void windmi_sleep_ms(unsigned int ms) {
+    windmi::platform::sleep_ms(ms);
+}

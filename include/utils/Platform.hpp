@@ -3,6 +3,7 @@
 #include <csignal>
 #include <functional>
 #include <string>
+#include <time.h>  // for clock_gettime / CLOCK_MONOTONIC
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -12,7 +13,6 @@
 #include <pthread.h>
 #include <sys/file.h>
 #include <unistd.h>
-#include <unistd.h>  // for close()
 #endif
 
 namespace windmi::platform {
@@ -153,9 +153,13 @@ private:
  */
 class ConditionVariable {
 public:
-    /** Constructor - initializes condition variable */
+    /** Constructor - initializes condition variable with CLOCK_MONOTONIC timeout clock */
     ConditionVariable() {
-        pthread_cond_init(&cond_, nullptr);
+        pthread_condattr_t attr;
+        pthread_condattr_init(&attr);
+        pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+        pthread_cond_init(&cond_, &attr);
+        pthread_condattr_destroy(&attr);
     }
 
     /** Destructor - destroys condition variable */
@@ -180,19 +184,6 @@ public:
 
     /** Block until notified or timeout. Returns false on timeout. */
     inline bool wait_for(UniqueLock& lock, unsigned int ms) {
-#ifdef _WIN32
-        // Windows MinGW pthread doesn't have clock_gettime - use system time
-        struct timespec ts;
-        struct timeval tv;
-        gettimeofday(&tv, nullptr);
-        ts.tv_sec = tv.tv_sec;
-        ts.tv_nsec = tv.tv_usec * 1000;
-        ts.tv_nsec += (ms % 1000) * 1000000;
-        ts.tv_sec += ms / 1000 + (ts.tv_nsec >= 1000000000 ? 1 : 0);
-        if (ts.tv_nsec >= 1000000000) {
-            ts.tv_nsec -= 1000000000;
-        }
-#else
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
         ts.tv_nsec += (ms % 1000) * 1000000;
@@ -200,7 +191,6 @@ public:
         if (ts.tv_nsec >= 1000000000) {
             ts.tv_nsec -= 1000000000;
         }
-#endif
         int rc = pthread_cond_timedwait(&cond_, lock.mutex()->native_handle(), &ts);
         return rc == 0;
     }

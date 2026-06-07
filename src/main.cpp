@@ -277,7 +277,7 @@ int main(int argc, char* argv[]) {
     // Poll web server until a signal requests shutdown. The signal handler only
     // flips g_running; all C++ calls happen here outside signal context.
     while (g_running) {
-        g_web_server->poll(100);
+        g_web_server->pollOnce(100);
     }
     g_web_server->stop();
 

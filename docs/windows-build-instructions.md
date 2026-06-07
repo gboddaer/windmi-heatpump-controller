@@ -4,154 +4,76 @@
 
 To build Windmi Controller for Windows, you need:
 
-1. **Windows 10/11**
-2. **Visual Studio 2022** (recommended) or **MinGW-w64** (64-bit) with pthread support
-3. **CMake 3.16+**
-4. **Git**
+1. **CMake 3.16+**
+2. **MinGW-w64 with POSIX threads** (for cross-compilation on Linux or native builds)
+3. **Git**
 
-## Option 1: Visual Studio (Recommended)
+## Cross-Compilation on Linux (Recommended for MinGW)
 
-### Install Visual Studio Build Tools
+The project includes a toolchain file for cross-compiling from Linux to Windows using MinGW-w64 with POSIX threading support.
 
-Download and install from [visualstudio.microsoft.com](https://visualstudio.microsoft.com/):
+### Install Dependencies (Debian/Ubuntu)
 
-- **Visual Studio 2022 Community** (free) or
-- **Build Tools for Visual Studio**
-
-Ensure these workloads are selected:
-- Desktop development with C++
-- CMake tools for Windows development
-
-### Build Steps
-
-```powershell
-# Clone the repository
-git clone https://github.com/your-username/windmi-heatpump-controller.git
-cd windmi-heatpump-controller
-
-# Create build directory
-mkdir build
-cd build
-
-# Configure with Visual Studio generator
-cmake .. -G "Visual Studio 17 2022" -A x64
-
-# Build
-cmake --build . --config Release
-
-# Run tests
-ctest --test-dir build --output-on-failure
-```
-
-## Option 2: MinGW-w64 (Limited Support)
-
-### Install MinGW-w64 with pthreads
-
-Note: The MinGW version 10-win32 lacks full pthread support:
-- `clock_gettime` and `CLOCK_MONOTONIC` may not be available
-- Some POSIX APIs are missing or incomplete
-
-For production builds, **use Visual Studio 2022 instead**. MinGW is only suitable for basic builds with known limitations.
-
-You need a MinGW-w64 with **pthreads-win32** support. Options:
-
-1. **MSYS2** (recommended for MinGW builds):
 ```bash
-pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake
+sudo apt-get install g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix cmake
 ```
 
-2. **Win64 Seh** build from [mingw-w64.org](https://www.mingw-w64.org/)
-
-**Warning:** MinGW builds may require additional patches for `clock_gettime` and other POSIX APIs. The CI/CD uses Visual Studio for Windows builds.
+> **Important:** Use the `-posix` variant (`x86_64-w64-mingw32-g++-posix`). The default `x86_64-w64-mingw32-g++` uses the `win32` threading model which lacks `<thread>`, `<mutex>`, and `<condition_variable>` support.
 
 ### Build Steps
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/windmi-heatpump-controller.git
 cd windmi-heatpump-controller
 
-# Create build directory
-mkdir build
-cd build
+# Clean build
+rm -rf build-win64 && mkdir build-win64 && cd build-win64
 
-# Configure with MinGW generator
-cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+# Configure (uses provided toolchain file)
+cmake .. -G "Unix Makefiles" \
+    -DCMAKE_TOOLCHAIN_FILE=../mingw-w64-x86_64.cmake \
+    -DCMAKE_BUILD_TYPE=Release
 
 # Build
-make
+make -j$(nproc)
 
-# Run tests
-ctest
+# The executable is build-win64/windmi-control.exe
 ```
 
-## Cross-Compilation on Linux (for maintainers)
-
-If you have MinGW installed on Linux with pthread support:
+### Running on Linux (with Wine)
 
 ```bash
-# Install MinGW-w64 with pthreads (Debian/Ubuntu)
-sudo apt-get install g++-mingw-w64-x86-64 gcc-mingw-w64-x86-64
-
-# Use the provided build script
-cd windmi-heatpump-controller
-./build_windows.sh
+wine build-win64/windmi-control.exe --help
 ```
 
-**Note:** MinGW cross-compilation on Linux has the same limitations as native MinGW builds. For production Windows builds, use Visual Studio or GitHub Actions with Windows runners.
+## Threading Model
 
-Or manually with proper toolchain:
+The project uses a platform abstraction layer (`include/utils/Platform.hpp`) that wraps threading primitives:
+- **POSIX/Linux:** `pthread_mutex_t`, `pthread_cond_t`, `pthread_t`
+- **Windows (MinGW):** Same POSIX APIs via MinGW's `winpthreads` library (requires `-posix` toolchain)
 
-```bash
-mkdir -p build-win64
-cd build-win64
+Google's `gtest` also requires POSIX threading (it uses `std::mutex` internally), so the `-posix` toolchain is mandatory.
 
-# Create toolchain file with pthread support
-cat > toolchain.cmake << 'EOF'
-set(CMAKE_SYSTEM_NAME Windows)
-set(CMAKE_SYSTEM_PROCESSOR x86_64)
-set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)
-set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)
-set(CMAKE_FIND_ROOT_PATH /usr/x86_64-w64-mingw32)
-set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-# Ensure pthread is available
-add_compile_definitions(_REENTRANT)
-EOF
+## Windows-Specific Code Paths
 
-cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=toolchain.cmake -DCMAKE_BUILD_TYPE=Release
-make
-```
+The codebase uses these Windows APIs (conditioned on `_WIN32`):
 
-## Known Windows-Specific Code Paths
+- **Signal handling:** `SetConsoleCtrlHandler()` instead of `signal()`
+- **Instance locking:** `CreateMutexA()` instead of `flock()`
+- **PID checking:** `OpenProcess()` + `GetExitCodeProcess()` instead of `/proc/<pid>/stat`
+- **Path resolution:** `GetModuleFileNameA()` + `_fullpath()` instead of `readlink("/proc/self/exe")`
+- **Sleep:** `Sleep(ms)` instead of `usleep()`
+- **Timestamps:** `gmtime_s()` instead of `gmtime_r()`
+- **Sockets:** Winsock2 with `ws2_32` — see `windmi_recv`, `windmi_send`, `windmi_select` macros in `modbus_client.c`
+- **Mongoose:** `#undef poll` after `#include <mongoose.h>` to prevent macro conflict with `WSAPoll`
 
-The codebase uses these Windows APIs:
+## Known Limitations
 
-- **Signal handling**: `SetConsoleCtrlHandler()` instead of `signal()`
-- **Instance locking**: `CreateMutexA()` instead of `flock()`
-- **PID checking**: `OpenProcess()` + `GetExitCodeProcess()` instead of `/proc/<pid>/stat`
-- **Path resolution**: `GetModuleFileNameA()` + `_fullpath()` instead of `readlink("/proc/self/exe")`
-- **Sleep**: `Sleep(ms)` instead of `usleep()`
-- **Mutex/Threading**: Platform abstraction using `CRITICAL_SECTION` (Windows) or `pthread_mutex_t` (MinGW)
-
-## Testing on Windows
-
-Run the test suite:
-
-```powershell
-cd build
-ctest --output-on-failure
-```
-
-Run the executable:
-
-```powershell
-.\Release\windmi-control.exe --help
-```
+1. **`mingw_gettimeofday`:** Used instead of `clock_gettime(CLOCK_MONOTONIC)` for `ConditionVariable::wait_for` timeouts
+2. **`FD_SET` on Windows:** The `nfds` parameter to `select()` is ignored (Windows uses SOCKET-based FD_SET)
+3. **`MSG_DONTWAIT`:** Not available on Windows; defined as `0` for MinGW builds
 
 ## CI/CD
 
-Windows builds are automated via GitHub Actions on push to `feature/windows-support`.
+Windows cross-builds are automated via GitHub Actions on push to `feature/windows-support`.
 
 See `.github/workflows/windows-build.yml` for details.

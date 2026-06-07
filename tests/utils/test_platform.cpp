@@ -65,3 +65,18 @@ TEST(PlatformTest, ResolveStaticDir) {
     result = windmi::platform::resolve_static_dir("/nonexistent/path");
     EXPECT_TRUE(result.empty());
 }
+
+TEST(PlatformThreadingTest, ConditionVariableWaitForTimeoutUsesRequestedDuration) {
+    windmi::Mutex mutex;
+    windmi::ConditionVariable cv;
+    windmi::UniqueLock lock(mutex);
+
+    auto start = std::chrono::steady_clock::now();
+    bool notified = cv.wait_for(lock, 100, []() { return false; });
+    auto end = std::chrono::steady_clock::now();
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    EXPECT_FALSE(notified);
+    EXPECT_GE(elapsed, 90);
+    EXPECT_LE(elapsed, 500);
+}
