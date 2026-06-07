@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <csignal>
 #include <functional>
 #include <string>
