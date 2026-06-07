@@ -20,7 +20,7 @@ Refactor the entire codebase to match `docs/coding-style.md` (inspired by Google
 - **Important:** The power fields remain in `StatusSnapshot` struct **and in the JSON status response**. They are still used internally for COP calculation and may be useful for API consumers. Only the UI display section is removed.
 - `src/web/WebServer.cpp` is **not** changed — the JSON response keeps `acCurrent`, `dcCurrent`, `acVoltage`, `dcVoltage`, `acPowerVA`, `acPowerW`, and `powerValid` fields.
 
-### 2. Include guard standardization (22 headers)
+### 2. Include guard standardization (24 headers)
 
 Headers currently use inconsistent guard styles:
 - `#pragma once` (Platform.hpp)
@@ -33,8 +33,8 @@ Standardize all to the `WINDMI_<PATH>_<FILE>_H_` (for .h) or `WINDMI_<PATH>_<FIL
 
 | File | Guard |
 |------|-------|
-| `include/config.h` | `WINDMI_CONFIG_H_` (already correct) |
-| `include/crc16.h` | `WINDMI_CRC16_H_` (already correct) |
+| `include/config.h` | `WINDMI_CONFIG_H_` |
+| `include/crc16.h` | `WINDMI_CRC16_H_` |
 | `include/modbus_client.h` | `WINDMI_MODBUS_CLIENT_H_` |
 | `include/modbus/modbus_rtu_frame.h` | `WINDMI_MODBUS_RTU_FRAME_H_` |
 | `include/modbus/modbus_serial_client.h` | `WINDMI_MODBUS_SERIAL_CLIENT_H_` |
@@ -98,7 +98,7 @@ Replace `(int)`, `(uint16_t)` etc. with `static_cast<type>`.
 - Include guard changes: purely mechanical, no logic change. Verified by running `ctest`.
 - Web UI changes: remove DOM elements and JS references only. The C++ side and JSON response keep all power data.
 - COP calculation uses `power_valid` and `ac_power_w` — those fields stay in the struct and JSON.
-- `src/selftest.h` and `src/spsc_queue.h` are included from `src/selftest.c` only (internal headers), so their guard changes are low-risk.
+- `src/selftest.h` is included from `src/selftest.c`, and `src/spsc_queue.h` is included from `tests/test_spsc_queue.c`; both are internal headers, so their guard changes are low-risk.
 
 ## Verification
 
