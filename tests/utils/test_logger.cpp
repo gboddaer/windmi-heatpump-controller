@@ -196,9 +196,19 @@ TEST_F(LoggerTest, SetOutputReplacesPrevious) {
 // FileLogOutput
 // ─────────────────────────────────────────────────────────────────────────
 TEST_F(LoggerTest, FileLogOutputWritesToFile) {
-    const char* test_file = "/tmp/windmi_test_logger.log";
+    // Use a platform-appropriate temp directory so the test passes on both
+    // Linux and Windows (where /tmp does not exist).
+    const char* tmp_dir;
+#if defined(_WIN32)
+    tmp_dir = std::getenv("TEMP") ? std::getenv("TEMP")
+                                  : std::getenv("TMP")   ? std::getenv("TMP")
+                                                         : "C:\\tmp";
+#else
+    tmp_dir = std::getenv("TMPDIR") ? std::getenv("TMPDIR") : "/tmp";
+#endif
+    std::string test_file = std::string(tmp_dir) + "/windmi_test_logger.log";
     // Remove if exists
-    std::remove(test_file);
+    std::remove(test_file.c_str());
 
     Logger::instance().addOutput(std::make_unique<FileLogOutput>(test_file));
 
@@ -211,7 +221,7 @@ TEST_F(LoggerTest, FileLogOutputWritesToFile) {
     std::getline(ifs, line);
     EXPECT_NE(line.find("file output test"), std::string::npos);
     ifs.close();
-    std::remove(test_file);
+    std::remove(test_file.c_str());
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -247,7 +257,7 @@ TEST_F(LoggerTest, ConcurrentLoggingDoesNotCrash) {
     std::vector<windmi::Thread> threads;
 
     for (int t = 0; t < num_threads; t++) {
-        threads.emplace_back([t]() {
+        threads.emplace_back([t, messages_per_thread]() {
             for (int i = 0; i < messages_per_thread; i++) {
                 WINDMI_LOG_INFO(LOG_TAG_MAIN, "thread %d msg %d", t, i);
             }

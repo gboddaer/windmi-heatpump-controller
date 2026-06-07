@@ -5,7 +5,6 @@
 #include <csignal>
 #include <functional>
 #include <string>
-#include <pthread.h>
 
 namespace windmi::platform {
 
@@ -83,6 +82,10 @@ namespace windmi {
 
 /**
  * @brief Platform-agnostic mutex wrapper
+ *
+ * Uses PIMPL to hide platform-specific native mutex types from public headers.
+ * On POSIX/MinGW: wraps pthread_mutex_t.
+ * On native Windows (MSVC): wraps CRITICAL_SECTION.
  */
 class Mutex {
 public:
@@ -93,13 +96,12 @@ public:
     Mutex(const Mutex&) = delete;
     Mutex& operator=(const Mutex&) = delete;
 
-    // Friend for ConditionVariable access to underlying mutex
+    // Friend for ConditionVariable access to underlying mutex impl
     friend class ConditionVariable;
 
 private:
-    pthread_mutex_t* native_handle() { return &mutex_; }
-
-    pthread_mutex_t mutex_;
+    struct Impl;
+    Impl* impl_;
 };
 
 /**
@@ -123,7 +125,9 @@ private:
 /**
  * @brief Platform-agnostic thread wrapper
  *
- * Wraps pthread_t (POSIX) or HANDLE/_beginthreadex (Windows).
+ * Uses PIMPL to hide platform-specific native thread types from public headers.
+ * On POSIX/MinGW: wraps pthread_create.
+ * On native Windows (MSVC): wraps _beginthreadex.
  * Takes std::function<void()> to avoid template bloat in .cpp file.
  */
 class Thread {
@@ -147,9 +151,8 @@ public:
 private:
     static void* thread_entry(void* arg);
 
-    pthread_t thread_{};
-    bool joined_ = false;
-    bool detached_ = false;
+    struct Impl;
+    Impl* impl_;
 };
 
 /**
@@ -179,12 +182,14 @@ private:
 /**
  * @brief Platform-agnostic condition variable wrapper
  *
- * Wraps pthread_cond_t (POSIX) or CONDITION_VARIABLE (Windows).
+ * Uses PIMPL to hide platform-specific native condition variable types from public headers.
+ * On POSIX/MinGW: wraps pthread_cond_t with CLOCK_MONOTONIC.
+ * On native Windows (MSVC): wraps CONDITION_VARIABLE.
  * wait_for() takes milliseconds (not std::chrono) to avoid <chrono> issues on MinGW.
  */
 class ConditionVariable {
 public:
-    /** Constructor - initializes condition variable with CLOCK_MONOTONIC timeout clock */
+    /** Constructor - initializes condition variable */
     ConditionVariable();
 
     /** Destructor - destroys condition variable */
@@ -221,7 +226,8 @@ public:
     ConditionVariable& operator=(const ConditionVariable&) = delete;
 
 private:
-    pthread_cond_t cond_;
+    struct Impl;
+    Impl* impl_;
 };
 
 }  // namespace windmi
