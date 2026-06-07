@@ -152,6 +152,9 @@ private:
     std::vector<std::unique_ptr<ILogOutput>> outputs_;
 };
 
+// Alias for compatibility
+using StdoutLogOutput = ConsoleLogOutput;
+
 } // namespace windmi
 
 // ─────────────────────────────────────────────────────────────────────
