@@ -104,6 +104,9 @@ if(WINDMI_BUILD_TESTS)
     add_test(NAME test_modbus_client COMMAND test_modbus_client)
     add_test(NAME test_modbus_rtu_frame COMMAND test_modbus_rtu_frame)
     add_test(NAME test_modbus_serial_client COMMAND test_modbus_serial_client)
+    add_test(NAME test_core COMMAND test_core)
+    add_test(NAME test_web COMMAND test_web)
+    add_test(NAME test_utils COMMAND test_utils)
 endif()
 
 # Documentation
