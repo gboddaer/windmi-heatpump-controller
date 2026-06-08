@@ -25,14 +25,35 @@ using windmi::ConsoleLogOutput;
 using windmi::FileLogOutput;
 
 // ─────────────────────────────────────────────────────────────────────────
-// Test output that captures entries in memory
+// Test output that captures entries in memory.
+// LogEntry stores raw const char* pointers to stack-local buffers in the
+// WINDMI_LOG macro, so we must deep-copy the string fields before the
+// caller's stack frame is destroyed.
 // ─────────────────────────────────────────────────────────────────────────
+struct OwnedLogEntry {
+    LogLevel level;
+    std::string tag;
+    std::string message;
+    std::string file;
+    int line;
+    std::string function;
+    std::chrono::system_clock::time_point timestamp;
+};
+
 class TestLogOutput : public ILogOutput {
 public:
-    std::vector<LogEntry> entries;
+    std::vector<OwnedLogEntry> entries;
 
     void write(const LogEntry& entry) override {
-        entries.push_back(entry);
+        OwnedLogEntry owned;
+        owned.level = entry.level;
+        owned.tag = entry.tag ? entry.tag : "";
+        owned.message = entry.message ? entry.message : "";
+        owned.file = entry.file ? entry.file : "";
+        owned.line = entry.line;
+        owned.function = entry.function ? entry.function : "";
+        owned.timestamp = entry.timestamp;
+        entries.push_back(std::move(owned));
     }
 
     void clear() { entries.clear(); }
@@ -160,7 +181,7 @@ TEST_F(LoggerTest, CBridgeLogsFormattedMessage) {
     ASSERT_EQ(test_output_->entries.size(), 1u);
     EXPECT_EQ(test_output_->entries[0].level, LogLevel::Info);
     EXPECT_EQ(test_output_->entries[0].tag, std::string(LOG_TAG_MODBUS));
-    EXPECT_STREQ(test_output_->entries[0].message, "C bridge value 17");
+    EXPECT_EQ(test_output_->entries[0].message, "C bridge value 17");
     EXPECT_EQ(test_output_->entries[0].file, std::string("test.c"));
     EXPECT_EQ(test_output_->entries[0].line, 123);
 }
