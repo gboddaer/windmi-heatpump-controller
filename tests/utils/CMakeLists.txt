@@ -20,3 +20,15 @@ add_executable(test_web_server_api
 )
 target_link_libraries(test_web_server_api PRIVATE windmi_core windmi_modbus windmi_utils GTest::gtest_main)
 target_include_directories(test_web_server_api PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+
+add_executable(test_platform_mutex
+    test_platform_mutex.cpp
+)
+target_link_libraries(test_platform_mutex PRIVATE windmi_utils GTest::gtest_main)
+target_include_directories(test_platform_mutex PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+
+add_executable(test_web_server_concurrent
+    ../web/test_web_server_concurrent.cpp
+)
+target_link_libraries(test_web_server_concurrent PRIVATE windmi_core windmi_modbus windmi_utils GTest::gtest_main)
+target_include_directories(test_web_server_concurrent PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)

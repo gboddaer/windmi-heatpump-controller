@@ -16,3 +16,9 @@ add_executable(test_main_args
 )
 target_link_libraries(test_main_args PRIVATE windmi_utils GTest::gtest_main)
 target_include_directories(test_main_args PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+
+add_executable(test_main_signal
+    test_main_signal.cpp
+)
+target_link_libraries(test_main_signal PRIVATE windmi_utils GTest::gtest_main)
+target_include_directories(test_main_signal PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
