@@ -108,6 +108,8 @@ if(WINDMI_BUILD_TESTS)
     add_test(NAME test_core COMMAND test_core)
     add_test(NAME test_main_args COMMAND test_main_args)
     add_test(NAME test_web COMMAND test_web)
+    add_test(NAME test_web_server_static COMMAND test_web_server_static)
+    add_test(NAME test_web_server_api COMMAND test_web_server_api)
     add_test(NAME test_utils COMMAND test_utils)
 endif()
 
