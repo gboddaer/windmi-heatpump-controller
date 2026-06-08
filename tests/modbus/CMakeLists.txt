@@ -4,6 +4,13 @@ add_executable(test_modbus_client
 target_link_libraries(test_modbus_client PRIVATE windmi_modbus windmi_utils GTest::gtest_main)
 target_include_directories(test_modbus_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
+add_executable(test_modbus_client_c
+    test_modbus_client_c.cpp
+)
+target_link_libraries(test_modbus_client_c PRIVATE windmi_modbus windmi_utils GTest::gtest_main)
+target_include_directories(test_modbus_client_c PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+target_compile_definitions(test_modbus_client_c PRIVATE TEST_BUILD)
+
 add_executable(test_modbus_rtu_frame
     test_modbus_rtu_frame.cpp
 )
