@@ -81,20 +81,10 @@ TEST(SignalHandlerTest, NullFlagDoesNotCrash) {
 TEST(SignalHandlerTest, HandlerCallbackSetsFlagToZero) {
     volatile sig_atomic_t running = 1;
     platform::install_signal_handlers(&running);
-
-#ifdef _WIN32
-    // On Windows, invoke the console control handler directly
-    auto* handler = [](DWORD) -> int {
-        // We can't easily test this without a real console event
-        // Just verify the flag was set to 1 by install
-        return 0;
-    };
+    // We can't easily trigger a real signal in a unit test,
+    // but we verify the handler was installed and the flag
+    // is not set to 0 by the call.
     EXPECT_EQ(running, 1);
-#else
-    // On POSIX, we can send SIGPIPE which is ignored, and verify
-    // the signal handler is installed by checking the flag is 1
-    EXPECT_EQ(running, 1);
-#endif
 }
 
 // ─── Instance Lock Tests ───
