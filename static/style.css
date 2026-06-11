@@ -207,14 +207,24 @@ main {
     margin-bottom: 12px;
 }
 
-.slider-container {
+/* Temperature controls in a single row */
+.temp-controls-row {
     display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 12px;
+    gap: 24px;
+    margin-bottom: 24px;
 }
 
-.slider-container input[type="range"] {
+.temp-control-col {
+    flex: 1;
+}
+
+.temp-control-inline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.temp-control-inline input[type="range"] {
     flex: 1;
     height: 8px;
     border-radius: 4px;
@@ -225,25 +235,25 @@ main {
     appearance: none;
 }
 
-.slider-container input[type="range"]::-webkit-slider-thumb {
+.temp-control-inline input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
     background: #3b82f6;
     cursor: pointer;
     box-shadow: 0 2px 6px rgba(59, 130, 246, 0.5);
 }
 
-.slider-container input[type="range"]::-moz-range-track {
+.temp-control-inline input[type="range"]::-moz-range-track {
     height: 8px;
     border-radius: 4px;
     background: rgba(255, 255, 255, 0.1);
 }
 
-.slider-container input[type="range"]::-moz-range-thumb {
-    width: 24px;
-    height: 24px;
+.temp-control-inline input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
     background: #3b82f6;
     cursor: pointer;
@@ -251,20 +261,26 @@ main {
     box-shadow: 0 2px 6px rgba(59, 130, 246, 0.5);
 }
 
-.slider-container input[type="number"] {
-    width: 80px;
-    padding: 10px;
+.temp-control-inline input[type="number"] {
+    width: 60px;
+    padding: 6px 4px;
     border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 8px;
+    border-radius: 6px;
     background: rgba(255, 255, 255, 0.05);
     color: #fff;
-    font-size: 1rem;
+    font-size: 0.9rem;
     text-align: center;
 }
 
-.slider-container input[type="number"]:focus {
+.temp-control-inline input[type="number"]:focus {
     outline: none;
     border-color: #3b82f6;
+}
+
+.btn-small {
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    white-space: nowrap;
 }
 
 .btn {
@@ -406,6 +422,24 @@ footer {
     .mode-btn {
         min-width: 45%;
         font-size: 0.7rem;
+    }
+
+    .temp-controls-row {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .temp-control-inline {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .temp-control-inline input[type="number"] {
+        width: 100%;
+    }
+
+    .btn-small {
+        width: 100%;
     }
 }
 

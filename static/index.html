@@ -63,22 +63,23 @@
             <section class="controls-card">
                 <h2>Controls</h2>
                 
-                <div class="control-group">
-                    <label for="dhwSlider">DHW Temperature (°C)</label>
-                    <div class="slider-container">
-                        <input type="range" id="dhwSlider" min="40" max="63" step="0.5" value="50">
-                        <input type="number" id="dhwInput" min="40" max="63" step="0.5" value="50">
+                <div class="control-group temp-controls-row">
+                    <div class="temp-control-col">
+                        <label for="dhwSlider">DHW (°C)</label>
+                        <div class="temp-control-inline">
+                            <input type="range" id="dhwSlider" min="40" max="63" step="0.5" value="50">
+                            <input type="number" id="dhwInput" min="40" max="63" step="0.5" value="50">
+                            <button id="setDhwBtn" class="btn btn-small">Set</button>
+                        </div>
                     </div>
-                    <button id="setDhwBtn" class="btn">Set DHW</button>
-                </div>
-
-                <div class="control-group">
-                    <label for="heatingSlider">Heating Temperature (°C)</label>
-                    <div class="slider-container">
-                        <input type="range" id="heatingSlider" min="25" max="63" step="0.5" value="40">
-                        <input type="number" id="heatingInput" min="25" max="63" step="0.5" value="40">
+                    <div class="temp-control-col">
+                        <label for="heatingSlider">Heating (°C)</label>
+                        <div class="temp-control-inline">
+                            <input type="range" id="heatingSlider" min="25" max="63" step="0.5" value="40">
+                            <input type="number" id="heatingInput" min="25" max="63" step="0.5" value="40">
+                            <button id="setHeatingBtn" class="btn btn-small">Set</button>
+                        </div>
                     </div>
-                    <button id="setHeatingBtn" class="btn">Set Heating</button>
                 </div>
 
                 <div class="control-group mode-group">
