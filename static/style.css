@@ -101,6 +101,58 @@ main {
     gap: 20px;
 }
 
+/* Tab bar */
+.tab-bar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 10px 16px;
+    border: none;
+    border-bottom: 3px solid transparent;
+    border-radius: 8px 8px 0 0;
+    background: transparent;
+    color: #9ca3af;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tab-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn.active {
+    color: #fff;
+    border-bottom-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.1);
+}
+
+/* Tab panels */
+.tab-panel {
+    display: none;
+}
+
+.tab-panel.active {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.placeholder-text {
+    color: #6b7280;
+    font-style: italic;
+    text-align: center;
+    padding: 30px 0;
+    font-size: 1rem;
+}
+
 .status-card, .temps-card, .controls-card {
     background: rgba(255, 255, 255, 0.05);
     border-radius: 16px;
@@ -390,6 +442,11 @@ footer {
 
     .status-card, .temps-card, .controls-card {
         padding: 18px;
+    }
+
+    .tab-btn {
+        padding: 8px 10px;
+        font-size: 0.85rem;
     }
 
     .temp-grid {

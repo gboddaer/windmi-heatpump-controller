@@ -16,92 +16,111 @@
             </div>
         </header>
 
+        <nav class="tab-bar">
+            <button class="tab-btn active" data-tab="overview">Overview</button>
+            <button class="tab-btn" data-tab="schedule">Schedule</button>
+            <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
+        </nav>
+
         <main>
-            <section class="status-card">
-                <h2>Current Status</h2>
-                <div class="status-row status-row-main">
-                    <div class="status-item"><span class="label">Mode</span> <span id="modeValue" class="value">-</span></div>
-                    <div class="status-item"><span class="label">Status</span> <span id="runStatus" class="value">-</span></div>
-                    <div class="status-item"><span class="label">Priority</span> <span id="priorityValue" class="value">-</span></div>
-                    <div class="status-item"><span class="label">Outdoor</span> <span id="outdoorTempValue" class="value">-</span></div>
-                </div>
-            </section>
+            <!-- Tab 1: Overview -->
+            <div class="tab-panel active" id="tab-overview">
+                <section class="status-card">
+                    <h2>Current Status</h2>
+                    <div class="status-row status-row-main">
+                        <div class="status-item"><span class="label">Mode</span> <span id="modeValue" class="value">-</span></div>
+                        <div class="status-item"><span class="label">Status</span> <span id="runStatus" class="value">-</span></div>
+                        <div class="status-item"><span class="label">Priority</span> <span id="priorityValue" class="value">-</span></div>
+                        <div class="status-item"><span class="label">Outdoor</span> <span id="outdoorTempValue" class="value">-</span></div>
+                    </div>
+                </section>
 
-            <section class="temps-card">
-                <h2>Temperatures</h2>
-                <div class="temp-grid">
-                    <div class="temp-item">
-                        <span class="label">DHW Tank</span>
-                        <span id="dhwTempValue" class="value">-</span>
-                    </div>
-                    <div class="temp-item">
-                        <span class="label">Heating (LWT)</span>
-                        <span id="heatingTempValue" class="value">-</span>
-                    </div>
-
-                </div>
-            </section>
-
-            <section class="status-card">
-                <h2>Diagnostics</h2>
-                <div class="temp-grid">
-                    <div class="temp-item">
-                        <span class="label">DHW Valve</span>
-                        <span id="dhwValveValue" class="value">-</span>
-                    </div>
-                    <div class="temp-item">
-                        <span class="label">DHW Mode</span>
-                        <span id="dhwModeValue" class="value">-</span>
-                    </div>
-                    <div class="temp-item">
-                        <span class="label">Capacity Output</span>
-                        <span id="actualCapacityValue" class="value">-</span>
-                    </div>
-                </div>
-            </section>
-
-            <section class="controls-card">
-                <h2>Controls</h2>
-                
-                <div class="control-group temp-controls-row">
-                    <div class="temp-control-col">
-                        <label for="dhwSlider">DHW (°C)</label>
-                        <div class="temp-control-inline">
-                            <input type="range" id="dhwSlider" min="40" max="63" step="0.5" value="50">
-                            <input type="number" id="dhwInput" min="40" max="63" step="0.5" value="50">
-                            <button id="setDhwBtn" class="btn btn-small">Set</button>
+                <section class="temps-card">
+                    <h2>Temperatures</h2>
+                    <div class="temp-grid">
+                        <div class="temp-item">
+                            <span class="label">DHW Tank</span>
+                            <span id="dhwTempValue" class="value">-</span>
+                        </div>
+                        <div class="temp-item">
+                            <span class="label">Heating (LWT)</span>
+                            <span id="heatingTempValue" class="value">-</span>
                         </div>
                     </div>
-                    <div class="temp-control-col">
-                        <label for="heatingSlider">Heating (°C)</label>
-                        <div class="temp-control-inline">
-                            <input type="range" id="heatingSlider" min="25" max="63" step="0.5" value="40">
-                            <input type="number" id="heatingInput" min="25" max="63" step="0.5" value="40">
-                            <button id="setHeatingBtn" class="btn btn-small">Set</button>
+                </section>
+
+                <section class="controls-card">
+                    <h2>Controls</h2>
+
+                    <div class="control-group temp-controls-row">
+                        <div class="temp-control-col">
+                            <label for="dhwSlider">DHW (°C)</label>
+                            <div class="temp-control-inline">
+                                <input type="range" id="dhwSlider" min="40" max="63" step="0.5" value="50">
+                                <input type="number" id="dhwInput" min="40" max="63" step="0.5" value="50">
+                                <button id="setDhwBtn" class="btn btn-small">Set</button>
+                            </div>
+                        </div>
+                        <div class="temp-control-col">
+                            <label for="heatingSlider">Heating (°C)</label>
+                            <div class="temp-control-inline">
+                                <input type="range" id="heatingSlider" min="25" max="63" step="0.5" value="40">
+                                <input type="number" id="heatingInput" min="25" max="63" step="0.5" value="40">
+                                <button id="setHeatingBtn" class="btn btn-small">Set</button>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="control-group mode-group">
-                    <label>Working Mode</label>
-                    <div class="mode-selector">
-                        <button id="mode0Btn" class="mode-btn mode-off">OFF</button>
-                        <button id="mode1Btn" class="mode-btn">DHW Only</button>
-                        <button id="mode2Btn" class="mode-btn">Heating Only</button>
-                        <button id="mode3Btn" class="mode-btn mode-active">Heating + DHW Priority</button>
-                        <button id="mode4Btn" class="mode-btn mode-active">Heating Priority + DHW</button>
+                    <div class="control-group mode-group">
+                        <label>Working Mode</label>
+                        <div class="mode-selector">
+                            <button id="mode0Btn" class="mode-btn mode-off">OFF</button>
+                            <button id="mode1Btn" class="mode-btn">DHW Only</button>
+                            <button id="mode2Btn" class="mode-btn">Heating Only</button>
+                            <button id="mode3Btn" class="mode-btn mode-active">Heating + DHW Priority</button>
+                            <button id="mode4Btn" class="mode-btn mode-active">Heating Priority + DHW</button>
+                        </div>
                     </div>
-                </div>
 
-                <div class="control-group occupancy-group">
-                    <label>Occupancy Mode</label>
-                    <div class="occupancy-selector">
-                        <button id="occupancyAwayBtn" class="occupancy-btn">Away</button>
-                        <button id="occupancySleepBtn" class="occupancy-btn">Sleep</button>
-                        <button id="occupancyHomeBtn" class="occupancy-btn active">Home</button>
+                    <div class="control-group occupancy-group">
+                        <label>Occupancy Mode</label>
+                        <div class="occupancy-selector">
+                            <button id="occupancyAwayBtn" class="occupancy-btn">Away</button>
+                            <button id="occupancySleepBtn" class="occupancy-btn">Sleep</button>
+                            <button id="occupancyHomeBtn" class="occupancy-btn active">Home</button>
+                        </div>
                     </div>
-                </div>
-            </section>
+                </section>
+            </div>
+
+            <!-- Tab 2: Schedule (placeholder) -->
+            <div class="tab-panel" id="tab-schedule">
+                <section class="status-card">
+                    <h2>Schedule</h2>
+                    <p class="placeholder-text">Heating and DHW scheduling coming soon.</p>
+                </section>
+            </div>
+
+            <!-- Tab 3: Diagnostics -->
+            <div class="tab-panel" id="tab-diagnostics">
+                <section class="status-card">
+                    <h2>Diagnostics</h2>
+                    <div class="temp-grid">
+                        <div class="temp-item">
+                            <span class="label">DHW Valve</span>
+                            <span id="dhwValveValue" class="value">-</span>
+                        </div>
+                        <div class="temp-item">
+                            <span class="label">DHW Mode</span>
+                            <span id="dhwModeValue" class="value">-</span>
+                        </div>
+                        <div class="temp-item">
+                            <span class="label">Capacity Output</span>
+                            <span id="actualCapacityValue" class="value">-</span>
+                        </div>
+                    </div>
+                </section>
+            </div>
         </main>
 
         <footer>
