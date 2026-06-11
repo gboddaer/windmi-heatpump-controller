@@ -277,13 +277,6 @@ main {
     border-color: #3b82f6;
 }
 
-.btn-small {
-    padding: 6px 8px;
-    font-size: 0.75rem;
-    white-space: nowrap;
-    min-width: 32px;
-}
-
 .btn {
     width: 100%;
     padding: 12px;
@@ -295,6 +288,14 @@ main {
     font-weight: 600;
     cursor: pointer;
     transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.btn-small {
+    width: auto;
+    padding: 6px 8px;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    min-width: 32px;
 }
 
 .btn:hover {
