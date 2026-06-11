@@ -3,6 +3,7 @@ const API_STATUS_URL = '/api/status';
 const API_SET_DHW_URL = '/api/set-dhw';
 const API_SET_HEATING_URL = '/api/set-heating';
 const API_SET_PRIORITY_URL = '/api/set-priority';
+const API_SET_OCCUPANCY_URL = '/api/set-occupancy';
 const REFRESH_INTERVAL = 5000; // 5 seconds
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
@@ -15,6 +16,7 @@ let pendingMode = null;  // Prevents status poll from reverting mode before comm
 // Working mode: 'off', 'dhw', 'heat', 'both'
 let currentMode = 'both';
 let currentPriority = 'dhw'; // 'dhw' or 'heating'
+let currentOccupancy = 'home'; // 'away', 'sleep', 'home'
 
 // DOM Elements
 const elements = {
@@ -40,7 +42,11 @@ const elements = {
     dhwPriorityBtn: document.getElementById('dhwPriorityBtn'),
     heatingPriorityBtn: document.getElementById('heatingPriorityBtn'),
     refreshCountdown: document.getElementById('refreshCountdown'),
-    acPowerValue: document.getElementById('acPowerValue')
+    acPowerValue: document.getElementById('acPowerValue'),
+    occupancyAwayBtn: document.getElementById('occupancyAwayBtn'),
+    occupancySleepBtn: document.getElementById('occupancySleepBtn'),
+    occupancyHomeBtn: document.getElementById('occupancyHomeBtn'),
+    dhwModeValue: document.getElementById('dhwModeValue')
 };
 
 // State
@@ -195,6 +201,25 @@ function setPriority(priority) {
         .catch(error => showNotification('Failed to set priority: ' + error.message, 'error'));
 }
 
+// Occupancy mode buttons
+function setOccupancyMode(mode) {
+    if (mode === currentOccupancy) return;
+
+    currentOccupancy = mode;
+    elements.occupancyAwayBtn.classList.toggle('active', mode === 'away');
+    elements.occupancySleepBtn.classList.toggle('active', mode === 'sleep');
+    elements.occupancyHomeBtn.classList.toggle('active', mode === 'home');
+
+    const modeMap = { 'away': 0, 'sleep': 1, 'home': 2 };
+    apiPost(API_SET_OCCUPANCY_URL, { mode: modeMap[mode] })
+        .then(() => showNotification('Occupancy set to ' + mode, 'success'))
+        .catch(error => showNotification('Failed to set occupancy: ' + error.message, 'error'));
+}
+
+elements.occupancyAwayBtn.addEventListener('click', () => setOccupancyMode('away'));
+elements.occupancySleepBtn.addEventListener('click', () => setOccupancyMode('sleep'));
+elements.occupancyHomeBtn.addEventListener('click', () => setOccupancyMode('home'));
+
 // API functions
 async function apiGet(url, retries = 0) {
     try {
@@ -334,9 +359,28 @@ function updateUI(status) {
         const valveEl = document.getElementById('dhwValveValue');
         if (valveEl) valveEl.textContent = status.dhwValveStatus === 0 ? 'Opened' : (status.dhwValveStatus === 1 ? 'Closed' : 'Unknown');
     }
+    if (status.dhwModeStatus !== undefined) {
+        const dhwModeEl = document.getElementById('dhwModeValue');
+        if (dhwModeEl) {
+            const dhwModes = { 0: 'Eco', 1: 'Anti-Legionella', 2: 'Regular' };
+            dhwModeEl.textContent = dhwModes[status.dhwModeStatus] || 'Unknown';
+        }
+    }
     if (status.actualCapacityOutput !== undefined) {
         const capEl = document.getElementById('actualCapacityValue');
         if (capEl) capEl.textContent = status.actualCapacityOutput;
+    }
+
+    // Occupancy mode from server (0=Away, 1=Sleep, 2=Home)
+    if (status.occupancyMode !== undefined) {
+        const occupancyMap = ['away', 'sleep', 'home'];
+        const serverOccupancy = occupancyMap[status.occupancyMode] || 'home';
+        if (serverOccupancy !== currentOccupancy) {
+            currentOccupancy = serverOccupancy;
+        }
+        elements.occupancyAwayBtn.classList.toggle('active', currentOccupancy === 'away');
+        elements.occupancySleepBtn.classList.toggle('active', currentOccupancy === 'sleep');
+        elements.occupancyHomeBtn.classList.toggle('active', currentOccupancy === 'home');
     }
 
     // Last update

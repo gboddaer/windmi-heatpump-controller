@@ -159,7 +159,7 @@ main {
 
 .temp-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 16px;
 }
 
@@ -428,4 +428,34 @@ footer {
 /* Power values — amber color */
 .power-value {
     color: #fbbf24 !important;
+}
+
+/* Occupancy mode selector */
+.occupancy-group .occupancy-selector {
+    display: flex;
+    gap: 10px;
+}
+
+.occupancy-btn {
+    flex: 1;
+    padding: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    background: transparent;
+    color: #9ca3af;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.occupancy-btn:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+    color: #fff;
+}
+
+.occupancy-btn.active {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.2);
+    color: #fff;
 }

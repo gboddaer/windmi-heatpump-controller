@@ -50,6 +50,10 @@
                         <span id="dhwValveValue" class="value">-</span>
                     </div>
                     <div class="temp-item">
+                        <span class="label">DHW Mode</span>
+                        <span id="dhwModeValue" class="value">-</span>
+                    </div>
+                    <div class="temp-item">
                         <span class="label">Capacity Output</span>
                         <span id="actualCapacityValue" class="value">-</span>
                     </div>
@@ -92,6 +96,15 @@
                     <div class="toggle-container">
                         <button id="dhwPriorityBtn" class="toggle-btn active">DHW</button>
                         <button id="heatingPriorityBtn" class="toggle-btn">Heating</button>
+                    </div>
+                </div>
+
+                <div class="control-group occupancy-group">
+                    <label>Occupancy Mode</label>
+                    <div class="occupancy-selector">
+                        <button id="occupancyAwayBtn" class="occupancy-btn">Away</button>
+                        <button id="occupancySleepBtn" class="occupancy-btn">Sleep</button>
+                        <button id="occupancyHomeBtn" class="occupancy-btn active">Home</button>
                     </div>
                 </div>
             </section>

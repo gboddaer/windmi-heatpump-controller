@@ -89,9 +89,27 @@ static const RegisterDef registers[] = {
 };
 static const int NUM_REGISTERS = sizeof(registers) / sizeof(registers[0]);
 
+static int flush_recv(int sockfd) {
+    uint8_t dummy[128];
+    fd_set fds;
+    struct timeval tv = {0, 0};
+    int flushed = 0;
+    FD_ZERO(&fds);
+    FD_SET(sockfd, &fds);
+    while (select(sockfd + 1, &fds, NULL, NULL, &tv) > 0) {
+        int n = (int)recv(sockfd, dummy, sizeof(dummy), MSG_DONTWAIT);
+        if (n <= 0) break;
+        flushed += n;
+    }
+    return flushed;
+}
+
 static int probe_register(int sockfd, uint8_t slave, const RegisterDef *reg) {
     uint8_t frame[8];
     build_read_frame(frame, slave, reg->address);
+
+    // Flush stale data before sending (Waveshare gateway may leave bytes in buffer)
+    flush_recv(sockfd);
 
     if (write(sockfd, frame, 8) != 8) return -2;
 
