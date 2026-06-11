@@ -278,9 +278,10 @@ main {
 }
 
 .btn-small {
-    padding: 6px 14px;
-    font-size: 0.85rem;
+    padding: 6px 8px;
+    font-size: 0.75rem;
     white-space: nowrap;
+    min-width: 32px;
 }
 
 .btn {
