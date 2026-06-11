@@ -9,6 +9,8 @@
 #include <io.h>
 #else
 #include <termios.h>
+#include <pwd.h>
+#include <unistd.h>
 #endif
 
 // Platform thread detection: native Windows (MSVC) vs POSIX/MinGW
@@ -225,6 +227,21 @@ bool is_pid_alive(int pid) {
 }
 
 // ── Static dir ─────────────────────────────────────────────────────
+
+std::string get_home_dir() {
+#ifdef _WIN32
+    const char* home = getenv("USERPROFILE");
+    if (home) return std::string(home);
+    return "";
+#else
+    const char* home = getenv("HOME");
+    if (home) return std::string(home);
+    // Fallback: query /etc/passwd
+    struct passwd* pw = getpwuid(getuid());
+    if (pw && pw->pw_dir) return std::string(pw->pw_dir);
+    return "";
+#endif
+}
 
 std::string resolve_static_dir(const std::string& dir) {
 #ifdef _WIN32

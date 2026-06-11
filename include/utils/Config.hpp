@@ -36,8 +36,16 @@ public:
     /**
      * @brief Load configuration from file
      * @param filename Path to config file
+     * @return true if file was loaded, false if file does not exist
      */
-    void loadFromFile(const std::string& filename);
+    bool loadFromFile(const std::string& filename);
+
+    /**
+     * @brief Save configuration to file
+     * @param filename Path to config file
+     * @return true if successful, false otherwise
+     */
+    bool saveToFile(const std::string& filename);
 
     /**
      * @brief Get string value

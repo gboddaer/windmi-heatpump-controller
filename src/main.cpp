@@ -17,6 +17,7 @@
 #include "modbus/ModbusClient.hpp"
 #include "modbus/ModbusSerialClient.hpp"
 #include "modbus/SimulatedModbusClient.hpp"
+#include "utils/Config.hpp"
 #include "utils/Logger.hpp"
 #include "utils/LogTags.hpp"
 #include "utils/Platform.hpp"
@@ -81,6 +82,7 @@ int main(int argc, char* argv[]) {
     bool run_selftest = false;
     bool demo_mode = false;
     bool force_lock = false;
+    std::string config_path;
     bool ip_specified = false;
     bool port_specified = false;
     bool serial_specified = false;
@@ -103,6 +105,7 @@ int main(int argc, char* argv[]) {
             printf("      --parity <N|E|O>    Parity: N(none), E(even), O(odd)\n");
             printf("      --stop-bits <1|2>   Stop bits: 1 or 2\n");
             printf("      --rs485             Enable RS-485 direction control\n");
+            printf("      --config <path>     Settings file path (default: ~/.windmi/settings.ini)\n");
             return 0;
         } else if ((strcmp(argv[i], "--ip") == 0 || strcmp(argv[i], "-i") == 0) && i + 1 < argc) {
             modbus_ip = argv[++i];
@@ -152,6 +155,8 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--rs485") == 0) {
             rs485_enabled = true;
             serial_config_specified = true;
+        } else if ((strcmp(argv[i], "--config") == 0) && i + 1 < argc) {
+            config_path = argv[++i];
         } else {
             WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Unknown option: %s", argv[i]);
             WINDMI_LOG_INFO(LOG_TAG_MAIN, "Use --help for usage information");
@@ -246,10 +251,37 @@ int main(int argc, char* argv[]) {
     WINDMI_LOG_INFO(LOG_TAG_MAIN, "Web server port: %d", web_port);
     WINDMI_LOG_INFO(LOG_TAG_MAIN, "Static files: %s", resolved_static_dir.c_str());
 
+    // Load persistent settings
+    windmi::Config config;
+    if (config_path.empty()) {
+        std::string home = windmi::platform::get_home_dir();
+        config_path = home + "/.windmi/settings.ini";
+    }
+    if (config.loadFromFile(config_path)) {
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "Loaded settings from %s", config_path.c_str());
+    } else {
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "No settings file at %s, using defaults", config_path.c_str());
+    }
+    int init_working_mode = config.getInt("ui.working_mode", 3);
+    std::string init_priority = config.getString("ui.priority", "dhw");
+    float init_dhw_target = static_cast<float>(config.getDouble("ui.dhw_target", 45.0));
+    float init_heating_target = static_cast<float>(config.getDouble("ui.heating_target", 40.0));
+
     windmi::CmdQueue cmd_queue;
     windmi::StatusQueue status_queue;
 
     g_control_loop = new windmi::ControlLoop();
+    g_control_loop->setInitialSettings(init_working_mode, init_priority,
+                                       init_dhw_target, init_heating_target);
+    g_control_loop->setSettingsCallback([&config, config_path](
+        int working_mode, const std::string& priority,
+        float dhw_target, float heating_target) {
+            config.set("ui.working_mode", std::to_string(working_mode));
+            config.set("ui.priority", priority);
+            config.set("ui.dhw_target", std::to_string(dhw_target));
+            config.set("ui.heating_target", std::to_string(heating_target));
+            config.saveToFile(config_path);
+        });
     if (!g_control_loop->start(modbus_client.get(), &cmd_queue, &status_queue)) {
         WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to start control loop");
         delete g_control_loop;

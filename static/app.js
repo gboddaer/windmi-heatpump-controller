@@ -31,8 +31,6 @@ const elements = {
     outdoorTempValue: document.getElementById('outdoorTempValue'),
     dhwTempValue: document.getElementById('dhwTempValue'),
     heatingTempValue: document.getElementById('heatingTempValue'),
-    dhwTargetValue: document.getElementById('dhwTargetValue'),
-    heatingTargetValue: document.getElementById('heatingTargetValue'),
     dhwSlider: document.getElementById('dhwSlider'),
     dhwInput: document.getElementById('dhwInput'),
     heatingSlider: document.getElementById('heatingSlider'),
@@ -330,8 +328,6 @@ function updateUI(status) {
     const dhwTargetDisplay = pendingDhwTarget !== null ? pendingDhwTarget : status.dhwTarget;
     const heatingTargetDisplay = pendingHeatingTarget !== null ? pendingHeatingTarget : status.heatingTarget;
 
-    elements.dhwTargetValue.textContent = dhwTargetDisplay + '°C';
-    elements.heatingTargetValue.textContent = heatingTargetDisplay + '°C';
 
     // Diagnostic values
     if (status.dhwValveStatus !== undefined) {

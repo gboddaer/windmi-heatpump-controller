@@ -121,6 +121,31 @@ ControlLoop::ControlLoop()
 {
 }
 
+void ControlLoop::setInitialSettings(int working_mode, const std::string& priority,
+                                     float dhw_target, float heating_target) {
+    desired_working_mode_ = working_mode;
+    current_priority_ = (priority == "heating") ? PriorityMode::Heating : PriorityMode::Dhw;
+    mDhwTarget_ = dhw_target;
+    mHeatingTarget_ = heating_target;
+}
+
+void ControlLoop::setSettingsCallback(SettingsCallback callback) {
+    settings_callback_ = callback;
+}
+
+static inline std::string priorityToString(PriorityMode priority) {
+    return priority == PriorityMode::Heating ? "heating" : "dhw";
+}
+
+void ControlLoop::fireSettingsCallback() {
+    if (settings_callback_) {
+        settings_callback_(desired_working_mode_,
+                           priorityToString(current_priority_),
+                           mDhwTarget_,
+                           mHeatingTarget_);
+    }
+}
+
 ControlLoop::~ControlLoop() {
     stop();
 }
@@ -188,6 +213,8 @@ int ControlLoop::setDhwTarget(float temp) {
     try {
         modbus_client_->writeRegister(REG_DHW_TARGET, static_cast<uint16_t>(raw_temp));
         WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set DHW target to %.1f C", temp);
+        mDhwTarget_ = temp;
+        fireSettingsCallback();
         return 0;
     } catch (const ModbusException& e) {
         WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set DHW target to %.1f: %s", temp, e.what());
@@ -202,6 +229,8 @@ int ControlLoop::setHeatingTarget(float temp) {
     try {
         modbus_client_->writeRegister(REG_HEATING_TARGET, static_cast<uint16_t>(raw_temp));
         WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set heating target to %.1f C", temp);
+        mHeatingTarget_ = temp;
+        fireSettingsCallback();
         return 0;
     } catch (const ModbusException& e) {
         WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set heating target to %.1f: %s", temp, e.what());
@@ -478,6 +507,7 @@ void ControlLoop::processCommands() {
                     current_priority_ = (cmd.int_val == 1) ? PriorityMode::Dhw : PriorityMode::Heating;
                     WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Priority set to %s",
                            cmd.int_val == 1 ? "DHW" : "Heating");
+                    fireSettingsCallback();
                 } catch (const ModbusException& e) {
                     WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set priority register: %s", e.what());
                 }
@@ -486,6 +516,7 @@ void ControlLoop::processCommands() {
             case CommandType::CMD_SET_RUNNING_MODE:
                 WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_RUNNING_MODE, mode=%d", cmd.int_val);
                 desired_working_mode_ = cmd.int_val;
+                fireSettingsCallback();
 
                 {
                     int target_device_mode;

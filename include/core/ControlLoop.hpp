@@ -178,8 +178,26 @@ private:
  */
 class ControlLoop {
 public:
+    using SettingsCallback = std::function<void(int working_mode, const std::string& priority,
+                                                  float dhw_target, float heating_target)>;
+
     ControlLoop();
     ~ControlLoop();
+
+    /**
+     * @brief Set initial settings from persistent config
+     * @param working_mode Initial working mode (0-3)
+     * @param priority Priority string ("dhw" or "heating")
+     * @param dhw_target DHW target temperature
+     * @param heating_target Heating target temperature
+     */
+    void setInitialSettings(int working_mode, const std::string& priority,
+                            float dhw_target, float heating_target);
+
+    /**
+     * @brief Set callback to fire on settings changes
+     */
+    void setSettingsCallback(SettingsCallback callback);
 
     /**
      * @brief Start the control loop thread
@@ -233,6 +251,13 @@ private:
     float saved_dhw_target_;
     float saved_heating_target_;
     bool saved_targets_initialized_;
+
+    void fireSettingsCallback();
+
+    // Settings persistence
+    SettingsCallback settings_callback_;
+    float mDhwTarget_ = 45.0f;
+    float mHeatingTarget_ = 40.0f;
 };
 
 } // namespace windmi
