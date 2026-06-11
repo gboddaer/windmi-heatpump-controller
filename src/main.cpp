@@ -206,13 +206,18 @@ int main(int argc, char* argv[]) {
         WINDMI_LOG_INFO(LOG_TAG_MAIN, "Modbus gateway: %s:%d", modbus_ip, modbus_port);
     }
 
+    // Connect for selftest
+    bool connected_for_setup = false;
     if (run_selftest) {
         if (!modbus_client->connect()) {
-            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to connect for self-test");
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to connect for setup");
             release_lock();
             return 1;
         }
+        connected_for_setup = true;
+    }
 
+    if (run_selftest) {
         windmi::SelftestReport report = windmi::selftest_run(modbus_client.get());
         windmi::selftest_print_report(report);
         WINDMI_LOG_INFO(LOG_TAG_SELFTEST, "%d/%d registers passed", report.passed, report.total);
@@ -224,6 +229,11 @@ int main(int argc, char* argv[]) {
         modbus_client->disconnect();
         release_lock();
         return report.all_critical_passed ? 0 : 1;
+    }
+
+    // Normal operation - connect if not already connected
+    if (connected_for_setup) {
+        modbus_client->disconnect();
     }
 
     if (!modbus_client->connect()) {

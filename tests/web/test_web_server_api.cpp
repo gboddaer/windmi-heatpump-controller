@@ -20,7 +20,7 @@ static std::string makeJson(const std::string& mode, const std::string& status) 
         mode, status, "dhw", status, true,
         5.0, 3.0, 230.0, 12.0, 1150.0, 920.0, true,
         45.0, 4.5, 8, 80, 0, 1000, 500,
-        5000.0, 3.5, true, MODE_SET_HEAT_DHW
+        5000.0, 3.5, true, 5.0, 0, MODE_SET_HEAT_DHW
     );
 }
 
@@ -30,7 +30,7 @@ static std::string makeZeroJson() {
         std::string("off"), std::string("off"), std::string("dhw"), std::string("off"), false,
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false,
         0.0, 0.0, 0, 0, 0, 0, 0,
-        0.0, 0.0, false, 0
+        0.0, 0.0, false, 0.0, 0, 0
     );
 }
 

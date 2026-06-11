@@ -179,6 +179,7 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
     snprintf(response, sizeof(response),
         "{\"dhwTemperature\":%.1f,"
         "\"dhwTarget\":%.1f,"
+
         "\"heatingTemperature\":%.1f,"
         "\"heatingTarget\":%.1f,"
         "\"outdoorTemperature\":%.1f,"
@@ -206,6 +207,8 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         "\"heatOutputW\":%.1f,"
         "\"cop\":%.2f,"
         "\"copValid\":%s,"
+        "\"waterDeltaT\":%.1f,"
+        "\"dhwValveStatus\":%d,"
         "\"workingMode\":%d}\n",
         last_status_.dhw_tank_temp,
         last_status_.dhw_target,
@@ -236,6 +239,8 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         last_status_.heat_output_w,
         last_status_.cop,
         last_status_.cop_valid ? "true" : "false",
+        last_status_.water_delta_t,
+        last_status_.dhw_valve_status,
         last_status_.working_mode
     );
 

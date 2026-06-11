@@ -96,6 +96,7 @@ if(WINDMI_BUILD_TESTS)
     add_subdirectory(tests/modbus)
     add_subdirectory(tests/web)
     add_subdirectory(tests/utils)
+    add_subdirectory(tests/tools)
 
     # Add CRC16 to utils tests
     target_link_libraries(test_utils PRIVATE windmi_utils GTest::gtest_main)
