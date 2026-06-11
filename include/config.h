@@ -105,7 +105,6 @@ extern "C" {
 #define REG_COMPRESSOR_FREQ       0x0017  // R  - Actual compressor frequency (1 Hz)
 // NOTE: Address 0x0017 is from hvdb gist; NOT confirmed in Rotenso Windmi manual.
 // Requires hardware validation. Alternative: 0x100F (required freq) may be more reliable.
-#define REG_WATER_DELTA_T         0x0239  // R  - Water Delta T setpoint (°C, raw = °C)
 #define REG_WATER_FLOW            0x102A  // R  - Water flow feedback (m3/h × 100)
 // NOTE: Address 0x102A is from hvdb gist; NOT confirmed in Rotenso Windmi manual.
 // Required for COP calculation. Requires hardware validation.

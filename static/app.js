@@ -42,10 +42,6 @@ const elements = {
     dhwPriorityBtn: document.getElementById('dhwPriorityBtn'),
     heatingPriorityBtn: document.getElementById('heatingPriorityBtn'),
     refreshCountdown: document.getElementById('refreshCountdown'),
-    acCurrentValue: document.getElementById('acCurrentValue'),
-    dcCurrentValue: document.getElementById('dcCurrentValue'),
-    acVoltageValue: document.getElementById('acVoltageValue'),
-    dcVoltageValue: document.getElementById('dcVoltageValue'),
     acPowerValue: document.getElementById('acPowerValue')
 };
 
@@ -337,20 +333,7 @@ function updateUI(status) {
     elements.dhwTargetValue.textContent = dhwTargetDisplay + '°C';
     elements.heatingTargetValue.textContent = heatingTargetDisplay + '°C';
 
-    // Power monitoring - always displayed in status row
-    elements.acCurrentValue.textContent = status.acCurrent.toFixed(2) + ' A';
-    elements.dcCurrentValue.textContent = status.dcCurrent.toFixed(2) + ' A';
-    elements.acVoltageValue.textContent = status.acVoltage.toFixed(1) + ' V';
-    elements.dcVoltageValue.textContent = status.dcVoltage.toFixed(1) + ' V';
-    // Show AC real power (W) if valid, otherwise show apparent power (VA)
-    const acPowerDisplay = status.powerValid ? status.acPowerW : status.acPowerVA;
-    elements.acPowerValue.textContent = acPowerDisplay.toFixed(1) + ' W';
-
     // Diagnostic values
-    if (status.waterDeltaT !== undefined) {
-        const waterDeltaTEl = document.getElementById('waterDeltaTValue');
-        if (waterDeltaTEl) waterDeltaTEl.textContent = status.waterDeltaT.toFixed(1) + '°C';
-    }
     if (status.dhwValveStatus !== undefined) {
         const valveEl = document.getElementById('dhwValveValue');
         if (valveEl) valveEl.textContent = status.dhwValveStatus === 0 ? 'Opened' : (status.dhwValveStatus === 1 ? 'Closed' : 'Unknown');

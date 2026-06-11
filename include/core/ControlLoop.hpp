@@ -79,7 +79,6 @@ struct StatusSnapshot {
     float water_flow = 0.0f;            // Water flow in m³/h (from 0x102A, raw/100)
     int unit_capacity_kw = 0;           // Unit capacity in kW (4/6/8/10/12/14/16)
     int actual_capacity_output = 0;     // Actual capacity output (from 0x1004)
-    float water_delta_t = 0.0f;         // Water Delta T setpoint in °C (from 0x0239)
     int dhw_valve_status = -1;          // DHW valve status (0=Opened, 1=Closed, -1=unknown)
     int odu_input_status = 0;           // Outdoor unit input status bit flags (from 0x101F)
     int compressor_runtime_h = 0;       // Compressor runtime in hours (from 0x0174)

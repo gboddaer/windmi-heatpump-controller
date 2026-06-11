@@ -389,14 +389,6 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         status.actual_capacity_output = 0;
     }
 
-    // Read Water Delta T setpoint (0x0239)
-    try {
-        raw = modbus_client_->readRegister(REG_WATER_DELTA_T);
-        status.water_delta_t = static_cast<float>(raw);  // raw = °C directly
-    } catch (const ModbusException&) {
-        status.water_delta_t = 0.0f;
-    }
-
     // Read DHW valve status (0x00D2)
     try {
         raw = modbus_client_->readRegister(REG_DHW_VALVE_STATUS);

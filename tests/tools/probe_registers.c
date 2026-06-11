@@ -84,7 +84,6 @@ static const RegisterDef registers[] = {
     { "AC_VOLTAGE",            0x1016 },
     { "DC_VOLTAGE",            0x1017 },
     { "ODU_INPUT_STATUS",      0x101F },
-    { "WATER_DELTA_T",         0x0239 },
     { "WATER_FLOW",            0x102A },
     { "DHW_VALVE_STATUS",      0x00D2 },
 };

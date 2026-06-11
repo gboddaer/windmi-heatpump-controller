@@ -21,7 +21,7 @@ TEST(JsonHelpersTest, GenerateStatusJson) {
         5750.0, 5175.0, true,
         42.0, 1.20, 8, 50, 3, 123, 456,
         6976.7, 1.35, true,
-        5.0, 0,
+        0,
         3);
     
     EXPECT_NE(json.find("\"dhwTemperature\":45.0"), std::string::npos);
@@ -32,7 +32,6 @@ TEST(JsonHelpersTest, GenerateStatusJson) {
     EXPECT_NE(json.find("\"acPowerW\":5175.0"), std::string::npos);
     EXPECT_NE(json.find("\"powerValid\":true"), std::string::npos);
     EXPECT_NE(json.find("\"copValid\":true"), std::string::npos);
-    EXPECT_NE(json.find("\"waterDeltaT\":5.0"), std::string::npos);
     EXPECT_NE(json.find("\"dhwValveStatus\":0"), std::string::npos);
     EXPECT_EQ(json.find("\"dhwHysteresis\":"), std::string::npos);
     EXPECT_EQ(json.find("\"acPower\":"), std::string::npos);
