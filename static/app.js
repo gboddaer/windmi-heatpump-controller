@@ -13,9 +13,9 @@ let pendingDhwTarget = null;
 let pendingHeatingTarget = null;
 let pendingMode = null;  // Prevents status poll from reverting mode before command is processed
 
-// Working mode: 'off', 'dhw', 'heat', 'both'
-let currentMode = 'both';
-let currentPriority = 'dhw'; // 'dhw' or 'heating'
+// Working mode: 0=OFF, 1=DHW Only, 2=Heating Only, 3=Heating+DHW Priority, 4=Heating Priority+DHW
+let currentMode = 3; // default: Heating + DHW Priority
+let currentPriority = 'dhw'; // 'dhw' or 'heating' (derived from mode)
 let currentOccupancy = 'home'; // 'away', 'sleep', 'home'
 
 // DOM Elements
@@ -26,10 +26,11 @@ const elements = {
     modeValue: document.getElementById('modeValue'),
     priorityValue: document.getElementById('priorityValue'),
     prioritySection: document.getElementById('prioritySection'),
-    modeOffBtn: document.getElementById('modeOffBtn'),
-    modeDhwBtn: document.getElementById('modeDhwBtn'),
-    modeHeatBtn: document.getElementById('modeHeatBtn'),
-    modeBothBtn: document.getElementById('modeBothBtn'),
+    mode0Btn: document.getElementById('mode0Btn'),
+    mode1Btn: document.getElementById('mode1Btn'),
+    mode2Btn: document.getElementById('mode2Btn'),
+    mode3Btn: document.getElementById('mode3Btn'),
+    mode4Btn: document.getElementById('mode4Btn'),
     outdoorTempValue: document.getElementById('outdoorTempValue'),
     dhwTempValue: document.getElementById('dhwTempValue'),
     heatingTempValue: document.getElementById('heatingTempValue'),
@@ -39,8 +40,6 @@ const elements = {
     heatingInput: document.getElementById('heatingInput'),
     setDhwBtn: document.getElementById('setDhwBtn'),
     setHeatingBtn: document.getElementById('setHeatingBtn'),
-    dhwPriorityBtn: document.getElementById('dhwPriorityBtn'),
-    heatingPriorityBtn: document.getElementById('heatingPriorityBtn'),
     refreshCountdown: document.getElementById('refreshCountdown'),
     acPowerValue: document.getElementById('acPowerValue'),
     occupancyAwayBtn: document.getElementById('occupancyAwayBtn'),
@@ -131,75 +130,59 @@ elements.setHeatingBtn.addEventListener('click', async () => {
     }
 });
 
-// Working mode buttons
+// Working mode buttons (0=OFF, 1=DHW Only, 2=Heating Only, 3=Heating+DHW Priority, 4=Heating Priority+DHW)
 function setWorkingMode(mode) {
     if (mode === currentMode) return;
 
     currentMode = mode;
-    pendingMode = mode;  // Block status poll from reverting until server confirms
-    setTimeout(() => { pendingMode = null; }, 10000);  // Safety: clear after 10s if server never confirms
+    pendingMode = mode;
+    setTimeout(() => { pendingMode = null; }, 10000);
 
-    // Update button states
-    elements.modeOffBtn.classList.toggle('active', mode === 'off');
-    elements.modeDhwBtn.classList.toggle('active', mode === 'dhw');
-    elements.modeHeatBtn.classList.toggle('active', mode === 'heat');
-    elements.modeBothBtn.classList.toggle('active', mode === 'both');
+    // Update button active states
+    for (let i = 0; i <= 4; i++) {
+        const btn = document.getElementById('mode' + i + 'Btn');
+        if (btn) btn.classList.toggle('active', i === mode);
+    }
 
-    // Show/hide priority section based on mode
-    elements.prioritySection.style.display = (mode === 'both') ? 'block' : 'none';
+    // Map to backend working_mode and priority
+    // Mode 0: OFF → working_mode=0
+    // Mode 1: DHW Only → working_mode=1, priority=dhw
+    // Mode 2: Heating Only → working_mode=2, priority=heating
+    // Mode 3: Heating + DHW Priority → working_mode=3, priority=dhw
+    // Mode 4: Heating Priority + DHW → working_mode=3, priority=heating
+    const backendMode = (mode === 0) ? 0 : (mode === 3 || mode === 4) ? 3 : mode;
+    currentPriority = (mode === 3 || mode === 1) ? 'dhw' : 'heating';
 
-    // Send mode command to server
-    const modeMap = {
-        'off': 0,
-        'dhw': 1,  // Will be mapped to DHW-only on backend
-        'heat': 2, // Will be mapped to Heating-only on backend
-        'both': 2  // DHW + Heating
-    };
-
-    apiPost('/api/set-mode', { mode: modeMap[mode], priority: currentPriority })
-        .then(() => showNotification('Mode set to ' + mode, 'success'))
+    apiPost('/api/set-mode', { mode: backendMode, priority: currentPriority })
+        .then(() => {
+            const labels = ['OFF', 'DHW Only', 'Heating Only', 'Heating + DHW Priority', 'Heating Priority + DHW'];
+            showNotification('Mode set to ' + labels[mode], 'success');
+        })
         .catch(error => {
             showNotification('Failed to set mode: ' + error.message, 'error');
-            pendingMode = null;  // Clear pending on failure so status poll can correct
+            pendingMode = null;
         });
 }
 
-elements.modeOffBtn.addEventListener('click', () => setWorkingMode('off'));
-elements.modeDhwBtn.addEventListener('click', () => setWorkingMode('dhw'));
-elements.modeHeatBtn.addEventListener('click', () => setWorkingMode('heat'));
-elements.modeBothBtn.addEventListener('click', () => setWorkingMode('both'));
+elements.mode0Btn.addEventListener('click', () => setWorkingMode(0));
+elements.mode1Btn.addEventListener('click', () => setWorkingMode(1));
+elements.mode2Btn.addEventListener('click', () => setWorkingMode(2));
+elements.mode3Btn.addEventListener('click', () => setWorkingMode(3));
+elements.mode4Btn.addEventListener('click', () => setWorkingMode(4));
 
 // Power button (ON/OFF toggle)
 elements.powerBtn.addEventListener('click', () => {
-    if (currentMode === 'off') {
-        // Turn on: restore to DHW+Heating (default on mode)
-        setWorkingMode('both');
+    if (currentMode === 0) {
+        // Turn on: restore to Heating + DHW Priority (default)
+        setWorkingMode(3);
     } else {
         // Turn off
-        setWorkingMode('off');
+        setWorkingMode(0);
     }
 });
 
-// Priority toggle (only active when mode is 'both')
-elements.dhwPriorityBtn.addEventListener('click', () => {
-    setPriority('dhw');
-});
-
-elements.heatingPriorityBtn.addEventListener('click', () => {
-    setPriority('heating');
-});
-
-function setPriority(priority) {
-    if (priority === currentPriority || currentMode !== 'both') return;
-
-    currentPriority = priority;
-    elements.dhwPriorityBtn.classList.toggle('active', priority === 'dhw');
-    elements.heatingPriorityBtn.classList.toggle('active', priority === 'heating');
-
-    apiPost(API_SET_PRIORITY_URL, { priority })
-        .then(() => showNotification('Priority set to ' + priority, 'success'))
-        .catch(error => showNotification('Failed to set priority: ' + error.message, 'error'));
-}
+// Priority is now baked into the working mode (modes 3/4).
+// setPriority is kept for internal use only (called from setWorkingMode via the API).
 
 // Occupancy mode buttons
 function setOccupancyMode(mode) {
@@ -293,9 +276,21 @@ function updateUI(status) {
     // Priority display
     elements.priorityValue.textContent = status.priority.toUpperCase();
 
-    // Map working mode from server (0=off, 1=dhw, 2=heat, 3=both)
-    const modeMap = ['off', 'dhw', 'heat', 'both'];
-    const displayMode = modeMap[status.workingMode] || 'both';
+    // Map working mode + priority to our 5-mode system
+    // Server: workingMode 0=off, 1=dhw, 2=heat, 3=both
+    // Server: priority 'dhw' or 'heating'
+    // Our modes: 0=OFF, 1=DHW Only, 2=Heating Only, 3=Heating+DHW Priority, 4=Heating Priority+DHW
+    const serverMode = status.workingMode || 0;
+    const serverPriority = (status.priority || 'dhw').toLowerCase();
+    let displayMode;
+    if (serverMode === 0) displayMode = 0;
+    else if (serverMode === 1) displayMode = 1;
+    else if (serverMode === 2) displayMode = 2;
+    else if (serverMode === 3) {
+        displayMode = (serverPriority === 'dhw') ? 3 : 4;
+    } else {
+        displayMode = 3; // default
+    }
 
     // If we have a pending mode change, only accept server state once it matches
     if (pendingMode !== null) {
@@ -304,34 +299,26 @@ function updateUI(status) {
         } else {
             // Server hasn't caught up yet - keep the user's choice, don't revert
         }
-        // Fall through: still update currentPriority below
     } else {
         currentMode = displayMode;
     }
 
-    currentPriority = status.priority.toLowerCase();
+    currentPriority = (currentMode === 3 || currentMode === 1) ? 'dhw' : 'heating';
 
     // Update mode button active states (always reflect currentMode)
-    elements.modeOffBtn.classList.toggle('active', currentMode === 'off');
-    elements.modeDhwBtn.classList.toggle('active', currentMode === 'dhw');
-    elements.modeHeatBtn.classList.toggle('active', currentMode === 'heat');
-    elements.modeBothBtn.classList.toggle('active', currentMode === 'both');
+    for (let i = 0; i <= 4; i++) {
+        const btn = document.getElementById('mode' + i + 'Btn');
+        if (btn) btn.classList.toggle('active', i === currentMode);
+    }
 
     // Update power button
-    if (currentMode === 'off') {
+    if (currentMode === 0) {
         elements.powerBtn.textContent = 'ON';
         elements.powerBtn.className = 'power-btn off';
     } else {
         elements.powerBtn.textContent = 'OFF';
         elements.powerBtn.className = 'power-btn on';
     }
-
-    // Show/hide priority section based on mode
-    elements.prioritySection.style.display = (currentMode === 'both') ? 'block' : 'none';
-
-    // Update priority buttons
-    elements.dhwPriorityBtn.classList.toggle('active', currentPriority === 'dhw');
-    elements.heatingPriorityBtn.classList.toggle('active', currentPriority === 'heating');
 
     // Temperatures
     elements.outdoorTempValue.textContent = status.outdoorTemperature + '°C';
