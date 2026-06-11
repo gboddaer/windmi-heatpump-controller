@@ -292,10 +292,10 @@ main {
 
 .btn-small {
     width: auto;
-    padding: 6px 8px;
-    font-size: 0.75rem;
+    padding: 8px 12px;
+    font-size: 0.85rem;
     white-space: nowrap;
-    min-width: 32px;
+    min-width: 36px;
 }
 
 .btn:hover {
