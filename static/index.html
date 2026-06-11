@@ -27,17 +27,6 @@
                 </div>
             </section>
 
-            <section class="status-card">
-                <h2>Power Monitoring</h2>
-                <div class="status-row status-row-power">
-                    <div class="status-item"><span class="label">AC Current</span> <span id="acCurrentValue" class="value power-value">-</span></div>
-                    <div class="status-item"><span class="label">DC Current</span> <span id="dcCurrentValue" class="value power-value">-</span></div>
-                    <div class="status-item"><span class="label">AC Voltage</span> <span id="acVoltageValue" class="value power-value">-</span></div>
-                    <div class="status-item"><span class="label">DC Voltage</span> <span id="dcVoltageValue" class="value power-value">-</span></div>
-                    <div class="status-item"><span class="label">Power</span> <span id="acPowerValue" class="value power-value">-</span></div>
-                </div>
-            </section>
-
             <section class="temps-card">
                 <h2>Temperatures</h2>
                 <div class="temp-grid">
@@ -49,13 +38,24 @@
                         <span class="label">Heating (LWT)</span>
                         <span id="heatingTempValue" class="value">-</span>
                     </div>
+
+                </div>
+            </section>
+
+            <section class="status-card">
+                <h2>Diagnostics</h2>
+                <div class="temp-grid">
                     <div class="temp-item">
-                        <span class="label">DHW Target</span>
-                        <span id="dhwTargetValue" class="value">-</span>
+                        <span class="label">DHW Valve</span>
+                        <span id="dhwValveValue" class="value">-</span>
                     </div>
                     <div class="temp-item">
-                        <span class="label">Heating Target</span>
-                        <span id="heatingTargetValue" class="value">-</span>
+                        <span class="label">DHW Mode</span>
+                        <span id="dhwModeValue" class="value">-</span>
+                    </div>
+                    <div class="temp-item">
+                        <span class="label">Capacity Output</span>
+                        <span id="actualCapacityValue" class="value">-</span>
                     </div>
                 </div>
             </section>
@@ -63,39 +63,42 @@
             <section class="controls-card">
                 <h2>Controls</h2>
                 
-                <div class="control-group">
-                    <label for="dhwSlider">DHW Temperature (°C)</label>
-                    <div class="slider-container">
-                        <input type="range" id="dhwSlider" min="40" max="63" step="0.5" value="50">
-                        <input type="number" id="dhwInput" min="40" max="63" step="0.5" value="50">
+                <div class="control-group temp-controls-row">
+                    <div class="temp-control-col">
+                        <label for="dhwSlider">DHW (°C)</label>
+                        <div class="temp-control-inline">
+                            <input type="range" id="dhwSlider" min="40" max="63" step="0.5" value="50">
+                            <input type="number" id="dhwInput" min="40" max="63" step="0.5" value="50">
+                            <button id="setDhwBtn" class="btn btn-small">Set</button>
+                        </div>
                     </div>
-                    <button id="setDhwBtn" class="btn">Set DHW</button>
-                </div>
-
-                <div class="control-group">
-                    <label for="heatingSlider">Heating Temperature (°C)</label>
-                    <div class="slider-container">
-                        <input type="range" id="heatingSlider" min="25" max="63" step="0.5" value="40">
-                        <input type="number" id="heatingInput" min="25" max="63" step="0.5" value="40">
+                    <div class="temp-control-col">
+                        <label for="heatingSlider">Heating (°C)</label>
+                        <div class="temp-control-inline">
+                            <input type="range" id="heatingSlider" min="25" max="63" step="0.5" value="40">
+                            <input type="number" id="heatingInput" min="25" max="63" step="0.5" value="40">
+                            <button id="setHeatingBtn" class="btn btn-small">Set</button>
+                        </div>
                     </div>
-                    <button id="setHeatingBtn" class="btn">Set Heating</button>
                 </div>
 
                 <div class="control-group mode-group">
                     <label>Working Mode</label>
                     <div class="mode-selector">
-                        <button id="modeOffBtn" class="mode-btn">OFF</button>
-                        <button id="modeDhwBtn" class="mode-btn">DHW Only</button>
-                        <button id="modeHeatBtn" class="mode-btn">Heating Only</button>
-                        <button id="modeBothBtn" class="mode-btn active">DHW + Heating</button>
+                        <button id="mode0Btn" class="mode-btn mode-off">OFF</button>
+                        <button id="mode1Btn" class="mode-btn">DHW Only</button>
+                        <button id="mode2Btn" class="mode-btn">Heating Only</button>
+                        <button id="mode3Btn" class="mode-btn mode-active">Heating + DHW Priority</button>
+                        <button id="mode4Btn" class="mode-btn mode-active">Heating Priority + DHW</button>
                     </div>
                 </div>
-                
-                <div class="control-group priority-group" id="prioritySection">
-                    <label>Priority (when both enabled)</label>
-                    <div class="toggle-container">
-                        <button id="dhwPriorityBtn" class="toggle-btn active">DHW</button>
-                        <button id="heatingPriorityBtn" class="toggle-btn">Heating</button>
+
+                <div class="control-group occupancy-group">
+                    <label>Occupancy Mode</label>
+                    <div class="occupancy-selector">
+                        <button id="occupancyAwayBtn" class="occupancy-btn">Away</button>
+                        <button id="occupancySleepBtn" class="occupancy-btn">Sleep</button>
+                        <button id="occupancyHomeBtn" class="occupancy-btn active">Home</button>
                     </div>
                 </div>
             </section>

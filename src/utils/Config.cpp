@@ -21,10 +21,10 @@ Config::Config() {
     set("heating.target", "40.0");
 }
 
-void Config::loadFromFile(const std::string& filename) {
+bool Config::loadFromFile(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) {
-        throw ConfigException("Failed to open config file: " + filename);
+        return false;
     }
     
     std::string line;
@@ -53,6 +53,18 @@ void Config::loadFromFile(const std::string& filename) {
             set(key, value);
         }
     }
+    return true;
+}
+
+bool Config::saveToFile(const std::string& filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        return false;
+    }
+    for (const auto& [key, value] : values_) {
+        file << key << " = " << value << "\n";
+    }
+    return file.good();
 }
 
 std::string Config::getString(const std::string& key, const std::string& default_value) const {

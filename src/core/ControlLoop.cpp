@@ -121,6 +121,31 @@ ControlLoop::ControlLoop()
 {
 }
 
+void ControlLoop::setInitialSettings(int working_mode, const std::string& priority,
+                                     float dhw_target, float heating_target) {
+    desired_working_mode_ = working_mode;
+    current_priority_ = (priority == "heating") ? PriorityMode::Heating : PriorityMode::Dhw;
+    mDhwTarget_ = dhw_target;
+    mHeatingTarget_ = heating_target;
+}
+
+void ControlLoop::setSettingsCallback(SettingsCallback callback) {
+    settings_callback_ = callback;
+}
+
+static inline std::string priorityToString(PriorityMode priority) {
+    return priority == PriorityMode::Heating ? "heating" : "dhw";
+}
+
+void ControlLoop::fireSettingsCallback() {
+    if (settings_callback_) {
+        settings_callback_(desired_working_mode_,
+                           priorityToString(current_priority_),
+                           mDhwTarget_,
+                           mHeatingTarget_);
+    }
+}
+
 ControlLoop::~ControlLoop() {
     stop();
 }
@@ -188,6 +213,8 @@ int ControlLoop::setDhwTarget(float temp) {
     try {
         modbus_client_->writeRegister(REG_DHW_TARGET, static_cast<uint16_t>(raw_temp));
         WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set DHW target to %.1f C", temp);
+        mDhwTarget_ = temp;
+        fireSettingsCallback();
         return 0;
     } catch (const ModbusException& e) {
         WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set DHW target to %.1f: %s", temp, e.what());
@@ -202,6 +229,8 @@ int ControlLoop::setHeatingTarget(float temp) {
     try {
         modbus_client_->writeRegister(REG_HEATING_TARGET, static_cast<uint16_t>(raw_temp));
         WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set heating target to %.1f C", temp);
+        mHeatingTarget_ = temp;
+        fireSettingsCallback();
         return 0;
     } catch (const ModbusException& e) {
         WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set heating target to %.1f: %s", temp, e.what());
@@ -310,6 +339,14 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         ok = false;
     }
 
+    // Read occupancy mode (0x0029) - 0=Away, 1=Sleep, 2=Home
+    try {
+        raw = modbus_client_->readRegister(REG_OCCUPANCY_MODE);
+        status.occupancy_mode = raw;
+    } catch (const ModbusException&) {
+        // Non-critical, leave as last known value
+    }
+
     // Read power monitoring registers (individual reads — one failure does not zero the others)
     {
         int16_t raw;
@@ -387,6 +424,22 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         status.actual_capacity_output = raw;
     } catch (const ModbusException&) {
         status.actual_capacity_output = 0;
+    }
+
+    // Read DHW valve status (0x00D2)
+    try {
+        raw = modbus_client_->readRegister(REG_DHW_VALVE_STATUS);
+        status.dhw_valve_status = raw;
+    } catch (const ModbusException&) {
+        status.dhw_valve_status = -1;
+    }
+
+    // Read DHW mode status (0x00C9) - 0=Eco, 1=Anti-Legionella, 2=Regular
+    try {
+        raw = modbus_client_->readRegister(REG_DHW_MODE_STATUS);
+        status.dhw_mode_status = raw;
+    } catch (const ModbusException&) {
+        status.dhw_mode_status = -1;
     }
 
     try {
@@ -470,14 +523,26 @@ void ControlLoop::processCommands() {
                     current_priority_ = (cmd.int_val == 1) ? PriorityMode::Dhw : PriorityMode::Heating;
                     WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Priority set to %s",
                            cmd.int_val == 1 ? "DHW" : "Heating");
+                    fireSettingsCallback();
                 } catch (const ModbusException& e) {
                     WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set priority register: %s", e.what());
+                }
+                break;
+
+            case CommandType::CMD_SET_OCCUPANCY_MODE:
+                WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_OCCUPANCY_MODE, mode=%d", cmd.int_val);
+                try {
+                    modbus_client_->writeRegister(REG_OCCUPANCY_MODE, static_cast<uint16_t>(cmd.int_val));
+                    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Occupancy mode set to %d (0=Away, 1=Sleep, 2=Home)", cmd.int_val);
+                } catch (const ModbusException& e) {
+                    WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set occupancy mode: %s", e.what());
                 }
                 break;
 
             case CommandType::CMD_SET_RUNNING_MODE:
                 WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_RUNNING_MODE, mode=%d", cmd.int_val);
                 desired_working_mode_ = cmd.int_val;
+                fireSettingsCallback();
 
                 {
                     int target_device_mode;

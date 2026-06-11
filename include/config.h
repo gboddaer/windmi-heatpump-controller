@@ -33,7 +33,6 @@ extern "C" {
 
 // Control Loop
 #define CONTROL_LOOP_INTERVAL_S 30
-#define DHW_HYSTERESIS_C       3.0f
 // Power factor assumption for inverter-driven compressor
 // Typical range: 0.85-0.95 for inverter heat pumps
 #define ESTIMATED_POWER_FACTOR  0.90f
@@ -88,6 +87,7 @@ extern "C" {
 #define REG_RUNNING_MODE          0x002C  // RW - Set mode: 0=Off, 1=Cool+DHW, 2=Heat+DHW (ONLY 0,1,2 allowed!)
 #define REG_HEATING_TARGET        0x0191  // RW - Heating target temperature (0.1°C)
 #define REG_DHW_TARGET            0x0194  // RW - DHW target temperature (0.1°C)
+#define REG_DHW_VALVE_STATUS      0x00D2  // R  - DHW valve status (0=Opened, 1=Closed)
 #define REG_OCCUPANCY_MODE        0x0029  // RW - Occupancy mode: 0=Away, 1=Sleep, 2=Home
 //
 // === POWER MONITORING REGISTERS (READ-ONLY) ===

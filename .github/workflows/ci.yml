@@ -82,7 +82,8 @@ jobs:
         retention-days: 7
 
   build-msvc:
-    runs-on: windows-latest
+    # Pin to windows-2022: windows-latest migrated to VS 2026 (Jun 2026)
+    runs-on: windows-2022
 
     steps:
     - name: Checkout code

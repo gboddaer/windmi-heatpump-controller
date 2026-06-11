@@ -22,6 +22,23 @@ namespace windmi {
 class IModbusClient;
 
 /**
+ * @brief Occupancy mode values for register 0x0029 (Occupancy Mode)
+ *
+ * Verified live on device:
+ *   0 = Away  (DHW mode = Regular/2)
+ *   1 = Sleep (DHW mode = Eco/0)
+ *   2 = Home  (DHW mode = Regular/2)
+ *
+ * Register 0x0067 (Normal/Eco Switch) is read-only and reflects the
+ * current state derived from occupancy mode.
+ */
+enum class OccupancyMode : int {
+    Away  = 0,
+    Sleep = 1,
+    Home  = 2,
+};
+
+/**
  * @brief Command types for the control loop
  *
  * These match the C cmd_type_t enum from spsc_queue.h.
@@ -30,7 +47,8 @@ enum class CommandType : uint8_t {
     CMD_SET_DHW_TEMP = 0,
     CMD_SET_HEATING_TEMP = 1,
     CMD_SET_PRIORITY = 2,
-    CMD_SET_RUNNING_MODE = 3
+    CMD_SET_RUNNING_MODE = 3,
+    CMD_SET_OCCUPANCY_MODE = 4,
 };
 
 /**
@@ -51,6 +69,7 @@ struct Command {
  * - dhw_priority: true=DHW priority, false=heating priority
  * - is_running: true if device is active (running_status != 0)
  * - working_mode: application-level (0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating)
+ * - occupancy_mode: 0=Away, 1=Sleep, 2=Home (from REG_OCCUPANCY_MODE 0x0029)
  */
 struct StatusSnapshot {
     float outdoor_temp = 0.0f;
@@ -79,6 +98,8 @@ struct StatusSnapshot {
     float water_flow = 0.0f;            // Water flow in m³/h (from 0x102A, raw/100)
     int unit_capacity_kw = 0;           // Unit capacity in kW (4/6/8/10/12/14/16)
     int actual_capacity_output = 0;     // Actual capacity output (from 0x1004)
+    int dhw_valve_status = -1;          // DHW valve status (0=Opened, 1=Closed, -1=unknown)
+    int dhw_mode_status = -1;           // DHW mode status (0=Eco, 1=Anti-Legionella, 2=Regular)
     int odu_input_status = 0;           // Outdoor unit input status bit flags (from 0x101F)
     int compressor_runtime_h = 0;       // Compressor runtime in hours (from 0x0174)
     int pump_runtime_h = 0;             // Pump runtime in hours (from 0x0176)
@@ -90,6 +111,9 @@ struct StatusSnapshot {
     
     // Working mode (0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating)
     int working_mode = 0;
+    
+    // Occupancy mode (0=Away, 1=Sleep, 2=Home)
+    int occupancy_mode = 2;
 };
 
 /**
@@ -177,8 +201,26 @@ private:
  */
 class ControlLoop {
 public:
+    using SettingsCallback = std::function<void(int working_mode, const std::string& priority,
+                                                  float dhw_target, float heating_target)>;
+
     ControlLoop();
     ~ControlLoop();
+
+    /**
+     * @brief Set initial settings from persistent config
+     * @param working_mode Initial working mode (0-3)
+     * @param priority Priority string ("dhw" or "heating")
+     * @param dhw_target DHW target temperature
+     * @param heating_target Heating target temperature
+     */
+    void setInitialSettings(int working_mode, const std::string& priority,
+                            float dhw_target, float heating_target);
+
+    /**
+     * @brief Set callback to fire on settings changes
+     */
+    void setSettingsCallback(SettingsCallback callback);
 
     /**
      * @brief Start the control loop thread
@@ -232,6 +274,13 @@ private:
     float saved_dhw_target_;
     float saved_heating_target_;
     bool saved_targets_initialized_;
+
+    void fireSettingsCallback();
+
+    // Settings persistence
+    SettingsCallback settings_callback_;
+    float mDhwTarget_ = 45.0f;
+    float mHeatingTarget_ = 40.0f;
 };
 
 } // namespace windmi

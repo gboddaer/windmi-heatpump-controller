@@ -23,6 +23,8 @@ bool is_pid_alive(int pid);
 /** Resolve static directory as-is, relative to executable, or one level above executable. */
 std::string resolve_static_dir(const std::string& dir);
 
+/** Return the user's home directory path (e.g., /home/user or C:\\Users\\user). */
+std::string get_home_dir();
 /** Cross-platform millisecond sleep. */
 void sleep_ms(unsigned int ms);
 

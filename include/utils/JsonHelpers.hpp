@@ -72,6 +72,7 @@ public:
      * @param ac_power_va AC apparent power
      * @param ac_power_w Estimated AC real power
      * @param power_valid Power reading validity flag
+     * @param dhw_valve_status DHW valve status (0=Opened, 1=Closed, -1=unknown)
      * @param working_mode Working mode
      * @return JSON string
      */
@@ -89,6 +90,7 @@ public:
         int actual_capacity_output, int odu_input_status,
         int compressor_runtime_h, int pump_runtime_h,
         double heat_output_w, double cop, bool cop_valid,
+        int dhw_valve_status,
         int working_mode);
 
     /**

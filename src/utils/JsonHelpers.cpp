@@ -51,11 +51,12 @@ std::string JsonHelpers::generateStatusJson(
     int actual_capacity_output, int odu_input_status,
     int compressor_runtime_h, int pump_runtime_h,
     double heat_output_w, double cop, bool cop_valid,
+    int dhw_valve_status,
     int working_mode) {
 
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(1);
-    oss << "{"
+    oss << "{" 
         << "\"dhwTemperature\":" << dhw_temp << ","
         << "\"dhwTarget\":" << dhw_target << ","
         << "\"heatingTemperature\":" << heating_temp << ","
@@ -85,6 +86,7 @@ std::string JsonHelpers::generateStatusJson(
         << "\"heatOutputW\":" << heat_output_w << ","
         << "\"cop\":" << cop << ","
         << "\"copValid\":" << (cop_valid ? "true" : "false") << ","
+        << "\"dhwValveStatus\":" << dhw_valve_status << ","
         << "\"workingMode\":" << working_mode
         << "}";
     return oss.str();
@@ -106,7 +108,7 @@ std::string JsonHelpers::generateSuccessResponse(bool success, bool verified, co
 
 std::string JsonHelpers::generateErrorResponse(const std::string& error, int /*code*/) {
     std::ostringstream oss;
-    oss << "{" 
+    oss << "{"
         << "\"error\":\"" << error << "\""
         << "}";
     return oss.str();

@@ -79,13 +79,12 @@ TEST(SignalIntegrationTest, MultipleInstallsDoNotCrash) {
 TEST(ArgValidationTest, InvalidLogLevel) {
     // Mimics main.cpp parse_log_level validation
     auto parse_level = [](const char* s) -> bool {
-        LogLevel level;
-        if (strcmp(s, "TRACE") == 0 || strcmp(s, "Trace") == 0) { level = LogLevel::Trace; return true; }
-        if (strcmp(s, "DEBUG") == 0 || strcmp(s, "Debug") == 0) { level = LogLevel::Debug; return true; }
-        if (strcmp(s, "INFO") == 0 || strcmp(s, "Info") == 0) { level = LogLevel::Info; return true; }
-        if (strcmp(s, "WARN") == 0 || strcmp(s, "Warn") == 0) { level = LogLevel::Warn; return true; }
-        if (strcmp(s, "ERROR") == 0 || strcmp(s, "Error") == 0) { level = LogLevel::Error; return true; }
-        if (strcmp(s, "FATAL") == 0 || strcmp(s, "Fatal") == 0) { level = LogLevel::Fatal; return true; }
+        if (strcmp(s, "TRACE") == 0 || strcmp(s, "Trace") == 0) return true;
+        if (strcmp(s, "DEBUG") == 0 || strcmp(s, "Debug") == 0) return true;
+        if (strcmp(s, "INFO") == 0 || strcmp(s, "Info") == 0) return true;
+        if (strcmp(s, "WARN") == 0 || strcmp(s, "Warn") == 0) return true;
+        if (strcmp(s, "ERROR") == 0 || strcmp(s, "Error") == 0) return true;
+        if (strcmp(s, "FATAL") == 0 || strcmp(s, "Fatal") == 0) return true;
         return false;
     };
 

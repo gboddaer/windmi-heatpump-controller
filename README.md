@@ -198,11 +198,11 @@ Get current heat pump status.
 {
   "mode": 2,
   "runningStatus": 2,
-  "dhwTemp": 45.5,
-  "heatingTemp": 38.2,
-  "outsideTemp": 12.3,
-  "targetDhw": 48.0,
-  "targetHeating": 38.0,
+  "dhwTemperature": 45.5,
+  "dhwTarget": 48.0,
+  "heatingTemperature": 38.2,
+  "heatingTarget": 38.0,
+  "outdoorTemperature": 12.3,
   "dhwPriority": 1,
   "errors": [],
   "timestamp": "2026-06-01T14:32:05Z"

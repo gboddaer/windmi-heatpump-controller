@@ -158,6 +158,12 @@ void WebServer::handleRequest(struct mg_connection* c, struct mg_http_message* h
         } else {
             sendJsonReply(c, 405, "{\"error\":\"Method not allowed\"}");
         }
+    } else if (mg_strcmp(hm->uri, mg_str("/api/set-occupancy")) == 0) {
+        if (mg_strcasecmp(hm->method, mg_str("POST")) == 0) {
+            apiSetOccupancyHandler(c, &hm->body);
+        } else {
+            sendJsonReply(c, 405, "{\"error\":\"Method not allowed\"}");
+        }
     } else {
         // Serve static files
         struct mg_http_serve_opts opts;
@@ -179,6 +185,7 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
     snprintf(response, sizeof(response),
         "{\"dhwTemperature\":%.1f,"
         "\"dhwTarget\":%.1f,"
+
         "\"heatingTemperature\":%.1f,"
         "\"heatingTarget\":%.1f,"
         "\"outdoorTemperature\":%.1f,"
@@ -206,7 +213,11 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         "\"heatOutputW\":%.1f,"
         "\"cop\":%.2f,"
         "\"copValid\":%s,"
-        "\"workingMode\":%d}\n",
+
+        "\"dhwValveStatus\":%d,"
+        "\"dhwModeStatus\":%d,"
+        "\"workingMode\":%d,"
+        "\"occupancyMode\":%d}\n",
         last_status_.dhw_tank_temp,
         last_status_.dhw_target,
         last_status_.leaving_water_temp,
@@ -236,7 +247,10 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         last_status_.heat_output_w,
         last_status_.cop,
         last_status_.cop_valid ? "true" : "false",
-        last_status_.working_mode
+        last_status_.dhw_valve_status,
+        last_status_.dhw_mode_status,
+        last_status_.working_mode,
+        last_status_.occupancy_mode
     );
 
     sendJsonReply(c, 200, response);
@@ -390,6 +404,36 @@ void WebServer::apiSetModeHandler(struct mg_connection* c, struct mg_str* body) 
     if (pushed && wake_callback_) wake_callback_();
     WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Mode command pushed to queue (mode=%ld, pushed=%d)", mode, pushed);
 
+    sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
+}
+
+void WebServer::apiSetOccupancyHandler(struct mg_connection* c, struct mg_str* body) {
+    if (isShuttingDown()) {
+        sendJsonReply(c, 503, "{\"error\":\"Server is shutting down\"}");
+        return;
+    }
+
+    if (body->len == 0) {
+        sendJsonReply(c, 400, "{\"error\":\"Empty request body\"}");
+        return;
+    }
+
+    // Parse occupancy mode (0=Away, 1=Sleep, 2=Home)
+    long mode = mg_json_get_long(*body, "$.mode", -1);
+    if (mode < 0 || mode > 2) {
+        sendJsonReply(c, 422, "{\"error\":\"Invalid occupancy mode (0=Away, 1=Sleep, 2=Home)\"}");
+        return;
+    }
+
+    WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Received occupancy set request - mode=%ld", mode);
+
+    Command cmd;
+    cmd.type = CommandType::CMD_SET_OCCUPANCY_MODE;
+    cmd.float_val = 0.0f;
+    cmd.int_val = static_cast<int>(mode);
+    bool pushed = cmd_queue_ ? cmd_queue_->push(cmd) : false;
+    if (pushed && wake_callback_) wake_callback_();
+    WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER, "Occupancy command pushed to queue (mode=%ld, pushed=%d)", mode, pushed);
     sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Command queued\"}");
 }
 

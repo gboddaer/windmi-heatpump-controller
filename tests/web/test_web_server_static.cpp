@@ -91,7 +91,7 @@ static std::string zeroJson() {
         std::string("off"), std::string("off"), std::string("dhw"), std::string("off"), false,
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false,
         0.0, 0.0, 0, 0, 0, 0, 0,
-        0.0, 0.0, false, 0
+        0.0, 0.0, false, 0, 0
     );
 }
 
@@ -109,7 +109,7 @@ TEST(JsonHelpersTest, GenerateStatusJsonWithNegativeTemp) {
         "heat+dhw", "heat", "dhw", "heat", true,
         5.0, 3.0, 230.0, 12.0, 1150.0, 920.0, true,
         45.0, 4.5, 8, 80, 0, 1000, 500,
-        5000.0, 3.5, true, MODE_SET_HEAT_DHW
+        5000.0, 3.5, true, 0, MODE_SET_HEAT_DHW
     );
     EXPECT_FALSE(json.empty());
     EXPECT_NE(json.find("-20"), std::string::npos);
@@ -122,7 +122,7 @@ TEST(JsonHelpersTest, GenerateStatusJsonWithLargeValues) {
         "heat+dhw", "heat", "dhw", "heat", true,
         999.9, 999.9, 999.9, 999.9, 999999.9, 999999.9, true,
         999.9, 999.9, 999, 999, 999, 99999, 99999,
-        999999.9, 999.9, true, 2
+        999999.9, 999.9, true, 0, 2
     );
     EXPECT_FALSE(json.empty());
     EXPECT_EQ(json.front(), '{');

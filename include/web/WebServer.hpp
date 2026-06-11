@@ -69,6 +69,7 @@ private:
     void apiSetHeatingHandler(struct mg_connection* c, struct mg_str* body);
     void apiSetPriorityHandler(struct mg_connection* c, struct mg_str* body);
     void apiSetModeHandler(struct mg_connection* c, struct mg_str* body);
+    void apiSetOccupancyHandler(struct mg_connection* c, struct mg_str* body);
 
     struct mg_mgr mgr_;
     std::string static_dir_;
