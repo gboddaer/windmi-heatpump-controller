@@ -339,6 +339,14 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         ok = false;
     }
 
+    // Read occupancy mode (0x0029) - 0=Away, 1=Sleep, 2=Home
+    try {
+        raw = modbus_client_->readRegister(REG_OCCUPANCY_MODE);
+        status.occupancy_mode = raw;
+    } catch (const ModbusException&) {
+        // Non-critical, leave as last known value
+    }
+
     // Read power monitoring registers (individual reads — one failure does not zero the others)
     {
         int16_t raw;
@@ -426,6 +434,14 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         status.dhw_valve_status = -1;
     }
 
+    // Read DHW mode status (0x00C9) - 0=Eco, 1=Anti-Legionella, 2=Regular
+    try {
+        raw = modbus_client_->readRegister(REG_DHW_MODE_STATUS);
+        status.dhw_mode_status = raw;
+    } catch (const ModbusException&) {
+        status.dhw_mode_status = -1;
+    }
+
     try {
         raw = modbus_client_->readRegister(REG_ODU_INPUT_STATUS);
         status.odu_input_status = raw;
@@ -510,6 +526,16 @@ void ControlLoop::processCommands() {
                     fireSettingsCallback();
                 } catch (const ModbusException& e) {
                     WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set priority register: %s", e.what());
+                }
+                break;
+
+            case CommandType::CMD_SET_OCCUPANCY_MODE:
+                WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_OCCUPANCY_MODE, mode=%d", cmd.int_val);
+                try {
+                    modbus_client_->writeRegister(REG_OCCUPANCY_MODE, static_cast<uint16_t>(cmd.int_val));
+                    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Occupancy mode set to %d (0=Away, 1=Sleep, 2=Home)", cmd.int_val);
+                } catch (const ModbusException& e) {
+                    WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set occupancy mode: %s", e.what());
                 }
                 break;
 
