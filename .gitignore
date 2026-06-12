@@ -13,3 +13,6 @@ tests/test_spsc
 
 # Runtime files
 /tmp/windmi-controller.lock
+
+# Brainstorming mockups
+.superpowers/
