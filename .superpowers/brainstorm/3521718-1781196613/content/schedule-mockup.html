@@ -1,0 +1,149 @@
+<h2>Schedule Tab — Timeline Mockup</h2>
+<p class="subtitle">Day groups with per-day overrides, 30-min slots as colored blocks</p>
+
+<!-- Day group tabs -->
+<div style="display:flex;gap:6px;margin-bottom:16px;">
+  <button class="mock-button" style="background:rgba(59,130,246,0.2);border-color:#3b82f6;color:#fff;">Weekdays (Mon-Fri)</button>
+  <button class="mock-button" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#9ca3af;">Weekend (Sat-Sun)</button>
+  <button class="mock-button" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#9ca3af;font-size:0.75rem;">Mon</button>
+  <button class="mock-button" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#9ca3af;font-size:0.75rem;">Tue</button>
+  <button class="mock-button" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#9ca3af;font-size:0.75rem;">Wed</button>
+  <button class="mock-button" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#9ca3af;font-size:0.75rem;">Thu</button>
+  <button class="mock-button" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#9ca3af;font-size:0.75rem;">Fri</button>
+  <button class="mock-button" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#9ca3af;font-size:0.75rem;">Sat</button>
+  <button class="mock-button" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#9ca3af;font-size:0.75rem;">Sun</button>
+</div>
+
+<!-- Legend -->
+<div style="display:flex;gap:16px;margin-bottom:12px;font-size:0.8rem;color:#9ca3af;">
+  <span><span style="display:inline-block;width:12px;height:12px;background:#3b82f6;border-radius:2px;vertical-align:middle;"></span> Heating + DHW</span>
+  <span><span style="display:inline-block;width:12px;height:12px;background:#10b981;border-radius:2px;vertical-align:middle;"></span> DHW Only</span>
+  <span><span style="display:inline-block;width:12px;height:12px;background:#f59e0b;border-radius:2px;vertical-align:middle;"></span> Heating Only</span>
+  <span><span style="display:inline-block;width:12px;height:12px;background:#4b5563;border-radius:2px;vertical-align:middle;"></span> OFF</span>
+</div>
+
+<!-- Timeline -->
+<div style="background:rgba(255,255,255,0.05);border-radius:12px;padding:16px;border:1px solid rgba(255,255,255,0.1);">
+  <!-- Hour labels -->
+  <div style="display:flex;margin-bottom:4px;">
+    <div style="width:40px;flex-shrink:0;"></div>
+    <div style="display:flex;flex:1;">
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">0:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">1:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">2:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">3:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">4:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">5:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">6:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">7:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">8:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">9:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">10:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">11:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">12:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">13:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">14:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">15:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">16:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">17:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">18:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">19:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">20:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">21:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">22:00</div>
+      <div style="flex:1;text-align:center;font-size:0.65rem;color:#6b7280;">23:00</div>
+    </div>
+  </div>
+
+  <!-- :00 row -->
+  <div style="display:flex;align-items:center;margin-bottom:2px;">
+    <div style="width:40px;flex-shrink:0;font-size:0.65rem;color:#6b7280;text-align:right;padding-right:6px;">:00</div>
+    <div style="display:flex;flex:1;gap:1px;height:18px;">
+      <div style="flex:1;background:#4b5563;border-radius:2px 0 0 2px;" title="0:00 OFF"></div>
+      <div style="flex:1;background:#4b5563;" title="1:00 OFF"></div>
+      <div style="flex:1;background:#4b5563;" title="2:00 OFF"></div>
+      <div style="flex:1;background:#4b5563;" title="3:00 OFF"></div>
+      <div style="flex:1;background:#4b5563;" title="4:00 OFF"></div>
+      <div style="flex:1;background:#4b5563;border-radius:0 2px 2px 0;" title="5:00 OFF"></div>
+      <div style="flex:1;background:#f59e0b;border-radius:2px 0 0 2px;" title="6:00 Heating 38°C"></div>
+      <div style="flex:1;background:#f59e0b;" title="7:00 Heating 38°C"></div>
+      <div style="flex:1;background:#3b82f6;border-radius:2px 0 0 2px;" title="8:00 H+DHW 40°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="9:00 H+DHW 40°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="10:00 H+DHW 40°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="11:00 H+DHW 40°C/50°C"></div>
+      <div style="flex:1;background:#f59e0b;border-radius:2px 0 0 2px;" title="12:00 Heating 35°C"></div>
+      <div style="flex:1;background:#f59e0b;" title="13:00 Heating 35°C"></div>
+      <div style="flex:1;background:#f59e0b;" title="14:00 Heating 35°C"></div>
+      <div style="flex:1;background:#f59e0b;" title="15:00 Heating 35°C"></div>
+      <div style="flex:1;background:#f59e0b;" title="16:00 Heating 35°C"></div>
+      <div style="flex:1;background:#3b82f6;border-radius:2px 0 0 2px;" title="17:00 H+DHW 42°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="18:00 H+DHW 42°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="19:00 H+DHW 42°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="20:00 H+DHW 42°C/50°C"></div>
+      <div style="flex:1;background:#10b981;border-radius:2px 0 0 2px;" title="21:00 DHW 50°C"></div>
+      <div style="flex:1;background:#10b981;" title="22:00 DHW 50°C"></div>
+      <div style="flex:1;background:#4b5563;border-radius:2px 0 0 2px;" title="23:00 OFF"></div>
+    </div>
+  </div>
+
+  <!-- :30 row -->
+  <div style="display:flex;align-items:center;">
+    <div style="width:40px;flex-shrink:0;font-size:0.65rem;color:#6b7280;text-align:right;padding-right:6px;">:30</div>
+    <div style="display:flex;flex:1;gap:1px;height:18px;">
+      <div style="flex:1;background:#4b5563;border-radius:2px 0 0 2px;" title="0:30 OFF"></div>
+      <div style="flex:1;background:#4b5563;" title="1:30 OFF"></div>
+      <div style="flex:1;background:#4b5563;" title="2:30 OFF"></div>
+      <div style="flex:1;background:#4b5563;" title="3:30 OFF"></div>
+      <div style="flex:1;background:#4b5563;" title="4:30 OFF"></div>
+      <div style="flex:1;background:#4b5563;border-radius:0 2px 2px 0;" title="5:30 OFF"></div>
+      <div style="flex:1;background:#f59e0b;border-radius:2px 0 0 2px;" title="6:30 Heating 38°C"></div>
+      <div style="flex:1;background:#f59e0b;" title="7:30 Heating 38°C"></div>
+      <div style="flex:1;background:#3b82f6;border-radius:2px 0 0 2px;" title="8:30 H+DHW 40°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="9:30 H+DHW 40°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="10:30 H+DHW 40°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="11:30 H+DHW 40°C/50°C"></div>
+      <div style="flex:1;background:#f59e0b;border-radius:2px 0 0 2px;" title="12:30 Heating 35°C"></div>
+      <div style="flex:1;background:#f59e0b;" title="13:30 Heating 35°C"></div>
+      <div style="flex:1;background:#f59e0b;" title="14:30 Heating 35°C"></div>
+      <div style="flex:1;background:#f59e0b;" title="15:30 Heating 35°C"></div>
+      <div style="flex:1;background:#f59e0b;" title="16:30 Heating 35°C"></div>
+      <div style="flex:1;background:#3b82f6;border-radius:2px 0 0 2px;" title="17:30 H+DHW 42°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="18:30 H+DHW 42°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="19:30 H+DHW 42°C/50°C"></div>
+      <div style="flex:1;background:#3b82f6;" title="20:30 H+DHW 42°C/50°C"></div>
+      <div style="flex:1;background:#10b981;border-radius:2px 0 0 2px;" title="21:30 DHW 50°C"></div>
+      <div style="flex:1;background:#10b981;" title="22:30 DHW 50°C"></div>
+      <div style="flex:1;background:#4b5563;border-radius:2px 0 0 2px;" title="23:30 OFF"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Editor panel (appears on click) -->
+<div style="background:rgba(255,255,255,0.05);border-radius:12px;padding:16px;margin-top:12px;border:1px solid rgba(59,130,246,0.3);">
+  <div style="font-size:0.85rem;color:#3b82f6;font-weight:600;margin-bottom:10px;">✏️ Editing 17:00-21:00 (Weekdays)</div>
+  <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.75rem;color:#9ca3af;">Mode</label>
+      <select class="mock-input" style="width:160px;">
+        <option>OFF</option>
+        <option>DHW Only</option>
+        <option>Heating Only</option>
+        <option selected>Heating + DHW</option>
+      </select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.75rem;color:#9ca3af;">Heating (°C)</label>
+      <input class="mock-input" type="number" value="42" style="width:80px;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.75rem;color:#9ca3af;">DHW (°C)</label>
+      <input class="mock-input" type="number" value="50" style="width:80px;">
+    </div>
+    <button class="mock-button" style="background:#3b82f6;color:#fff;border:none;padding:8px 16px;margin-left:auto;">Apply to selection</button>
+  </div>
+</div>
+
+<div style="margin-top:12px;display:flex;gap:8px;">
+  <button class="mock-button" style="background:#10b981;color:#fff;border:none;padding:8px 16px;">Save Schedule</button>
+  <button class="mock-button" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#9ca3af;padding:8px 16px;">Reset to defaults</button>
+</div>
