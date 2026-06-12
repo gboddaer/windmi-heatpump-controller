@@ -4,6 +4,9 @@ const API_SET_DHW_URL = '/api/set-dhw';
 const API_SET_HEATING_URL = '/api/set-heating';
 const API_SET_PRIORITY_URL = '/api/set-priority';
 const API_SET_OCCUPANCY_URL = '/api/set-occupancy';
+const API_SCHEDULE_URL = '/api/schedule';
+const API_SCHEDULE_TOGGLE_URL = '/api/schedule/toggle';
+const API_SCHEDULE_RESUME_URL = '/api/schedule/resume';
 const REFRESH_INTERVAL = 5000; // 5 seconds
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
@@ -17,6 +20,10 @@ let pendingMode = null;  // Prevents status poll from reverting mode before comm
 let currentMode = 3; // default: Heating + DHW Priority
 let currentPriority = 'dhw'; // 'dhw' or 'heating' (derived from mode)
 let currentOccupancy = 'home'; // 'away', 'sleep', 'home'
+
+// Schedule state
+let scheduleData = { enabled: false, paused: false, ranges: [] };
+let editingRangeIndex = -1; // -1 means adding a new range
 
 // DOM Elements
 const elements = {
@@ -370,6 +377,12 @@ function updateUI(status) {
         elements.occupancyHomeBtn.classList.toggle('active', currentOccupancy === 'home');
     }
 
+    // Schedule state from status
+    if (status.scheduleActive !== undefined) {
+        scheduleData.paused = status.schedulePaused || false;
+        renderSchedule();
+    }
+
     // Last update
     const now = new Date();
 
@@ -472,10 +485,205 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
+// ---- Schedule Functions ----
+
+async function loadSchedule() {
+    try {
+        const data = await apiGet(API_SCHEDULE_URL);
+        scheduleData = data;
+        renderSchedule();
+    } catch (e) {
+        console.error('Failed to load schedule:', e);
+    }
+}
+
+function minutesToTime(m) {
+    const hh = String(Math.floor(m / 60)).padStart(2, '0');
+    const mm = String(m % 60).padStart(2, '0');
+    return hh + ':' + mm;
+}
+
+function timeToMinutes(t) {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+}
+
+function modeBadgeClass(mode) {
+    if (mode === 0) return 'off';
+    if (mode === 1) return 'dhw';
+    if (mode === 2) return 'heating';
+    return 'both';
+}
+
+function modeLabel(mode) {
+    const labels = ['OFF', 'DHW Only', 'Heating Only', 'Heating + DHW'];
+    return labels[mode] || 'Unknown';
+}
+
+function renderSchedule() {
+    // Toggle
+    const toggle = document.getElementById('scheduleEnabled');
+    if (toggle) toggle.checked = scheduleData.enabled;
+
+    // State indicator
+    const stateEl = document.getElementById('scheduleState');
+    if (stateEl) {
+        if (scheduleData.enabled && scheduleData.paused) {
+            stateEl.textContent = 'Schedule paused — manual control active';
+            stateEl.className = 'schedule-state paused';
+        } else if (scheduleData.enabled) {
+            stateEl.textContent = 'Schedule active';
+            stateEl.className = 'schedule-state active';
+        } else {
+            stateEl.textContent = 'Schedule disabled';
+            stateEl.className = 'schedule-state';
+        }
+    }
+
+    // Ranges
+    const container = document.getElementById('scheduleRanges');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (scheduleData.ranges.length === 0) {
+        container.innerHTML = '<p class="placeholder-text">No time ranges configured. Tap "+ Add" below.</p>';
+        return;
+    }
+
+    scheduleData.ranges.forEach((r, i) => {
+        const card = document.createElement('div');
+        card.className = 'schedule-range-card';
+        card.innerHTML = `
+            <span class="range-time">${minutesToTime(r.start)} – ${minutesToTime(r.end)}</span>
+            <span class="range-mode-badge ${modeBadgeClass(r.mode)}">${modeLabel(r.mode)}</span>
+            <span class="range-temps">H:${r.heatingTemp}° D:${r.dhwTemp}°</span>
+            <span class="range-edit-icon">✎</span>
+        `;
+        card.addEventListener('click', () => openEditModal(i));
+        container.appendChild(card);
+    });
+}
+
+function openEditModal(index) {
+    editingRangeIndex = index;
+    const modal = document.getElementById('scheduleEditModal');
+    const title = document.getElementById('editModalTitle');
+    const deleteBtn = document.getElementById('editDeleteBtn');
+
+    if (index >= 0) {
+        const r = scheduleData.ranges[index];
+        title.textContent = 'Edit Range';
+        deleteBtn.style.display = '';
+        document.getElementById('editStart').value = minutesToTime(r.start);
+        document.getElementById('editEnd').value = minutesToTime(r.end);
+        document.getElementById('editMode').value = r.mode;
+        document.getElementById('editHeatingTemp').value = r.heatingTemp;
+        document.getElementById('editDhwTemp').value = r.dhwTemp;
+    } else {
+        title.textContent = 'Add Range';
+        deleteBtn.style.display = 'none';
+        document.getElementById('editStart').value = '08:00';
+        document.getElementById('editEnd').value = '10:00';
+        document.getElementById('editMode').value = '3';
+        document.getElementById('editHeatingTemp').value = '40';
+        document.getElementById('editDhwTemp').value = '45';
+    }
+    modal.classList.add('visible');
+}
+
+function closeEditModal() {
+    document.getElementById('scheduleEditModal').classList.remove('visible');
+    editingRangeIndex = -1;
+}
+
+async function saveEditModal() {
+    const range = {
+        start: timeToMinutes(document.getElementById('editStart').value),
+        end: timeToMinutes(document.getElementById('editEnd').value),
+        mode: parseInt(document.getElementById('editMode').value),
+        heatingTemp: parseFloat(document.getElementById('editHeatingTemp').value),
+        dhwTemp: parseFloat(document.getElementById('editDhwTemp').value)
+    };
+
+    if (editingRangeIndex >= 0) {
+        scheduleData.ranges[editingRangeIndex] = range;
+    } else {
+        scheduleData.ranges.push(range);
+    }
+
+    // Sort by start time
+    scheduleData.ranges.sort((a, b) => a.start - b.start);
+
+    try {
+        await apiPost(API_SCHEDULE_URL, {
+            enabled: scheduleData.enabled,
+            ranges: scheduleData.ranges
+        });
+        closeEditModal();
+        renderSchedule();
+        showNotification('Schedule range saved', 'success');
+    } catch (e) {
+        showNotification('Failed to save: ' + e.message, 'error');
+    }
+}
+
+async function deleteEditModal() {
+    if (editingRangeIndex < 0) return;
+    scheduleData.ranges.splice(editingRangeIndex, 1);
+    try {
+        await apiPost(API_SCHEDULE_URL, {
+            enabled: scheduleData.enabled,
+            ranges: scheduleData.ranges
+        });
+        closeEditModal();
+        renderSchedule();
+        showNotification('Range deleted', 'success');
+    } catch (e) {
+        showNotification('Failed to delete: ' + e.message, 'error');
+    }
+}
+
+// Schedule event bindings
+function bindScheduleEvents() {
+    // Toggle enable/disable
+    const toggle = document.getElementById('scheduleEnabled');
+    if (toggle) {
+        toggle.addEventListener('change', async () => {
+            scheduleData.enabled = toggle.checked;
+            try {
+                await apiPost(API_SCHEDULE_TOGGLE_URL, { enabled: toggle.checked });
+                renderSchedule();
+                showNotification('Schedule ' + (toggle.checked ? 'enabled' : 'disabled'), 'success');
+            } catch (e) {
+                toggle.checked = !toggle.checked; // revert
+                showNotification('Failed to toggle: ' + e.message, 'error');
+            }
+        });
+    }
+
+    // Add range button
+    const addBtn = document.getElementById('addRangeBtn');
+    if (addBtn) {
+        addBtn.addEventListener('click', () => openEditModal(-1));
+    }
+
+    // Modal buttons
+    const cancelBtn = document.getElementById('editCancelBtn');
+    if (cancelBtn) cancelBtn.addEventListener('click', closeEditModal);
+
+    const saveBtn = document.getElementById('editSaveBtn');
+    if (saveBtn) saveBtn.addEventListener('click', saveEditModal);
+
+    const deleteBtn = document.getElementById('editDeleteBtn');
+    if (deleteBtn) deleteBtn.addEventListener('click', deleteEditModal);
+}
+
 // Initialize
 function init() {
     fetchStatus();
     startCountdown();
+    bindScheduleEvents();
+    loadSchedule();
 }
 
 // Add CSS for notification animations

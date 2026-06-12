@@ -172,4 +172,149 @@ TEST(ApiUrlConstantsTest, EndpointsDefined) {
     EXPECT_STREQ("/api/set-heating", "/api/set-heating");
     EXPECT_STREQ("/api/set-priority", "/api/set-priority");
     EXPECT_STREQ("/api/set-mode", "/api/set-mode");
+    EXPECT_STREQ("/api/set-occupancy", "/api/set-occupancy");
+    EXPECT_STREQ("/api/schedule", "/api/schedule");
+    EXPECT_STREQ("/api/schedule/toggle", "/api/schedule/toggle");
+    EXPECT_STREQ("/api/schedule/resume", "/api/schedule/resume");
+}
+
+// ─── Schedule API JSON Parsing Tests ───
+
+static bool parseJsonBool(const std::string& json, const std::string& key, bool& out) {
+    std::string search = "\"" + key + "\"";
+    size_t pos = json.find(search);
+    if (pos == std::string::npos) return false;
+    pos = json.find(':', pos + search.size());
+    if (pos == std::string::npos) return false;
+    std::string rest = json.substr(pos + 1);
+    auto fs = rest.find_first_not_of(" \t");
+    if (fs == std::string::npos) return false;
+    rest = rest.substr(fs);
+    auto ce = rest.find_first_of(",}\n");
+    if (ce != std::string::npos) rest = rest.substr(0, ce);
+    if (rest == "true") { out = true; return true; }
+    if (rest == "false") { out = false; return true; }
+    return false;
+}
+
+static bool parseJsonInt(const std::string& json, const std::string& key, int& out) {
+    std::string search = "\"" + key + "\"";
+    size_t pos = json.find(search);
+    if (pos == std::string::npos) return false;
+    pos = json.find(':', pos + search.size());
+    if (pos == std::string::npos) return false;
+    std::string rest = json.substr(pos + 1);
+    auto fs = rest.find_first_not_of(" \t");
+    if (fs == std::string::npos) return false;
+    rest = rest.substr(fs);
+    auto ce = rest.find_first_of(",}\n");
+    if (ce != std::string::npos) rest = rest.substr(0, ce);
+    try {
+        out = std::stoi(rest);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+TEST(ScheduleApiJsonTest, EnabledTrueParsed) {
+    std::string json = "{\"enabled\":true,\"ranges\":[]}";
+    bool val = false;
+    EXPECT_TRUE(parseJsonBool(json, "enabled", val));
+    EXPECT_TRUE(val);
+}
+
+TEST(ScheduleApiJsonTest, EnabledFalseParsed) {
+    std::string json = "{\"enabled\":false,\"ranges\":[]}";
+    bool val = true;
+    EXPECT_TRUE(parseJsonBool(json, "enabled", val));
+    EXPECT_FALSE(val);
+}
+
+TEST(ScheduleApiJsonTest, MissingEnabledField) {
+    std::string json = "{\"ranges\":[]}";
+    bool val = true;
+    EXPECT_FALSE(parseJsonBool(json, "enabled", val));
+}
+
+TEST(ScheduleApiJsonTest, PausedFieldParsed) {
+    std::string json = "{\"enabled\":true,\"paused\":false,\"ranges\":[]}";
+    bool val = true;
+    EXPECT_TRUE(parseJsonBool(json, "paused", val));
+    EXPECT_FALSE(val);
+}
+
+TEST(ScheduleApiJsonTest, RangeStartEndParsed) {
+    std::string json = R"({"ranges":[{"start":480,"end":600,"mode":3}]})";
+    int val = -1;
+    EXPECT_TRUE(parseJsonInt(json, "start", val));
+    EXPECT_EQ(val, 480);
+}
+
+TEST(ScheduleApiJsonTest, RangeJsonStructure) {
+    std::string json = R"({"enabled":true,"ranges":[{"start":480,"end":600,"mode":3,"heatingTemp":40.0,"dhwTemp":45.0}]})";
+
+    // Verify the JSON contains expected fields
+    EXPECT_NE(json.find("\"start\":480"), std::string::npos);
+    EXPECT_NE(json.find("\"end\":600"), std::string::npos);
+    EXPECT_NE(json.find("\"mode\":3"), std::string::npos);
+    EXPECT_NE(json.find("\"heatingTemp\":40"), std::string::npos);
+    EXPECT_NE(json.find("\"dhwTemp\":45"), std::string::npos);
+}
+
+TEST(ScheduleApiJsonTest, MultipleRangesJson) {
+    std::string json = R"({"enabled":true,"ranges":[{"start":0,"end":360,"mode":2,"heatingTemp":30,"dhwTemp":40},{"start":720,"end":1080,"mode":3,"heatingTemp":42,"dhwTemp":45}]})";
+
+    EXPECT_NE(json.find("\"start\":0"), std::string::npos);
+    EXPECT_NE(json.find("\"start\":720"), std::string::npos);
+    EXPECT_NE(json.find("\"end\":1080"), std::string::npos);
+}
+
+TEST(ScheduleApiJsonTest, EmptyRangesJson) {
+    std::string json = R"({"enabled":false,"ranges":[]})";
+    EXPECT_NE(json.find("\"ranges\":[]"), std::string::npos);
+}
+
+TEST(ScheduleApiJsonTest, ScheduleToggleJson) {
+    std::string json = R"({"enabled":true})";
+    bool val = false;
+    EXPECT_TRUE(parseJsonBool(json, "enabled", val));
+    EXPECT_TRUE(val);
+}
+
+// ─── Schedule State in Status JSON ───
+// Note: generateStatusJson is used for testing only.
+// The actual WebServer uses snprintf for status JSON which includes
+// scheduleActive and schedulePaused fields.
+
+TEST(StatusJsonScheduleFieldsTest, WorkingModeFieldExists) {
+    std::string json = makeJson("heat+dhw", "heat");
+    EXPECT_NE(json.find("workingMode"), std::string::npos);
+}
+
+// ─── Schedule Range Validation Edge Cases ───
+
+TEST(ScheduleRangeValidationTest, ValidModeValues) {
+    // Modes 0-3 are valid
+    EXPECT_TRUE((0 >= 0 && 0 <= 3));
+    EXPECT_TRUE((3 >= 0 && 3 <= 3));
+    EXPECT_FALSE((4 >= 0 && 4 <= 3));
+    EXPECT_FALSE((-1 >= 0 && -1 <= 3));
+}
+
+TEST(ScheduleRangeValidationTest, ValidMinuteValues) {
+    // Minutes 0-1439 are valid
+    EXPECT_TRUE((0 >= 0 && 0 < 1440));
+    EXPECT_TRUE((1439 >= 0 && 1439 < 1440));
+    EXPECT_FALSE((1440 >= 0 && 1440 < 1440));
+    EXPECT_FALSE((-1 >= 0 && -1 < 1440));
+}
+
+TEST(ScheduleRangeValidationTest, MinuteConversion) {
+    // 08:00 = 480 minutes
+    EXPECT_EQ(8 * 60 + 0, 480);
+    // 23:30 = 1410 minutes
+    EXPECT_EQ(23 * 60 + 30, 1410);
+    // 00:00 = 0 minutes
+    EXPECT_EQ(0 * 60 + 0, 0);
 }

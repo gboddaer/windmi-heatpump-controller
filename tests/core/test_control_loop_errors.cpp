@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "core/ControlLoop.hpp"
+#include "core/Scheduler.hpp"
 #include "modbus/IModbusClient.hpp"
 
 namespace windmi::test {
@@ -166,6 +167,83 @@ TEST(COPCalculationEdgeTest, ValidCOP) {
   status.cop = status.heat_output_w / status.ac_power_w;
 
   EXPECT_FLOAT_EQ(status.cop, 4.0f);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Schedule Integration Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST(StatusSnapshotScheduleTest, DefaultScheduleState) {
+    StatusSnapshot status{};
+    EXPECT_FALSE(status.schedule_active);
+    EXPECT_FALSE(status.schedule_paused);
+}
+
+TEST(StatusSnapshotScheduleTest, ScheduleActiveState) {
+    StatusSnapshot status{};
+    status.schedule_active = true;
+    status.schedule_paused = false;
+    EXPECT_TRUE(status.schedule_active);
+    EXPECT_FALSE(status.schedule_paused);
+}
+
+TEST(StatusSnapshotScheduleTest, SchedulePausedState) {
+    StatusSnapshot status{};
+    status.schedule_active = false;
+    status.schedule_paused = true;
+    EXPECT_FALSE(status.schedule_active);
+    EXPECT_TRUE(status.schedule_paused);
+}
+
+TEST(SchedulerIntegrationTest, SchedulerAccessibleFromControlLoop) {
+    ControlLoop loop;
+    Scheduler& sched = loop.scheduler();
+    EXPECT_FALSE(sched.isEnabled());
+    EXPECT_FALSE(sched.isPaused());
+}
+
+TEST(SchedulerIntegrationTest, SchedulerEnableDisable) {
+    ControlLoop loop;
+    Scheduler& sched = loop.scheduler();
+    sched.setEnabled(true);
+    EXPECT_TRUE(sched.isEnabled());
+    sched.setEnabled(false);
+    EXPECT_FALSE(sched.isEnabled());
+}
+
+TEST(SchedulerIntegrationTest, SchedulerPauseResume) {
+    ControlLoop loop;
+    Scheduler& sched = loop.scheduler();
+    sched.setEnabled(true);
+    sched.pause();
+    EXPECT_TRUE(sched.isPaused());
+    sched.resume();
+    EXPECT_FALSE(sched.isPaused());
+}
+
+TEST(SchedulerIntegrationTest, SchedulerSetRanges) {
+    ControlLoop loop;
+    Scheduler& sched = loop.scheduler();
+    std::vector<ScheduleRange> ranges = {{0, 600, 3, 40.0f, 45.0f}};
+    EXPECT_TRUE(sched.setRanges(ranges));
+    EXPECT_EQ(sched.getRanges().size(), 1u);
+    EXPECT_EQ(sched.getRanges()[0].startMinutes, 0);
+}
+
+TEST(CommandTypeTest, ScheduleRelatedCommandTypes) {
+    // Verify that schedule can use existing command types
+    Command cmd;
+    cmd.type = CommandType::CMD_SET_RUNNING_MODE;
+    cmd.int_val = 3;
+    EXPECT_EQ(cmd.type, CommandType::CMD_SET_RUNNING_MODE);
+
+    cmd.type = CommandType::CMD_SET_HEATING_TEMP;
+    cmd.float_val = 40.0f;
+    EXPECT_EQ(cmd.type, CommandType::CMD_SET_HEATING_TEMP);
+
+    cmd.type = CommandType::CMD_SET_DHW_TEMP;
+    cmd.float_val = 45.0f;
+    EXPECT_EQ(cmd.type, CommandType::CMD_SET_DHW_TEMP);
 }
 
 }  // namespace windmi::test
