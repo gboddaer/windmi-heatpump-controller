@@ -13,5 +13,6 @@
 #define LOG_TAG_SELFTEST      "SelfTest"
 #define LOG_TAG_SIMULATOR     "Simulator"
 #define LOG_TAG_PLATFORM      "Platform"
+#define LOG_TAG_SCHEDULER     "Scheduler"
 
 #endif // WINDMI_UTILS_LOG_TAGS_HPP

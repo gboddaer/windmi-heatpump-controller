@@ -12,6 +12,7 @@
 #include <cstring>
 #include <cmath>
 #include <chrono>
+#include <ctime>
 
 namespace windmi {
 
@@ -179,6 +180,10 @@ void ControlLoop::stop() {
 
 bool ControlLoop::isRunning() const {
     return running_.load();
+}
+
+Scheduler& ControlLoop::scheduler() {
+    return scheduler_;
 }
 
 void ControlLoop::kick() {
@@ -753,6 +758,63 @@ void ControlLoop::threadFunc() {
         // Read current status
         StatusSnapshot status{};
         if (readStatus(status)) {
+            // Evaluate schedule
+            ScheduleRange currentRange{};
+            bool scheduleChanged = false;
+            if (scheduler_.isEnabled() && !scheduler_.isPaused()) {
+                std::time_t now = std::time(nullptr);
+                struct tm tmBuf;
+#if defined(_WIN32) || defined(_WIN64)
+                localtime_s(&tmBuf, &now);
+#else
+                localtime_r(&now, &tmBuf);
+#endif
+                int minutes = tmBuf.tm_hour * 60 + tmBuf.tm_min;
+
+                if (scheduler_.evaluate(minutes, currentRange)) {
+                    status.schedule_active = true;
+                    status.schedule_paused = false;
+
+                    // Check if the active range changed from last tick
+                    if (lastScheduleRange_.startMinutes == 0 && lastScheduleRange_.endMinutes == 0) {
+                        scheduleChanged = true; // First run
+                    } else if (currentRange.startMinutes != lastScheduleRange_.startMinutes ||
+                               currentRange.mode != lastScheduleRange_.mode) {
+                        scheduleChanged = true;
+                    }
+                    lastScheduleRange_ = currentRange;
+
+                    // Push commands if schedule changed
+                    if (scheduleChanged) {
+                        WINDMI_LOG_INFO(LOG_TAG_SCHEDULER, "Schedule change at %d min: mode=%d, heat=%.1f, dhw=%.1f",
+                                       minutes, currentRange.mode,
+                                       currentRange.heatingTemp, currentRange.dhwTemp);
+
+                        Command modeCmd;
+                        modeCmd.type = CommandType::CMD_SET_RUNNING_MODE;
+                        modeCmd.int_val = currentRange.mode;
+                        cmd_queue_->push(modeCmd);
+
+                        Command heatCmd;
+                        heatCmd.type = CommandType::CMD_SET_HEATING_TEMP;
+                        heatCmd.float_val = currentRange.heatingTemp;
+                        cmd_queue_->push(heatCmd);
+
+                        Command dhwCmd;
+                        dhwCmd.type = CommandType::CMD_SET_DHW_TEMP;
+                        dhwCmd.float_val = currentRange.dhwTemp;
+                        cmd_queue_->push(dhwCmd);
+
+                        kick();
+                    }
+                } else {
+                    status.schedule_active = false;
+                }
+            } else {
+                status.schedule_active = false;
+                status.schedule_paused = scheduler_.isPaused();
+            }
+
             // Apply control logic
             applyControlLogic(status);
 

@@ -33,9 +33,12 @@ public:
      * @param static_dir Directory for static files
      * @param cmd_queue Command queue for pushing API commands
      * @param status_queue Status queue for reading status snapshots
+     * @param scheduler Pointer to Scheduler (may be nullptr)
+     * @param wake_callback Callback to wake the control loop
      */
     WebServer(int port, const std::string& static_dir,
               CmdQueue* cmd_queue, StatusQueue* status_queue,
+              Scheduler* scheduler,
               std::function<void()> wake_callback = nullptr);
 
     ~WebServer();
@@ -70,11 +73,16 @@ private:
     void apiSetPriorityHandler(struct mg_connection* c, struct mg_str* body);
     void apiSetModeHandler(struct mg_connection* c, struct mg_str* body);
     void apiSetOccupancyHandler(struct mg_connection* c, struct mg_str* body);
+    void apiScheduleGetHandler(struct mg_connection* c);
+    void apiScheduleSetHandler(struct mg_connection* c, struct mg_str* body);
+    void apiScheduleToggleHandler(struct mg_connection* c, struct mg_str* body);
+    void apiScheduleResumeHandler(struct mg_connection* c);
 
     struct mg_mgr mgr_;
     std::string static_dir_;
     CmdQueue* cmd_queue_;
     StatusQueue* status_queue_;
+    Scheduler* scheduler_;
     StatusSnapshot last_status_;
     std::atomic<bool> running_;
     volatile sig_atomic_t shutting_down_;

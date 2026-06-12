@@ -43,21 +43,21 @@ TEST(WebServerTest, CreateServerWithQueues) {
     CmdQueue cmd_queue;
     StatusQueue status_queue;
     EXPECT_NO_THROW({
-        WebServer server(12345, "static", &cmd_queue, &status_queue);
+        WebServer server(12345, "static", &cmd_queue, &status_queue, nullptr);
     });
 }
 
 TEST(WebServerTest, IsShuttingDownInitiallyFalse) {
     CmdQueue cmd_queue;
     StatusQueue status_queue;
-    WebServer server(12346, "static", &cmd_queue, &status_queue);
+    WebServer server(12346, "static", &cmd_queue, &status_queue, nullptr);
     EXPECT_FALSE(server.isShuttingDown());
 }
 
 TEST(WebServerTest, StopSetsShuttingDown) {
     CmdQueue cmd_queue;
     StatusQueue status_queue;
-    WebServer server(12347, "static", &cmd_queue, &status_queue);
+    WebServer server(12347, "static", &cmd_queue, &status_queue, nullptr);
     server.stop();
     EXPECT_TRUE(server.isShuttingDown());
 }

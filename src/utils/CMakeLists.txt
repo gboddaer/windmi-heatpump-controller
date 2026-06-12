@@ -1,6 +1,7 @@
 add_library(windmi_utils STATIC
     Config.cpp
     JsonHelpers.cpp
+    ScheduleConfig.cpp
     SpscQueue.cpp
     Logger.cpp
     LoggerC.cpp

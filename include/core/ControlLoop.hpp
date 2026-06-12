@@ -15,6 +15,7 @@
 #include <functional>
 #include <string>
 #include "utils/Platform.hpp"
+#include "core/Scheduler.hpp"
 
 namespace windmi {
 
@@ -114,6 +115,10 @@ struct StatusSnapshot {
     
     // Occupancy mode (0=Away, 1=Sleep, 2=Home)
     int occupancy_mode = 2;
+    
+    // Schedule state
+    bool schedule_active = false;
+    bool schedule_paused = false;
 };
 
 /**
@@ -235,6 +240,11 @@ public:
     bool isRunning() const;
 
     /**
+     * @brief Get reference to the internal scheduler
+     */
+    Scheduler& scheduler();
+
+    /**
      * @brief Kick the control loop to wake it immediately
      *
      * Called when a command is pushed to the cmd_queue so the
@@ -281,6 +291,10 @@ private:
     SettingsCallback settings_callback_;
     float mDhwTarget_ = 45.0f;
     float mHeatingTarget_ = 40.0f;
+
+    // Schedule
+    Scheduler scheduler_;
+    ScheduleRange lastScheduleRange_;
 };
 
 } // namespace windmi

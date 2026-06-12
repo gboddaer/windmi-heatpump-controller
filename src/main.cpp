@@ -18,6 +18,7 @@
 #include "modbus/ModbusSerialClient.hpp"
 #include "modbus/SimulatedModbusClient.hpp"
 #include "utils/Config.hpp"
+#include "utils/ScheduleConfig.hpp"
 #include "utils/Logger.hpp"
 #include "utils/LogTags.hpp"
 #include "utils/Platform.hpp"
@@ -273,6 +274,14 @@ int main(int argc, char* argv[]) {
     g_control_loop = new windmi::ControlLoop();
     g_control_loop->setInitialSettings(init_working_mode, init_priority,
                                        init_dhw_target, init_heating_target);
+
+    // Load schedule
+    windmi::ScheduleConfig scheduleConfig;
+    std::string schedule_path = windmi::platform::get_home_dir() + "/.windmi/schedule.json";
+    if (scheduleConfig.loadFromFile(schedule_path)) {
+        g_control_loop->scheduler().setRanges(scheduleConfig.getRanges());
+        g_control_loop->scheduler().setEnabled(scheduleConfig.isEnabled());
+    }
     g_control_loop->setSettingsCallback([&config, config_path](
         int working_mode, const std::string& priority,
         float dhw_target, float heating_target) {
@@ -292,6 +301,7 @@ int main(int argc, char* argv[]) {
 
     try {
         g_web_server = new windmi::WebServer(web_port, resolved_static_dir, &cmd_queue, &status_queue,
+                                             &g_control_loop->scheduler(),
                                              []() {
                                                  if (g_control_loop) {
                                                      g_control_loop->kick();

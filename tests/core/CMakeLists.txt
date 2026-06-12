@@ -11,6 +11,12 @@ target_sources(test_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../src/selftest.
 
 target_include_directories(test_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
 
+add_executable(test_scheduler
+    test_scheduler.cpp
+)
+target_link_libraries(test_scheduler PRIVATE windmi_core windmi_utils GTest::gtest_main)
+target_include_directories(test_scheduler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+
 add_executable(test_main_args
     test_main_args.cpp
 )
