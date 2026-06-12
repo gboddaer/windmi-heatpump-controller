@@ -509,10 +509,17 @@ void WebServer::apiScheduleSetHandler(struct mg_connection* c, struct mg_str* bo
         return;
     }
 
-    // Parse enabled flag
-    double enabledVal = 0;
-    if (mg_json_get_num(*body, "$.enabled", &enabledVal) >= 1) {
-        scheduler_->setEnabled(enabledVal != 0);
+    // Parse enabled flag (accepts both JSON bool and JSON number)
+    {
+        bool enabledVal = false;
+        if (mg_json_get_bool(*body, "$.enabled", &enabledVal) >= 1) {
+            scheduler_->setEnabled(enabledVal);
+        } else {
+            double numVal = 0;
+            if (mg_json_get_num(*body, "$.enabled", &numVal) >= 1) {
+                scheduler_->setEnabled(numVal != 0);
+            }
+        }
     }
 
     // Parse ranges using hand-parsed approach (same as ScheduleConfig)
@@ -615,12 +622,19 @@ void WebServer::apiScheduleToggleHandler(struct mg_connection* c, struct mg_str*
         return;
     }
 
-    double enabledVal = 0;
-    if (mg_json_get_num(*body, "$.enabled", &enabledVal) >= 1) {
-        scheduler_->setEnabled(enabledVal != 0);
+    // Accepts both JSON bool and JSON number
+    bool enabledVal = false;
+    if (mg_json_get_bool(*body, "$.enabled", &enabledVal) >= 1) {
+        scheduler_->setEnabled(enabledVal);
         sendJsonReply(c, 200, "{\"success\":true}");
     } else {
-        sendJsonReply(c, 400, "{\"error\":\"Missing enabled parameter\"}");
+        double numVal = 0;
+        if (mg_json_get_num(*body, "$.enabled", &numVal) >= 1) {
+            scheduler_->setEnabled(numVal != 0);
+            sendJsonReply(c, 200, "{\"success\":true}");
+        } else {
+            sendJsonReply(c, 400, "{\"error\":\"Missing enabled parameter\"}");
+        }
     }
 }
 

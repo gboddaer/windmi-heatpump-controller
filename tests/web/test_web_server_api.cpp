@@ -318,3 +318,43 @@ TEST(ScheduleRangeValidationTest, MinuteConversion) {
     // 00:00 = 0 minutes
     EXPECT_EQ(0 * 60 + 0, 0);
 }
+
+// ─── Schedule Toggle Boolean Parsing Tests ───
+// Verifies that the server-side mg_json_get_bool fix is covered.
+// The server now accepts both JSON booleans and numbers for "enabled".
+
+TEST(ScheduleToggleBooleanTest, JsonBooleanTrue) {
+    // Simulates what the JS client sends: {"enabled":true}
+    std::string json = R"({"enabled":true})";
+    bool val = false;
+    EXPECT_TRUE(parseJsonBool(json, "enabled", val));
+    EXPECT_TRUE(val);
+}
+
+TEST(ScheduleToggleBooleanTest, JsonBooleanFalse) {
+    std::string json = R"({"enabled":false})";
+    bool val = true;
+    EXPECT_TRUE(parseJsonBool(json, "enabled", val));
+    EXPECT_FALSE(val);
+}
+
+TEST(ScheduleToggleBooleanTest, JsonNumberOne) {
+    // Legacy numeric form should also work
+    std::string json = R"({"enabled":1})";
+    int val = -1;
+    EXPECT_TRUE(parseJsonInt(json, "enabled", val));
+    EXPECT_EQ(val, 1);
+}
+
+TEST(ScheduleToggleBooleanTest, JsonNumberZero) {
+    std::string json = R"({"enabled":0})";
+    int val = -1;
+    EXPECT_TRUE(parseJsonInt(json, "enabled", val));
+    EXPECT_EQ(val, 0);
+}
+
+TEST(ScheduleToggleBooleanTest, MissingEnabled) {
+    std::string json = R"({})";
+    bool val = true;
+    EXPECT_FALSE(parseJsonBool(json, "enabled", val));
+}

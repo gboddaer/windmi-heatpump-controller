@@ -649,13 +649,16 @@ function bindScheduleEvents() {
     const toggle = document.getElementById('scheduleEnabled');
     if (toggle) {
         toggle.addEventListener('change', async () => {
-            scheduleData.enabled = toggle.checked;
+            const wanted = toggle.checked;
+            scheduleData.enabled = wanted;
             try {
-                await apiPost(API_SCHEDULE_TOGGLE_URL, { enabled: toggle.checked });
+                await apiPost(API_SCHEDULE_TOGGLE_URL, { enabled: wanted });
                 renderSchedule();
-                showNotification('Schedule ' + (toggle.checked ? 'enabled' : 'disabled'), 'success');
+                showNotification('Schedule ' + (wanted ? 'enabled' : 'disabled'), 'success');
             } catch (e) {
-                toggle.checked = !toggle.checked; // revert
+                toggle.checked = !wanted;
+                scheduleData.enabled = !wanted;
+                renderSchedule();
                 showNotification('Failed to toggle: ' + e.message, 'error');
             }
         });
