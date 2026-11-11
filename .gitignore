@@ -16,3 +16,6 @@ tests/test_spsc
 
 # Brainstorming mockups
 .superpowers/
+
+# Register readout snapshots (tools/windmi_regdump.py)
+regdumps/
