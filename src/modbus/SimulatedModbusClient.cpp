@@ -169,6 +169,24 @@ void SimulatedModbusClient::updateSimulationLocked() {
             registers_[REG_RUNNING_STATUS] = MODE_STATUS_COOL;
         }
     }
+    else if (running_mode == MODE_SET_HEAT_ONLY || running_mode == MODE_SET_COOL_ONLY) {
+        // Native single-function modes: same water behaviour as the +DHW
+        // variants, but without the domestic hot water demand.
+        int16_t leaving = registers_[REG_LEAVING_WATER_TEMP];
+        int16_t step = static_cast<int16_t>(elapsed * (registers_[REG_HEATING_TARGET] - leaving) * 0.2);
+        registers_[REG_LEAVING_WATER_TEMP] = static_cast<int16_t>(leaving + step);
+        registers_[REG_RUNNING_STATUS] = (running_mode == MODE_SET_HEAT_ONLY) ? MODE_STATUS_HEAT
+                                                                             : MODE_STATUS_COOL;
+    }
+    else if (running_mode == MODE_SET_DHW_ONLY) {
+        // Native DHW-only mode, what the display controller writes for "DHW
+        // mode". Measured 2026-11-11: status goes to 4 (dhw), the DHW valve
+        // closes and the tank climbs while the heating circuit is left alone.
+        int16_t tank = registers_[REG_DHW_TANK_TEMP];
+        int16_t step = static_cast<int16_t>(elapsed * (registers_[REG_DHW_TARGET] - tank) * 0.2);
+        registers_[REG_DHW_TANK_TEMP] = static_cast<int16_t>(tank + step);
+        registers_[REG_RUNNING_STATUS] = MODE_STATUS_DHW;
+    }
     
     // Update power readings based on current status
     int running_status = registers_[REG_RUNNING_STATUS];

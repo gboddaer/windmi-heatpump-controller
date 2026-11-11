@@ -51,10 +51,16 @@ extern "C" {
 #define MODBUS_SERIAL_RETRY_DELAY_MS 100
 
 // Running Mode Values for SETTING (register 0x002C - writable)
-// Only modes 0, 1, 2 should be SET on this register
+// Modes 3, 4 and 5 are marked "only in GCHV" in the vendor manual, but this unit
+// accepts them and the display controller writes them itself: measured 2026-11-11,
+// selecting DHW-only on the panel writes 5, passing through 4 (spec F2), and a
+// script-written 5 is executed within 2 s (spec F1).
 #define MODE_SET_OFF              0      // Off
 #define MODE_SET_COOL_DHW         1      // Cool + DHW
 #define MODE_SET_HEAT_DHW         2      // Heat + DHW
+#define MODE_SET_COOL_ONLY        3      // Cool only (GCHV)
+#define MODE_SET_HEAT_ONLY        4      // Heating only (GCHV)
+#define MODE_SET_DHW_ONLY         5      // DHW only (GCHV) - what the panel writes for "DHW mode"
 
 // Running Status Values for READING (register 0x002D - read-only)
 // These values differ from the writable mode values!
@@ -84,7 +90,7 @@ extern "C" {
 #define REG_DHW_PRIORITY          0x02BF  // RW - DHW priority flag (0=Automatic, 1=DHW priority)
 //
 // === READ/WRITE REGISTERS ===
-#define REG_RUNNING_MODE          0x002C  // RW - Set mode: 0=Off, 1=Cool+DHW, 2=Heat+DHW (ONLY 0,1,2 allowed!)
+#define REG_RUNNING_MODE          0x002C  // RW - Set mode: 0=Off 1=Cool+DHW 2=Heat+DHW 3=Cool 4=Heat 5=DHW only
 #define REG_HEATING_TARGET        0x0191  // RW - Heating target temperature (0.1°C)
 #define REG_DHW_TARGET            0x0194  // RW - DHW target temperature (0.1°C)
 #define REG_DHW_VALVE_STATUS      0x00D2  // R  - DHW valve status (0=Opened, 1=Closed)

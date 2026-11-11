@@ -7,6 +7,7 @@
 #include "utils/Logger.hpp"
 #include "utils/LogTags.hpp"
 #include "utils/ScheduleConfig.hpp"
+#include "core/ModeNames.hpp"
 #include "config.h"
 
 #include <mongoose.h>
@@ -22,15 +23,6 @@
 namespace windmi {
 
 // ---- Static helper functions (matching master) ----
-
-static const char* mode_to_string(int mode) {
-    switch (mode) {
-        case MODE_SET_OFF:      return "off";
-        case MODE_SET_COOL_DHW: return "cool+dhw";
-        case MODE_SET_HEAT_DHW: return "heat+dhw";
-        default:                return "unknown";
-    }
-}
 
 static const char* status_to_string(int status) {
     switch (status) {
