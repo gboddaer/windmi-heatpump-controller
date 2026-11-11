@@ -333,8 +333,8 @@ int main(int argc, char* argv[]) {
     WINDMI_LOG_INFO(LOG_TAG_MAIN, "Drain period complete");
 
     if (!demo_mode) {
-        WINDMI_LOG_INFO(LOG_TAG_MAIN, "Writing OFF mode via dedicated client...");
-        bool off_written = false;
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "Writing DHW mode (heat+dhw) via dedicated client...");
+        bool mode_written = false;
         try {
             std::unique_ptr<windmi::IModbusClient> shutdown_client;
             if (!serial_device.empty()) {
@@ -349,13 +349,15 @@ int main(int argc, char* argv[]) {
                 if (shutdown_client->connect()) {
                     shutdown_client->flushBuffer();
                     try {
-                        shutdown_client->writeRegister(REG_RUNNING_MODE, 0);
-                        WINDMI_LOG_INFO(LOG_TAG_MAIN, "OFF write OK (attempt %d)", attempt);
-                        off_written = true;
+                        // The device mode register only supports Off / Cool+DHW / Heat+DHW.
+                        // Leave the unit serving domestic hot water instead of switching it off.
+                        shutdown_client->writeRegister(REG_RUNNING_MODE, MODE_SET_HEAT_DHW);
+                        WINDMI_LOG_INFO(LOG_TAG_MAIN, "DHW mode write OK (attempt %d)", attempt);
+                        mode_written = true;
                         shutdown_client->disconnect();
                         break;
                     } catch (const windmi::ModbusException&) {
-                        WINDMI_LOG_ERROR(LOG_TAG_MAIN, "OFF write failed (attempt %d)", attempt);
+                        WINDMI_LOG_ERROR(LOG_TAG_MAIN, "DHW mode write failed (attempt %d)", attempt);
                         shutdown_client->disconnect();
                     }
                 } else {
@@ -368,11 +370,11 @@ int main(int argc, char* argv[]) {
         } catch (const std::exception& e) {
             WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Exception creating shutdown client: %s", e.what());
         }
-        if (!off_written) {
-            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "OFF mode write failed after 3 attempts");
+        if (!mode_written) {
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "DHW mode write failed after 3 attempts");
         }
     } else {
-        WINDMI_LOG_INFO(LOG_TAG_MAIN, "DEMO MODE: skipping real OFF write");
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "DEMO MODE: skipping real DHW mode write");
     }
 
     delete g_web_server;
