@@ -316,7 +316,11 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         raw = modbus_client_->readRegister(REG_DHW_TARGET);
         status.dhw_target = raw_to_temp(raw);
         if (!saved_targets_initialized_) {
-            saved_dhw_target_ = status.dhw_target;
+            // A target sitting on its minimum is our own demand suppression
+            // (heating-only pins DHW to DHW_TARGET_MIN), not a user setpoint,
+            // so seed the saved target from settings.ini instead.
+            const bool suppressed = (status.dhw_target <= DHW_TARGET_MIN + 0.5f);
+            saved_dhw_target_ = (suppressed && mDhwTarget_ > 0.0f) ? mDhwTarget_ : status.dhw_target;
         }
     } catch (const ModbusException&) {
         ok = false;
@@ -328,7 +332,12 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         status.heating_target = raw_to_temp(raw);
         last_heating_target_ = status.heating_target;
         if (!saved_targets_initialized_) {
-            saved_heating_target_ = status.heating_target;
+            // Same as above: DHW-only pins the heating target to
+            // HEATING_TARGET_MIN, and the exit path leaves the unit in DHW
+            // mode, so a floor value must not become the saved setpoint.
+            const bool suppressed = (status.heating_target <= HEATING_TARGET_MIN + 0.5f);
+            saved_heating_target_ = (suppressed && mHeatingTarget_ > 0.0f) ? mHeatingTarget_
+                                                                            : status.heating_target;
         }
     } catch (const ModbusException&) {
         status.heating_target = last_heating_target_;

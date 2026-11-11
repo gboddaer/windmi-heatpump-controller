@@ -12,6 +12,8 @@
 
 #include <chrono>
 #include <map>
+#include <utility>
+#include <vector>
 
 using namespace windmi;
 
@@ -35,8 +37,11 @@ public:
     }
 
     void writeRegister(uint16_t address, uint16_t value) override {
+        writes_.push_back({address, value});
         registers_[address] = static_cast<int16_t>(value);
     }
+
+    const std::vector<std::pair<uint16_t, uint16_t>>& writes() const { return writes_; }
 
     void flushBuffer() override {}
     std::string getLastError() const override { return {}; }
@@ -44,7 +49,56 @@ public:
 private:
     bool connected_ = true;
     std::map<uint16_t, int16_t> registers_;
+    std::vector<std::pair<uint16_t, uint16_t>> writes_;
 };
+
+// Complete register map so readStatus() reports the device as online; without
+// that the control logic is skipped entirely.
+std::map<uint16_t, int16_t> fullRegisters() {
+    return {
+        {REG_OUTDOOR_TEMP, 100},
+        {REG_INDOOR_TEMP, 210},
+        {REG_ENTERING_WATER_TEMP, 300},
+        {REG_LEAVING_WATER_TEMP, 350},
+        {REG_DHW_TANK_TEMP, 450},
+        {REG_RUNNING_MODE, MODE_SET_HEAT_DHW},
+        {REG_RUNNING_STATUS, MODE_STATUS_HEAT},
+        {REG_DHW_TARGET, 460},
+        {REG_HEATING_TARGET, 400},
+        {REG_DHW_PRIORITY, 1},
+        {REG_OCCUPANCY_MODE, 2},
+        {REG_AC_CURRENT, 5},
+        {REG_DC_CURRENT, 3},
+        {REG_AC_VOLTAGE, 230},
+        {REG_DC_VOLTAGE, 24},
+        {REG_UNIT_CAPACITY, 8},
+        {REG_COMPRESSOR_FREQ, 42},
+        {REG_WATER_FLOW, 120},
+        {REG_ACTUAL_CAPACITY_OUTPUT, 50},
+        {REG_ODU_INPUT_STATUS, 0},
+        {REG_COMPRESSOR_RUNTIME, 123},
+        {REG_PUMP_RUNTIME, 456},
+    };
+}
+
+bool wroteValue(const FakeModbusClient& client, uint16_t address, uint16_t value) {
+    for (const auto& write : client.writes()) {
+        if (write.first == address && write.second == value) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int writeCountFor(const FakeModbusClient& client, uint16_t address) {
+    int count = 0;
+    for (const auto& write : client.writes()) {
+        if (write.first == address) {
+            ++count;
+        }
+    }
+    return count;
+}
 
 bool waitForLatest(StatusQueue& queue, StatusSnapshot& snapshot) {
     for (int i = 0; i < 50; ++i) {
@@ -432,4 +486,75 @@ TEST(StatusMonitorTest, Reset) {
 
     monitor.reset();
     EXPECT_FALSE(monitor.isValid());
+}
+// ---- Saved target seeding tests ----
+//
+// The DHW-only / heating-only strategies pin a target register to its minimum
+// to suppress demand, and the exit path leaves the unit in DHW mode. A value
+// read back at the floor is therefore our own suppression, not the user's
+// setpoint, and must not overwrite the targets loaded from settings.ini.
+
+namespace {
+
+struct SavedTargetFixture {
+    FakeModbusClient client;
+    CmdQueue cmd_queue;
+    StatusQueue status_queue;
+    ControlLoop loop;
+
+    explicit SavedTargetFixture(std::map<uint16_t, int16_t> registers)
+        : client(std::move(registers)) {}
+
+    void run(int working_mode, const char* priority, float dhw_target, float heating_target) {
+        loop.setInitialSettings(working_mode, priority, dhw_target, heating_target);
+        ASSERT_TRUE(loop.start(&client, &cmd_queue, &status_queue));
+        StatusSnapshot snapshot{};
+        ASSERT_TRUE(waitForLatest(status_queue, snapshot));
+        windmi::platform::sleep_ms(50);
+        loop.stop();
+    }
+};
+
+} // namespace
+
+TEST(SavedTargetTest, HeatingFloorIsNotAdoptedAsSavedTarget) {
+    auto registers = fullRegisters();
+    registers[REG_HEATING_TARGET] = 250;  // 25.0 C == HEATING_TARGET_MIN: suppressed
+    registers[REG_DHW_TARGET] = 460;      // 46.0 C: real user value
+
+    SavedTargetFixture f(registers);
+    f.run(3, "dhw", 46.0f, 48.0f);
+
+    EXPECT_TRUE(wroteValue(f.client, REG_HEATING_TARGET, 480))
+        << "settings.ini heating target must be restored, not the suppression floor";
+    EXPECT_FALSE(wroteValue(f.client, REG_HEATING_TARGET, 250))
+        << "the suppression floor must never be re-asserted as the user's setpoint";
+}
+
+TEST(SavedTargetTest, DhwFloorIsNotAdoptedAsSavedTarget) {
+    auto registers = fullRegisters();
+    registers[REG_DHW_TARGET] = 400;      // 40.0 C == DHW_TARGET_MIN: suppressed
+    registers[REG_HEATING_TARGET] = 470;  // 47.0 C: real user value
+
+    SavedTargetFixture f(registers);
+    f.run(3, "dhw", 45.0f, 47.0f);
+
+    EXPECT_TRUE(wroteValue(f.client, REG_DHW_TARGET, 450))
+        << "settings.ini DHW target must be restored, not the suppression floor";
+    EXPECT_EQ(writeCountFor(f.client, REG_HEATING_TARGET), 0)
+        << "a device heating target above the floor is the user's value and stays untouched";
+}
+
+TEST(SavedTargetTest, DeviceTargetsAboveFloorWinOverStaleSettings) {
+    auto registers = fullRegisters();
+    registers[REG_HEATING_TARGET] = 470;  // 47.0 C, set on the display panel
+    registers[REG_DHW_TARGET] = 460;
+
+    SavedTargetFixture f(registers);
+    f.run(3, "dhw", 45.0f, 40.0f);  // settings.ini only holds the compiled-in default
+
+    EXPECT_EQ(writeCountFor(f.client, REG_HEATING_TARGET), 0)
+        << "without a recorded target the device value must not be clobbered";
+    EXPECT_EQ(writeCountFor(f.client, REG_DHW_TARGET), 0)
+        << "without a recorded target the device value must not be clobbered";
 }
