@@ -66,7 +66,13 @@ Each line is pinned by the named test in the named task:
 - Consumes: `MODE_SET_*` from Task 1.
 - Produces: `int ControlLoop::setRunningMode(int mode)` — returns 0 **only** when the value written to `0x002C` reads back equal; returns -1 for out-of-range (`< 0 || > 5`), on exception, and on read-back mismatch.
 
-- [ ] **Step 1: Write the failing tests** — `ModeWriteVerificationTest.AcceptsNativeMode5` (write 5, fake holds 5, expect 0 and one write recorded), `ModeWriteVerificationTest.RejectsOutOfRangeMode` (6 → -1, **no write recorded**), `ModeWriteVerificationTest.ReadbackMismatchIsAFailure` (a `FakeModbusClient` subclass whose `readRegister(REG_RUNNING_MODE)` returns 2 after a write of 5 → -1), `ModeWriteVerificationTest.ExceptionIsAFailure` (throwing client → -1, no exception escapes).
+`setRunningMode` is private and there is no public mode getter, so these tests are black-box through the command queue and the client's write log: the observable consequence of an unverified write is that the loop still believes the mode is unset and **tries again on the next tick**.
+
+- [ ] **Step 1: Write the failing tests** — extend `ModeSwitchFixture` (Task 3 renames it; for now add a sibling runner) with a `runTicks(int working_mode, int ticks, IModbusClient&)` variant, then:
+  - `ModeWriteVerificationTest.HonestClientWritesModeOnce` — a normal `FakeModbusClient`, two ticks, `countWrites(client, REG_RUNNING_MODE) == 1` (no retry storm).
+  - `ModeWriteVerificationTest.LyingClientIsRetried` — a `LyingModeClient : FakeModbusClient` that stores writes but always returns `MODE_SET_HEAT_DHW` from `readRegister(REG_RUNNING_MODE)` while a `5` was requested; over 3 ticks expect `countWrites(...) >= 2`, i.e. the mismatch did not count as success.
+  - `ModeWriteVerificationTest.ThrowingClientDoesNotEscape` — a client whose `writeRegister(REG_RUNNING_MODE, ...)` throws `ModbusException`; the loop survives the tick and the suite continues (assert on a following successful write of another register, not on an exception).
+  The `< 0 || > 5` range guard is defence in depth and is not reachable through the public API (working modes are 0..3); it is pinned by the free-function mapping tests in Task 3 rather than by a direct call here.
 - [ ] **Step 2: Run** — expect failure: the current range check rejects 5 and there is no read-back.
 - [ ] **Step 3: Implement** — widen the range to 0..5, then read `REG_RUNNING_MODE` inside the same try block and compare; `WINDMI_LOG_ERROR` naming the expected and observed values on mismatch.
 - [ ] **Step 4: Run** — expect green.
