@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - C++17 only; no new third-party dependencies (GoogleTest already arrives via FetchContent).
-- Control tick stays `CONTROL_LOOP_INTERVAL_S` = 30 s; device access only through `IModbusClient`.
+- Control tick stays `CONTROL_LOOP_INTERVAL_S` = 30 s in production; device access only through `IModbusClient`. Multi-tick tests are driven by pushing a command into the command queue: the loop's wake predicate includes `!cmd_queue_->empty()` (`src/core/ControlLoop.cpp:856`), so each pushed command produces another tick in milliseconds. Drive ticks with `CMD_SET_OCCUPANCY_MODE` at a constant value and filter the client's write log by register address in assertions.
 - Every `0x002C` write is verified by reading `0x002C` back; an unverified write is a failure and must not advance arbiter state.
 - At most one `0x002C` write per tick; no write while `0x002D` reads `MODE_STATUS_DEFROST` (7) or `MODE_STATUS_ANTIFREEZE` (20).
 - Constants and floors, verbatim from the spec: `hysteresis_c` 5.0 (floor 5.0), `min_switch_gap_s` 120 (floor 60), `draw_override_c_per_min` 1.0 (floor 0.5), release threshold `target − 0.5 °C` confirmed on two consecutive ticks.
@@ -70,7 +70,7 @@ Each line is pinned by the named test in the named task:
 
 - [ ] **Step 1: Write the failing tests** — extend `ModeSwitchFixture` (Task 3 renames it; for now add a sibling runner) with a `runTicks(int working_mode, int ticks, IModbusClient&)` variant, then:
   - `ModeWriteVerificationTest.HonestClientWritesModeOnce` — a normal `FakeModbusClient`, two ticks, `countWrites(client, REG_RUNNING_MODE) == 1` (no retry storm).
-  - `ModeWriteVerificationTest.LyingClientIsRetried` — a `LyingModeClient : FakeModbusClient` that stores writes but always returns `MODE_SET_HEAT_DHW` from `readRegister(REG_RUNNING_MODE)` while a `5` was requested; over 3 ticks expect `countWrites(...) >= 2`, i.e. the mismatch did not count as success.
+  - `ModeWriteVerificationTest.LyingClientIsRetried` — a `LyingModeClient : FakeModbusClient` that records writes but always returns `MODE_SET_HEAT_DHW` from `readRegister(REG_RUNNING_MODE)` while mode 5 is requested; over three driven ticks expect `countWrites(client, REG_RUNNING_MODE) >= 2`, i.e. the mismatch did not count as success. Ticks are driven with `CMD_SET_OCCUPANCY_MODE` as described in Global Constraints.
   - `ModeWriteVerificationTest.ThrowingClientDoesNotEscape` — a client whose `writeRegister(REG_RUNNING_MODE, ...)` throws `ModbusException`; the loop survives the tick and the suite continues (assert on a following successful write of another register, not on an exception).
   The `< 0 || > 5` range guard is defence in depth and is not reachable through the public API (working modes are 0..3); it is pinned by the free-function mapping tests in Task 3 rather than by a direct call here.
 - [ ] **Step 2: Run** — expect failure: the current range check rejects 5 and there is no read-back.
