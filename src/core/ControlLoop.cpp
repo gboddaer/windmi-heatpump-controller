@@ -307,8 +307,10 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
     try {
         raw = modbus_client_->readRegister(REG_RUNNING_MODE);
         status.running_mode = raw;
-        // Update current_mode from the device (may have been changed externally)
-        if (raw == 0 || raw == 1 || raw == 2) {
+        // Update current_mode from the device (may have been changed externally).
+        // Modes 3, 4 and 5 count too: they are what the display controller writes
+        // for DHW-only and heating-only (spec F2).
+        if (raw >= 0 && raw <= 5) {
             current_mode_ = raw;
         }
     } catch (const ModbusException&) {
@@ -356,15 +358,11 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         status.heating_target = last_heating_target_;
     }
 
-    // Read DHW priority (0x02BF) - only for status reporting, not for control
-    try {
-        raw = modbus_client_->readRegister(REG_DHW_PRIORITY);
-        status.dhw_priority = (raw != 0);
-        // Note: current_priority_ is managed by applyControlLogic(), not read from device
-        // to prevent external changes from overriding the desired working mode priority
-    } catch (const ModbusException&) {
-        ok = false;
-    }
+    // Who actually has the compressor follows from the device mode. The 0x02BF
+    // register is accepted by this firmware and ignored (spec F5, F6), so reading
+    // it would report a preference rather than a fact - and a read fault there
+    // used to mark the whole status unreadable.
+    status.dhw_priority = (status.running_mode == MODE_SET_DHW_ONLY);
 
     // Read occupancy mode (0x0029) - 0=Away, 1=Sleep, 2=Home
     try {
@@ -545,15 +543,12 @@ void ControlLoop::processCommands() {
 
             case CommandType::CMD_SET_PRIORITY:
                 WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_PRIORITY, pri_val=%d", cmd.int_val);
-                try {
-                    modbus_client_->writeRegister(REG_DHW_PRIORITY, static_cast<uint16_t>(cmd.int_val));
-                    current_priority_ = (cmd.int_val == 1) ? PriorityMode::Dhw : PriorityMode::Heating;
-                    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Priority set to %s",
-                           cmd.int_val == 1 ? "DHW" : "Heating");
-                    fireSettingsCallback();
-                } catch (const ModbusException& e) {
-                    WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set priority register: %s", e.what());
-                }
+                current_priority_ = (cmd.int_val == 1) ? PriorityMode::Dhw : PriorityMode::Heating;
+                WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP,
+                       "Priority %s noted, not written: 0x02BF has no effect on this firmware (spec F5/F6). "
+                       "Domestic hot water gets the compressor through device mode %d.",
+                       cmd.int_val == 1 ? "DHW" : "heating", MODE_SET_DHW_ONLY);
+                fireSettingsCallback();
                 break;
 
             case CommandType::CMD_SET_OCCUPANCY_MODE:
@@ -589,38 +584,17 @@ void ControlLoop::processCommands() {
                             WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP,
                                    "DHW-only mode: native device mode %d, setpoints left as the user set them",
                                    MODE_SET_DHW_ONLY);
-                            try {
-                                modbus_client_->writeRegister(REG_DHW_PRIORITY, 1);
-                                current_priority_ = PriorityMode::Dhw;
-                                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW-only mode, set DHW priority");
-                            } catch (const ModbusException& e) {
-                                WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set DHW priority: %s", e.what());
-                            }
                             break;
                         case 2:  // Heating-only
                             WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP,
                                    "Heating-only mode: native device mode %d, DHW setpoint left alone",
                                    MODE_SET_HEAT_ONLY);
-                            try {
-                                modbus_client_->writeRegister(REG_DHW_PRIORITY, 0);
-                                current_priority_ = PriorityMode::Heating;
-                                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Heating-only mode, cleared DHW priority");
-                            } catch (const ModbusException& e) {
-                                WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to clear DHW priority: %s", e.what());
-                            }
                             break;
                         case 3:  // DHW+Heating
                             WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW+Heating mode, restoring targets (DHW=%.1f, Heating=%.1f)",
                                    saved_dhw_target_, saved_heating_target_);
                             setDhwTarget(saved_dhw_target_);
                             setHeatingTarget(saved_heating_target_);
-                            try {
-                                modbus_client_->writeRegister(REG_DHW_PRIORITY, 1);
-                                current_priority_ = PriorityMode::Dhw;
-                                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW+Heating mode, set DHW priority");
-                            } catch (const ModbusException& e) {
-                                WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set DHW priority: %s", e.what());
-                            }
                             break;
                         case 0:  // Off: no target or priority changes needed
                             break;
@@ -673,36 +647,10 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
             break;
     }
 
-    // Enforce priority based on working mode
-    WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "Enforcing priority for working_mode=%d, current_priority=%s",
-           desired_working_mode_, current_priority_ == PriorityMode::Dhw ? "Dhw" : "Heating");
-    switch (desired_working_mode_) {
-        case 1:  // DHW-only: must have DHW priority
-        case 3:  // DHW+Heating: must have DHW priority
-            if (current_priority_ != PriorityMode::Dhw) {
-                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Mode %d enforcing DHW priority", desired_working_mode_);
-                try {
-                    modbus_client_->writeRegister(REG_DHW_PRIORITY, 1);
-                    current_priority_ = PriorityMode::Dhw;
-                    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Priority now set to DHW");
-                } catch (const ModbusException& e) {
-                    WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set DHW priority: %s", e.what());
-                }
-            }
-            break;
-        case 2:  // Heating-only: must have no DHW priority
-            if (current_priority_ != PriorityMode::Heating) {
-                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Heating-only mode clearing DHW priority");
-                try {
-                    modbus_client_->writeRegister(REG_DHW_PRIORITY, 0);
-                    current_priority_ = PriorityMode::Heating;
-                    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Priority now set to Heating");
-                } catch (const ModbusException& e) {
-                    WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to clear DHW priority: %s", e.what());
-                }
-            }
-            break;
-    }
+    // No priority enforcement: 0x02BF is accepted and ignored on this firmware
+    // (spec F5, F6, and F7: no register moves for it on the panel). Domestic hot
+    // water gets the compressor by the arbiter choosing device mode 5, and the
+    // status field dhw_priority reports exactly that.
 }
 
 void ControlLoop::threadFunc() {

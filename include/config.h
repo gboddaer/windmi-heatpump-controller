@@ -87,7 +87,7 @@ extern "C" {
 #define REG_WATER_CONTROL_POINT   0x0033  // R  - Water control point status
 #define REG_RUNNING_STATUS        0x002D  // R  - Current running status (0-5 normal, 7=defrost, 20=antifreeze)
 #define REG_DHW_MODE_STATUS       0x00C9  // R  - DHW mode: 0=Eco, 1=Anti Legionella, 2=Regular
-#define REG_DHW_PRIORITY          0x02BF  // RW - DHW priority flag (0=Automatic, 1=DHW priority)
+#define REG_DHW_PRIORITY          0x02BF  // RW - DHW priority: accepted, ignored (spec F5/F6); neither written nor polled
 //
 // === READ/WRITE REGISTERS ===
 #define REG_RUNNING_MODE          0x002C  // RW - Set mode: 0=Off 1=Cool+DHW 2=Heat+DHW 3=Cool 4=Heat 5=DHW only

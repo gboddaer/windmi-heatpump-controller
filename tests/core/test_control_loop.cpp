@@ -596,6 +596,22 @@ public:
         windmi::platform::sleep_ms(150);
     }
 
+    void sendWorkingMode(int working_mode) {
+        Command cmd{};
+        cmd.type = CommandType::CMD_SET_RUNNING_MODE;
+        cmd.int_val = working_mode;
+        cmd_queue_.push(cmd);
+        loop_.kick();
+    }
+
+    void sendPriority(int priority) {
+        Command cmd{};
+        cmd.type = CommandType::CMD_SET_PRIORITY;
+        cmd.int_val = priority;
+        cmd_queue_.push(cmd);
+        loop_.kick();
+    }
+
     StatusSnapshot latest() {
         StatusSnapshot snapshot{};
         waitForLatest(status_queue_, snapshot);
@@ -783,4 +799,62 @@ TEST(ArbiterMappingTest, PanelOverrideCorrectedOnce) {
 
     EXPECT_EQ(1, writeCountFor(client, REG_RUNNING_MODE))
         << "correct the panel once, then stay out of the way";
+}
+
+// ---- The 0x02BF priority register is accepted and ignored ----
+
+TEST(PriorityFieldTest, HeatingModeDoesNotReportDhwPriority) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = MODE_SET_HEAT_DHW;
+    registers[REG_DHW_PRIORITY] = 1;   // the device's own flag claims DHW priority
+
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 46.0f, 45.0f));
+    runner.tick();
+    StatusSnapshot snapshot = runner.latest();
+    runner.stop();
+
+    EXPECT_FALSE(snapshot.dhw_priority)
+        << "priority is a property of the mode (spec F4/F7), not of 0x02BF";
+}
+
+TEST(PriorityFieldTest, DhwOnlyModeReportsDhwPriority) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = MODE_SET_HEAT_DHW;
+    registers[REG_DHW_PRIORITY] = 0;
+
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(1, "dhw", 46.0f, 45.0f));
+    runner.tick();   // the mode is written during this tick
+    runner.tick();   // the next status read is the first that can see it
+    StatusSnapshot snapshot = runner.latest();
+    runner.stop();
+
+    EXPECT_TRUE(snapshot.dhw_priority)
+        << "in native mode 5 the tank has the compressor, whatever 0x02BF says";
+}
+
+TEST(PriorityFieldTest, NeverWritesDhwPriorityRegister) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = MODE_SET_HEAT_DHW;
+    registers[REG_DHW_PRIORITY] = 0;
+
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "heating", 46.0f, 45.0f));
+    runner.tick();
+    runner.sendWorkingMode(1);
+    runner.tick();
+    runner.sendWorkingMode(2);
+    runner.tick();
+    runner.sendWorkingMode(3);
+    runner.tick();
+    runner.sendPriority(1);
+    runner.tick();
+    runner.stop();
+
+    EXPECT_FALSE(wrote(client, REG_DHW_PRIORITY))
+        << "0x02BF is writable but has no observable effect (spec F5/F6); do not touch it";
 }
