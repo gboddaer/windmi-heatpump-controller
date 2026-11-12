@@ -351,7 +351,7 @@ int main(int argc, char* argv[]) {
                     try {
                         // The device mode register only supports Off / Cool+DHW / Heat+DHW.
                         // Leave the unit serving domestic hot water instead of switching it off.
-                        shutdown_client->writeRegister(REG_RUNNING_MODE, MODE_SET_HEAT_DHW);
+                        shutdown_client->writeRegister(REG_RUNNING_MODE, windmi::ControlLoop::shutdownDeviceMode());
                         WINDMI_LOG_INFO(LOG_TAG_MAIN, "DHW mode write OK (attempt %d)", attempt);
                         mode_written = true;
                         shutdown_client->disconnect();

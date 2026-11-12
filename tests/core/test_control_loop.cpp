@@ -858,3 +858,13 @@ TEST(PriorityFieldTest, NeverWritesDhwPriorityRegister) {
     EXPECT_FALSE(wrote(client, REG_DHW_PRIORITY))
         << "0x02BF is writable but has no observable effect (spec F5/F6); do not touch it";
 }
+
+// ---- Shutdown ----
+
+TEST(ShutdownModeTest, ShutdownAlwaysLeavesHeatingAndDhwAvailable) {
+    EXPECT_EQ(MODE_SET_HEAT_DHW, ControlLoop::shutdownDeviceMode());
+    EXPECT_NE(MODE_SET_OFF, ControlLoop::shutdownDeviceMode())
+        << "mode 0 leaves the unit with neither space heating nor domestic hot water";
+    EXPECT_NE(MODE_SET_DHW_ONLY, ControlLoop::shutdownDeviceMode())
+        << "mode 5 would switch space heating off and leave it off after we exit";
+}

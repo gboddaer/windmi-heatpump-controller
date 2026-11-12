@@ -15,6 +15,7 @@
 #include <functional>
 #include <string>
 #include "utils/Platform.hpp"
+#include "config.h"
 #include "core/Scheduler.hpp"
 
 namespace windmi {
@@ -251,6 +252,17 @@ public:
      * control loop processes it without waiting for the next poll.
      */
     void kick();
+
+    /**
+     * @brief Device mode written to 0x002C when the application exits
+     *
+     * Always MODE_SET_HEAT_DHW. Mode 0 would leave the unit with neither space
+     * heating nor domestic hot water, and mode 5 would leave space heating
+     * switched off after we have stopped arbitrating - with no arbiter running,
+     * nothing would ever hand the compressor back to the house. Arbiter spec,
+     * ruling 4.
+     */
+    static int shutdownDeviceMode() { return MODE_SET_HEAT_DHW; }
 
 private:
     void threadFunc();
