@@ -261,3 +261,37 @@ recv(sock, ...)
 ```
 
 werkt.
+
+---
+
+# Corrections, 2026-11-11/12 (re-measured on current firmware)
+
+The notes above are a record of measurements from mid-2026, and three of the
+"probably unusable" conclusions do not hold on the firmware now on the unit. Re-derive
+any of it with the read-only tools first, and only then the writing ones:
+
+```text
+tools/windmi_regdump.py    read registers, snapshot to JSON, --diff two snapshots
+tools/watch_changes.py     poll and print only what moves (this is how the panel was walked)
+tools/test_set_mode.py     write 0x002C = 0..5, verified by echo and read-back
+tools/test_set_*.py        the other hardware write tests, same shape
+```
+
+Every write test was run against a simulated gateway before it was run against the unit,
+and that is how two bugs in our own client were found: an exception reply is 5 bytes
+(address, `function | 0x80`, code, CRC) and we were waiting for 8, and a `/proc` scan that
+did not actually match the controller process.
+
+| Claim above | Measured on current firmware |
+|---|---|
+| `0x0209` gives exception 04, "probably broken" | Reads fine with FC 03 (`regdumps/probe-20261111-164334.json`: raw 2) |
+| `0x02BF` (DHW priority) cannot be used | Reads and writes fine, both directions — and is **inert**. Writing `1` changed nothing: `0x002D` stayed `2`, the valve stayed open, the tank was flat for 153 s. See `docs/dhw_priority_report.md` |
+| No native DHW-only mode; emulate it by pinning the heating target to 25 °C | `0x002C = 5` is DHW only and `4` is heat only. Both were written by us and executed by the unit in under 2 s: `0x002D` went to `4` (dhw), `0x00D2` closed the valve, the space loop stopped. Setpoint pinning is gone |
+
+The reason the old readings looked broken is not known; firmware changed, and our
+exception parsing was itself broken until 2026-11-11, so an "exception code N" reported by
+this project before that date should be treated as unverified.
+
+Mode 5 was confirmed by writing it, watching the unit react, writing 2 back, and watching
+it revert in about 7 s. The 8-minute panel walk that followed moved exactly three
+registers: `0x002C`, `0x002D`, `0x00D2`.

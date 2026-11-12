@@ -79,7 +79,7 @@ The application uses two threads communicating via lock-free SPSC queues:
 │   └── *.md                    # Technical documentation
 ├── static/                     # Web interface files
 ├── mongoose/                   # Mongoose library (submodule)
-└── googletest/                 # Google Test (submodule)
+└── googletest/                 # Local Google Test checkout (tests use the copy CMake fetches)
 ```
 
 ## Prerequisites
@@ -87,7 +87,7 @@ The application uses two threads communicating via lock-free SPSC queues:
 - **Build Tools**: CMake 3.16+, GCC with C99/C++17 support, or Clang
 - **Dependencies**:
   - Mongoose (embedded web server) - included as submodule
-  - Google Test - included as submodule
+  - Google Test - fetched by CMake with `FetchContent`; only Mongoose is a submodule
   - pthreads (standard on most systems)
 
 ## Quick Start
@@ -174,11 +174,14 @@ For devices connected via RS-485 without a TCP gateway, use the serial port mode
 |--------|-----------|-------------|---------|
 | `-i <addr>` | `--ip <addr>` | Modbus gateway IP address | 192.168.123.10 |
 | `-p <port>` | `--port <port>` | Modbus gateway TCP port | 8899 |
-| `-w <port>` | `--web <port>` | HTTP server port | 8080 |
+| `-w <port>` | `--web <port>` | HTTP server port | 8080 (10000 in demo mode) |
+| `-t <dir>` | `--static-dir <dir>` | Static files directory | static |
 | `-d` | `--demo` | Demo mode (simulated device) | disabled |
 | `-l <level>` | `--log-level <level>` | Logging level (TRACE/DEBUG/INFO/WARN/ERROR/FATAL) | INFO |
 | `-o <file>` | `--log-file <file>` | Log file path (default: console only) | none |
-| `-t` | `--selftest` | Run self-test suite | disabled |
+| `-s` | `--selftest` | Run self-test suite and exit | disabled |
+| | `--dry-run` | Evaluate and log control decisions without writing any register | disabled |
+| | `--config <path>` | Settings file | ~/.windmi/settings.ini |
 | `--serial <device>` | - | Serial device for Modbus RTU (e.g., /dev/ttyUSB0) | none |
 | `--baud <rate>` | - | Baud rate | 9600 |
 | `--parity <N|E|O>` | - | Parity: N(none), E(even), O(odd) | N |
@@ -196,32 +199,58 @@ Get current heat pump status.
 
 ```json
 {
-  "mode": 2,
-  "runningStatus": 2,
   "dhwTemperature": 45.5,
-  "dhwTarget": 48.0,
+  "dhwTarget": 50.0,
   "heatingTemperature": 38.2,
-  "heatingTarget": 38.0,
-  "outdoorTemperature": 12.3,
-  "dhwPriority": 1,
-  "errors": [],
-  "timestamp": "2026-06-01T14:32:05Z"
+  "heatingTarget": 40.0,
+  "outdoorTemperature": 7.1,
+  "leavingWaterTemperature": 44.8,
+  "enteringWaterTemperature": 39.5,
+  "mode": "heat+dhw",
+  "runningStatus": "heat",
+  "priority": "dhw",
+  "status": "running",
+  "deviceOnline": true,
+  "acCurrent": 6.2,
+  "dcCurrent": 4.1,
+  "acVoltage": 231.0,
+  "dcVoltage": 320.5,
+  "acPowerVA": 1430.0,
+  "acPowerW": 1320.0,
+  "powerValid": true,
+  "compressorFrequency": 62.0,
+  "waterFlow": 12.4,
+  "unitCapacityKw": 8,
+  "actualCapacityOutput": 6,
+  "oduInputStatus": 0,
+  "compressorRuntimeHours": 4211,
+  "pumpRuntimeHours": 5120,
+  "heatOutputW": 4680.0,
+  "cop": 3.54,
+  "copValid": true,
+  "dhwValveStatus": 0,
+  "dhwModeStatus": 2,
+  "workingMode": 3,
+  "occupancyMode": 0,
+  "scheduleActive": true,
+  "schedulePaused": false,
+  "dhwCalling": true,
+  "dhwStateKnown": true,
+  "requestedDeviceMode": "dhw_only",
+  "secondsSinceModeWrite": 36,
+  "dhwSensorFaultSuspected": false,
+  "tankReadFailures": 0
 }
 ```
 
-**Mode values:**
-- `0`: OFF
-- `1`: DHW only
-- `2`: Heating only
-- `3`: DHW + Heating
+`mode` is the device mode written to `0x002C`, as a name: `off`, `cool+dhw`, `heat+dhw`,
+`cool`, `heat`, `dhw_only`. `workingMode` is the application working mode: 0
+off, 1 DHW only, 2 heating only, 3 both. `runningStatus` is what the unit is actually
+doing: `off`, `cool`, `heat`, `dhw`, `defrost`, `antifreeze`.
 
-**Running status values:**
-- `0`: Off
-- `1`: Cool
-- `2`: Heat
-- `4`: DHW
-- `7`: Defrost
-- `20`: Anti-freeze
+The four fields at the end are the DHW arbiter: whether the tank is demanding, whether
+that verdict came from a usable reading, the device mode the arbiter decided on, and
+seconds since the last verified mode write (`-1`: none since startup).
 
 #### POST `/api/set-mode`
 
@@ -238,7 +267,7 @@ Set DHW target temperature.
 
 ```bash
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"target": 48.0}' http://localhost:8080/api/set-dhw
+  -d '{"temperature": 48.0}' http://localhost:8080/api/set-dhw
 ```
 
 #### POST `/api/set-heating`
@@ -247,30 +276,55 @@ Set heating target temperature.
 
 ```bash
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"target": 36.0}' http://localhost:8080/api/set-heating
+  -d '{"temperature": 36.0}' http://localhost:8080/api/set-heating
 ```
 
 #### POST `/api/set-priority`
 
-Set DHW priority.
-
-```bash
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"priority": 1}' http://localhost:8080/api/set-priority
-```
+Accepted and ignored. Domestic hot water always has priority and the unit has no
+heating-priority state to switch to, so there is nothing for this call to do; it stays so
+that an old client gets a 200 instead of a 404. See `docs/dhw_priority_report.md`.
 
 ## Working Modes Strategy
 
-The controller exposes 4 UI working modes that map to the device's native capabilities:
+The controller exposes 4 working modes. Each one is a native device mode, so no setpoint
+is touched to express a demand:
 
-| UI Mode | Mode Register | Heating Target | DHW Target | DHW Priority |
-|---------|---------------|----------------|------------|--------------|
-| OFF (`0`) | 0 (Off) | - | - | - |
-| DHW only (`1`) | 2 (Heat+DHW) | 25°C (min) | user setpoint | 1 |
-| Heating only (`2`) | 2 (Heat+DHW) | user setpoint | 40°C (min) | 0 |
-| DHW+Heating (`3`) | 2 (Heat+DHW) | user setpoint | user setpoint | 1 |
+| Working mode | Device mode `0x002C` |
+|--------------|----------------------|
+| OFF (`0`) | `0` Off |
+| DHW only (`1`) | `5` DHW only |
+| Heating only (`2`) | `4` Heat only |
+| DHW + Heating (`3`) | `5` while the tank is demanding, `2` Heat + DHW once it is confirmed at target |
 
-**Note:** The device's mode register (`0x002C`) only supports "Off" and "Heat+DHW" natively. The controller emulates "DHW only" and "Heating only" by setting minimum target temperatures to suppress demand.
+### DHW priority
+
+Hot water has priority: this heat pump is the only thing that makes hot water, and the
+house has other heat sources. With both demands enabled, the compressor goes to the tank
+when the tank is cold and back to the house when the tank is full.
+
+The rule, in words: demand is a fall more than 5 °C below target; satisfaction is
+`target - 0.5 °C` held for two 30 s ticks; a sag inside the band is not a demand; a grant
+waits 120 s after the last mode write unless the tank is falling at 1 °C/min or faster,
+which is somebody using hot water; a release never waits; and nothing is written during
+defrost or anti-freeze. Every mode write is verified by read-back.
+
+The margins are configurable, the priority is not:
+
+```ini
+[arbitration]
+dhw_hysteresis_c = 5.0            # floor 5.0
+dhw_min_switch_gap_s = 120        # floor 60
+dhw_charge_watchdog_min = 120     # floor 60
+dhw_draw_override_c_per_min = 1.0 # floor 0.5
+```
+
+Values below a floor are clamped with a warning: the floors are the compressor's and the
+diverter valve's, not preferences. `--dry-run` runs the whole loop, logging every decision
+and publishing it in `/api/status`, without writing a single register.
+
+Full detail: [working-modes.md](docs/working-modes.md); the measurements behind it:
+[dhw_priority_report.md](docs/dhw_priority_report.md).
 
 ## Configuration
 
@@ -317,7 +371,8 @@ firefox docs/html/index.html
 
 #### Core Components
 
-- **ControlLoop**: State machine for working modes, target temperature management
+- **ControlLoop**: Control tick, tank state, and the DHW demand arbiter
+- **Arbitration**: Pure decision function — sensors in, device mode out; no I/O, fully unit-tested
 - **StatusMonitor**: Thread-safe status data aggregation
 - **ModbusClient**: Modbus TCP communication with gateway
 - **WebServer**: HTTP server and REST API implementation

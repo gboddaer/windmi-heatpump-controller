@@ -1,44 +1,60 @@
-# DHW Priority Analysis
+# DHW Priority: register 0x02BF
 
-## Register: 0x02BF (DHW Priority)
+**Status: superseded.** This page used to say the register was unreadable and unwritable.
+That was wrong. Corrected by direct measurement on real firmware on 2026-11-11; the
+control rule that replaced everything described here lives in
+`docs/working-modes.md` and `docs/superpowers/specs/2026-11-11-native-dhw-only-mode-and-dhw-priority.md`.
 
-### What it is
-Register `0x02BF` is documented in the Rotenso Windmi Modbus register list as a read/write register controlling DHW vs Heating priority. Expected values:
-- `1` = DHW priority (domestic hot water takes precedence)
-- `0` = Heating priority (space heating takes precedence)
+## What the register is
 
-### Observed Behavior
-**The register consistently returns Modbus Exception `0x02` (Illegal Data Address)** on the target device firmware. This was verified using the `tests/tools/probe_registers.c` probe tool which sends raw Modbus RTU FC 0x03 frames over TCP to the Waveshare gateway.
+`0x02BF` (`REG_DHW_PRIORITY`) is listed in the Rotenso Windmi register map as read/write,
+`1` = domestic hot water takes precedence, `0` = space heating takes precedence.
 
-This means:
-- **Reading** the register fails — the device does not support this address in its current firmware
-- **Writing** to the register also fails — we cannot change priority through this register
+## What was measured (2026-11-11, Windmi 8 kW, firmware of that date)
 
-### Impact
-The priority setting is still functional in the application through a different mechanism:
-1. **Working Mode** (`0x002C`) controls whether the heat pump is in DHW, Heating, or Combined mode
-2. **Application-level priority** is managed in `ControlLoop::current_priority_` which determines the control logic behavior
-3. When mode changes are applied (e.g., switching to Heating-only), the `applyControlLogic()` method sets appropriate targets and priorities internally
+| Claim | Reality |
+|---|---|
+| Reading `0x02BF` returns exception `0x02` | Reads fine with FC 03 |
+| Writing `0x02BF` returns exception `0x02` | Writes fine both directions with FC 06: correct echo, and `0x03` reads the new value back |
+| Writing `1` gives hot water priority | **Nothing happens.** `0x002D` stayed `2` (heat), the diverter valve stayed open, the tank temperature was flat for 153 s, and the panel kept indicating heating priority |
+| The panel's priority indication comes from this register | An 8-minute read-only walk of the panel changing its own settings moved exactly three registers: `0x002C`, `0x002D`, `0x00D2`. `0x02BF` never moved |
 
-### Working Mode vs Priority
-The relationship between working mode and priority:
+The last two rows are the ones that matter. A register the firmware accepts, stores and
+shows on the register map, but which changes nothing observable in the unit's behaviour,
+is a register that cannot be relied on to arbitrate anything. Writing `1` immediately
+after re-writing the running mode (in case the priority flag is latched on a mode change)
+changed nothing either.
 
-| Working Mode | Value | Description | Priority Behavior |
-|---|---|---|---|
-| Off | 0 | Heat pump OFF | N/A |
-| DHW Only | 1 | DHW heating only | DHW priority enforced |
-| Heating Only | 2 | Space heating only | Heating priority enforced |
-| DHW + Heating | 3 | Both active | Priority depends on `current_priority_` |
+## Why the old report was wrong
 
-### Key Finding: DHW Only vs DHW+Heating Ambiguity
-At the device register level, both "DHW Only" and "DHW+Heating" modes map to the same running mode value (`MODE_SET_HEAT_DHW = 2`). The distinction is maintained entirely in application memory:
-- "DHW Only" is achieved by setting heating target to minimum (25°C)
-- "DHW+Heating" uses both targets at normal values
+Our own Modbus client mis-parsed exception replies until 2026-11-11: an exception frame is
+5 bytes (address, `function | 0x80`, code, CRC) and the client was waiting for the 8 bytes
+of a normal response. That bug was found with a simulated gateway, not on the unit, and it
+is fixed — the client now reads the 3-byte header, checks `function | 0x80`, and reads the
+2-byte CRC. Any "exception code" reported by this project before that fix should be read
+as unverified.
 
-This is why **persistent settings** are critical — without them, the application always restarts in DHW+Heating mode (mode 3) regardless of what the user had selected.
+## What the code does now
 
-### Recommendation
-1. **Keep `0x02BF` in the code** for status reporting (the read is attempted but failure is caught gracefully)
-2. **Do NOT attempt to write** to `0x02BF` as it will always fail
-3. **Use application-level priority** (`current_priority_`) and **working mode** (`desired_working_mode_`) for all control decisions
-4. **Persist settings** to `~/.windmi/settings.ini` to maintain user selection across restarts
+- **No code writes `0x02BF`.** Five write sites were deleted on 2026-11-11; the register is
+  not even read, because a value with no effect is not a status.
+- `dhw_priority` in the status payload is derived, not read: `running_mode == 5`. It says
+  what the unit is doing, which is the only honest version of that word.
+- `POST /api/set-priority` still accepted and still ignored, so an old client does not
+  break; the web UI's heating-priority button was removed, because the unit has no
+  heating-priority state to switch to.
+- Priority itself is a rule, not a setting: while both demands are enabled, the tank gets
+  the compressor when it is cold and the house gets it back when the tank is confirmed at
+  target. See `docs/working-modes.md`.
+
+## How to reproduce
+
+Read-only tools, all of which were exercised against a simulated gateway before touching
+hardware:
+
+- `tools/windmi_regdump.py` — read a block of registers, snapshot to JSON, `--diff` two snapshots
+- `tools/watch_changes.py` — poll continuously and print only what moves (this is what
+  proved the panel does not touch `0x02BF`)
+- `tools/windmi_mode.py` — write `0x002C` with read-back verification
+- `tools/test_priority_latch.py` — the write `0x02BF`, re-write the mode, watch for a
+  reaction experiment
