@@ -208,3 +208,43 @@ TEST(TankDrawRateTest, TooShortAnIntervalIsNotADraw) {
 TEST(TankDrawRateTest, RisingIsNeverADraw) {
     EXPECT_FALSE(tankIsDrawing(20.0f, 25.0f, 60.0, 1.0f));
 }
+
+// ---- Charge watchdog: a flag for a stuck sensor, never a relief valve ----
+
+namespace {
+constexpr uint64_t kMinuteMs = 60000ull;
+}
+
+TEST(ChargeWatchdogTest, StalledChargeIsFlagged) {
+    // 121 minutes of compressor time and the tank moved four tenths of a degree.
+    EXPECT_TRUE(chargeIsStalled(cfg(), 131 * kMinuteMs, 10 * kMinuteMs, 30.0f, 30.4f));
+}
+
+TEST(ChargeWatchdogTest, FallingTankWhileChargingIsFlagged) {
+    EXPECT_TRUE(chargeIsStalled(cfg(), 131 * kMinuteMs, 10 * kMinuteMs, 50.0f, 48.0f));
+}
+
+TEST(ChargeWatchdogTest, ARealChargeIsNotFlagged) {
+    // 35 degC over two hours is 0.29 degC/min, slower than this unit ever
+    // measured but plainly alive.
+    EXPECT_FALSE(chargeIsStalled(cfg(), 131 * kMinuteMs, 10 * kMinuteMs, 15.0f, 50.0f));
+}
+
+TEST(ChargeWatchdogTest, AYoungChargeIsNotFlagged) {
+    EXPECT_FALSE(chargeIsStalled(cfg(), 130 * kMinuteMs, 100 * kMinuteMs, 30.0f, 30.0f))
+        << "a defrost or a very cold tank can hold the rise back for an hour";
+}
+
+TEST(ChargeWatchdogTest, NoChargeSessionMeansNoVerdict) {
+    EXPECT_FALSE(chargeIsStalled(cfg(), 500 * kMinuteMs, 0, 30.0f, 30.0f))
+        << "a start of 0 means no session has begun, not one that began at the epoch";
+    EXPECT_FALSE(chargeIsStalled(cfg(), 500 * kMinuteMs, 10 * kMinuteMs, -1.0f, 30.0f));
+}
+
+TEST(ChargeWatchdogTest, FloorKeepsTheWatchdogFromBarking) {
+    ArbitrationConfig tight;
+    tight.charge_watchdog_min = 5;      // below the floor
+    tight.applyFloors();
+    EXPECT_EQ(60, tight.charge_watchdog_min)
+        << "a charge slower than an hour is normal, not a fault";
+}

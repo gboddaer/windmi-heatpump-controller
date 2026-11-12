@@ -239,7 +239,9 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         "\"dhwCalling\":%s,"
         "\"dhwStateKnown\":%s,"
         "\"requestedDeviceMode\":\"%s\","
-        "\"secondsSinceModeWrite\":%d}\n",
+        "\"secondsSinceModeWrite\":%d,"
+        "\"dhwSensorFaultSuspected\":%s,"
+        "\"tankReadFailures\":%d}\n",
         last_status_.dhw_tank_temp,
         last_status_.dhw_target,
         last_status_.leaving_water_temp,
@@ -278,7 +280,9 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         last_status_.dhw_calling ? "true" : "false",
         last_status_.dhw_state_known ? "true" : "false",
         mode_to_string(last_status_.requested_device_mode),
-        last_status_.seconds_since_mode_write
+        last_status_.seconds_since_mode_write,
+        last_status_.dhw_sensor_fault_suspected ? "true" : "false",
+        last_status_.tank_read_failures
     );
 
     sendJsonReply(c, 200, response);

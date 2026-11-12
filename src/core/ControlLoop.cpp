@@ -683,6 +683,10 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
     status.seconds_since_mode_write =
         wrote_mode_before ? static_cast<int>((nowMs() - last_mode_write_ms_) / 1000u) : -1;
 
+    updateChargeWatchdog(status);
+    status.dhw_sensor_fault_suspected = dhw_sensor_fault_suspected_;
+    status.tank_read_failures = tank_read_failures_;
+
     // Enforce target temperature overrides based on working mode
     switch (desired_working_mode_) {
         case 1:  // DHW-only: native mode 5 does the work; the user's setpoints stay
@@ -874,9 +878,46 @@ void ControlLoop::setArbitration(const ArbitrationConfig& arbitration) {
                     arbitration_.draw_override_c_per_min, dry_run_ ? " [dry-run]" : "");
 }
 
-uint64_t ControlLoop::nowMs() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count());
+uint64_t ControlLoop::nowMs() const {
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    return static_cast<uint64_t>(static_cast<int64_t>(ms) + clock_offset_ms_);
+}
+
+void ControlLoop::updateChargeWatchdog(const StatusSnapshot& status) {
+    const bool charging = ((current_mode_ == MODE_SET_DHW_ONLY ||
+                            requested_device_mode_ == MODE_SET_DHW_ONLY) &&
+                           status.dhw_tank_temp > 0.0f);
+    if (!charging) {
+        if (dhw_sensor_fault_suspected_) {
+            WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW charge watchdog cleared: not charging");
+        }
+        charge_started_ms_ = 0;
+        charge_start_c_ = -1.0f;
+        dhw_sensor_fault_suspected_ = false;
+        return;
+    }
+
+    if (charge_started_ms_ == 0) {
+        charge_started_ms_ = nowMs();
+        charge_start_c_ = status.dhw_tank_temp;
+        return;
+    }
+
+    if (dhw_sensor_fault_suspected_) {
+        return;   // said it once; saying it every thirty seconds is noise
+    }
+
+    if (chargeIsStalled(arbitration_, nowMs(), charge_started_ms_, charge_start_c_,
+                        status.dhw_tank_temp)) {
+        dhw_sensor_fault_suspected_ = true;
+        const int minutes = static_cast<int>((nowMs() - charge_started_ms_) / 60000u);
+        WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP,
+                         "DHW charge watchdog: tank %.1f -> %.1f C in %d min while the compressor was "
+                         "committed to it. Suspect the tank sensor or a unit that cannot make heat. "
+                         "Space heating is NOT being relieved.",
+                         charge_start_c_, status.dhw_tank_temp, minutes);
+    }
 }
 
 void ControlLoop::updateTankState(const StatusSnapshot& status) {

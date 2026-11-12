@@ -32,6 +32,11 @@ void ArbitrationConfig::applyFloors() {
                         min_switch_gap_s, kMinSwitchGapS);
         min_switch_gap_s = kMinSwitchGapS;
     }
+    if (charge_watchdog_min < kMinChargeWatchdogMin) {
+        WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "arbitration charge_watchdog_min %d clamped to %d min",
+                        charge_watchdog_min, kMinChargeWatchdogMin);
+        charge_watchdog_min = kMinChargeWatchdogMin;
+    }
     if (draw_override_c_per_min < kMinDrawOverrideCPerMin) {
         WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "arbitration draw_override_c_per_min %.2f clamped to %.2f",
                         draw_override_c_per_min, kMinDrawOverrideCPerMin);
@@ -93,6 +98,21 @@ int decideDeviceMode(const ArbitrationConfig& cfg, const ArbiterInput& in) {
             // the tank), and no reading at all is not a demand either.
             return in.current_mode;
     }
+}
+
+bool chargeIsStalled(const ArbitrationConfig& cfg, uint64_t now_ms, uint64_t started_ms,
+                     float start_c, float now_c) {
+    if (started_ms == 0 || now_ms <= started_ms) {
+        return false;          // no charge session
+    }
+    if (start_c <= 0.0f || now_c <= 0.0f) {
+        return false;          // nothing to compare against
+    }
+    const double elapsed_min = static_cast<double>(now_ms - started_ms) / 60000.0;
+    if (elapsed_min < cfg.charge_watchdog_min) {
+        return false;
+    }
+    return (static_cast<double>(now_c) - start_c) / elapsed_min < kMinExpectedChargeRiseCPerMin;
 }
 
 bool tankIsDrawing(float previous_c, float current_c, double elapsed_s,

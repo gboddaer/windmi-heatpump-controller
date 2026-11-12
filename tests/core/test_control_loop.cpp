@@ -606,6 +606,8 @@ public:
 
     void enableDryRun() { loop_.setDryRun(true); }
 
+    void advanceTime(int64_t ms) { loop_.advanceClockForTesting(ms); }
+
     void sendPriority(int priority) {
         Command cmd{};
         cmd.type = CommandType::CMD_SET_PRIORITY;
@@ -1009,4 +1011,36 @@ TEST(ArbitrationExecutionTest, StatusExposesArbitration) {
     EXPECT_EQ(MODE_SET_DHW_ONLY, snapshot.requested_device_mode);
     EXPECT_EQ(-1, snapshot.seconds_since_mode_write)
         << "negative means no device-mode write has happened since startup";
+}
+
+// ---- The watchdog in the loop: it watches, it says so, it does nothing else ----
+
+TEST(ChargeWatchdogLoopTest, NormalChargeRaisesNothing) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 300));   // 3.0 C tank, demanding
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    StatusSnapshot snapshot = runner.latest();
+    runner.stop();
+
+    EXPECT_FALSE(snapshot.dhw_sensor_fault_suspected);
+    EXPECT_EQ(0, snapshot.tank_read_failures);
+}
+
+TEST(ChargeWatchdogLoopTest, StalledChargeRaisesTheFlagAndNeverRelievesHeating) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 300));
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();                                   // charge session starts at 3.0 C
+    client.writeRegister(REG_DHW_TANK_TEMP, 304);    // two hours later: 30.4 C
+    runner.advanceTime(121 * 60 * 1000);
+    runner.tick();
+    StatusSnapshot snapshot = runner.latest();
+    runner.stop();
+
+    EXPECT_TRUE(snapshot.dhw_sensor_fault_suspected);
+    EXPECT_EQ(0, writeCountFor(client, REG_RUNNING_MODE))
+        << "the watchdog reports; it does not hand the compressor to the house";
 }

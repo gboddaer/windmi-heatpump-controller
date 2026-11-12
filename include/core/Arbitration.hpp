@@ -48,7 +48,8 @@ struct ArbitrationConfig {
     float hysteresis_c = 5.0f;             ///< width of the window heating may run in
     int min_switch_gap_s = 120;            ///< debounce between device-mode writes
     float draw_override_c_per_min = 1.0f;
-    int charge_watchdog_min = 120;  ///< a fall this fast is somebody using hot water
+    int charge_watchdog_min = 120;
+    static constexpr int kMinChargeWatchdogMin = 60;  ///< a fall this fast is somebody using hot water
 
     /// How far below the target counts as "at temperature", in degC.
     static constexpr float kReleaseMarginC = 0.5f;
@@ -108,6 +109,22 @@ constexpr double kMinDrawSampleS = 10.0;
  * stratification relaxing after a release is around 0.1-0.2 degC/min. Only a
  * draw may override the switch gap, because only a draw has a person waiting.
  */
+/// A 150 L tank on this unit measured 0.45-0.79 degC/min while charging. Half
+/// the slowest rate ever seen is the line between a slow charge and a sensor
+/// that is not telling the truth.
+constexpr float kMinExpectedChargeRiseCPerMin = 0.25f;
+
+/**
+ * Has a DHW charge run for the watchdog period without the tank rising?
+ *
+ * This raises a flag and nothing else. A tank that will not rise while the
+ * compressor is committed to it is either a sensor that has failed low or a
+ * unit that cannot make heat; in both cases the answer is a person with a
+ * multimeter, not handing the compressor to the house.
+ */
+bool chargeIsStalled(const ArbitrationConfig& cfg, uint64_t now_ms, uint64_t started_ms,
+                     float start_c, float now_c);
+
 bool tankIsDrawing(float previous_c, float current_c, double elapsed_s,
                    float override_c_per_min);
 

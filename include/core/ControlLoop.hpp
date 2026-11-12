@@ -90,6 +90,8 @@ struct StatusSnapshot {
     bool dhw_state_known = false;         ///< tank state derived from a usable reading
     int requested_device_mode = 0;        ///< the mode the arbiter last decided on
     int seconds_since_mode_write = 0;     ///< since the last verified 0x002C write
+    bool dhw_sensor_fault_suspected = false;  ///< charge ran its length without a rise
+    int tank_read_failures = 0;               ///< consecutive ticks with no usable tank reading
     bool is_running = false;
     bool device_online = false;
     // Power monitoring
@@ -288,13 +290,23 @@ public:
     void setDryRun(bool enabled) { dry_run_ = enabled; }
     bool dryRun() const { return dry_run_; }
 
+    /**
+     * @brief Move the loop's notion of now, for tests only
+     *
+     * The charge watchdog runs on minutes and the tank state on minutes of
+     * persistence; a test that waited for either would be a test that takes two
+     * hours to say nothing. Nothing in production calls this.
+     */
+    void advanceClockForTesting(int64_t ms) { clock_offset_ms_ += ms; }
+
 private:
     void threadFunc();
     bool readStatus(StatusSnapshot& status);
     void processCommands();
     void applyControlLogic(StatusSnapshot& status);
     void updateTankState(const StatusSnapshot& status);
-    static uint64_t nowMs();
+    uint64_t nowMs() const;
+    void updateChargeWatchdog(const StatusSnapshot& status);
     int setRunningMode(int mode);
     int setDhwTarget(float temp);
     int setHeatingTarget(float temp);
@@ -330,6 +342,10 @@ private:
     uint64_t last_tank_sample_ms_ = 0;
     uint64_t last_mode_write_ms_ = 0;
     int requested_device_mode_ = MODE_SET_HEAT_DHW;
+    uint64_t charge_started_ms_ = 0;
+    float charge_start_c_ = -1.0f;
+    bool dhw_sensor_fault_suspected_ = false;
+    int64_t clock_offset_ms_ = 0;
     bool dry_run_ = false;
     float saved_heating_target_;
     bool saved_targets_initialized_;
