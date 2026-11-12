@@ -558,3 +558,139 @@ TEST(SavedTargetTest, DeviceTargetsAboveFloorWinOverStaleSettings) {
     EXPECT_EQ(writeCountFor(f.client, REG_DHW_TARGET), 0)
         << "without a recorded target the device value must not be clobbered";
 }
+
+// ---- Mode write verification ----
+//
+// setRunningMode() is private and there is no public mode getter, so the
+// verification is pinned by what an observer can see: a device that does not
+// hold the value must not be treated as done, and the loop must come back and
+// try again on the next tick.
+
+namespace {
+
+/**
+ * Drives the control loop one iteration at a time. kick() wakes the loop out of
+ * its 30 s wait, so each tick() is one control iteration we can assert on
+ * without waiting half a minute for it.
+ */
+class TickedLoop {
+public:
+    explicit TickedLoop(IModbusClient& client) : client_(client) {}
+
+    bool start(int working_mode, const char* priority, float dhw_target, float heating_target) {
+        loop_.setInitialSettings(working_mode, priority, dhw_target, heating_target);
+        return loop_.start(&client_, &cmd_queue_, &status_queue_);
+    }
+
+    void tick() {
+        loop_.kick();
+        windmi::platform::sleep_ms(150);
+    }
+
+    StatusSnapshot latest() {
+        StatusSnapshot snapshot{};
+        waitForLatest(status_queue_, snapshot);
+        return snapshot;
+    }
+
+    void stop() { loop_.stop(); }
+
+private:
+    IModbusClient& client_;
+    ControlLoop loop_;
+    CmdQueue cmd_queue_;
+    StatusQueue status_queue_;
+};
+
+/** Accepts the write but keeps reporting a different value in 0x002C. */
+class LyingModeClient : public FakeModbusClient {
+public:
+    LyingModeClient(std::map<uint16_t, int16_t> registers, uint16_t reported)
+        : FakeModbusClient(std::move(registers)), reported_(reported) {}
+
+    int16_t readRegister(uint16_t address) override {
+        if (address == REG_RUNNING_MODE) {
+            return static_cast<int16_t>(reported_);
+        }
+        return FakeModbusClient::readRegister(address);
+    }
+
+private:
+    uint16_t reported_;
+};
+
+/** Refuses mode writes the way an unreachable or faulted device would. */
+class ThrowingModeClient : public FakeModbusClient {
+public:
+    explicit ThrowingModeClient(std::map<uint16_t, int16_t> registers)
+        : FakeModbusClient(std::move(registers)) {}
+
+    void writeRegister(uint16_t address, uint16_t value) override {
+        if (address == REG_RUNNING_MODE) {
+            ++mode_attempts_;          // the attempt happens, the write does not land
+            throw ModbusException("device offline");
+        }
+        FakeModbusClient::writeRegister(address, value);
+    }
+
+    int modeAttempts() const { return mode_attempts_; }
+
+private:
+    int mode_attempts_ = 0;
+};
+
+} // namespace
+
+TEST(ModeWriteVerificationTest, VerifiedModeWriteIsNotRepeated) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = MODE_SET_OFF;   // needs correcting to heat+dhw
+
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 46.0f, 40.0f));
+    runner.tick();
+    runner.tick();
+    runner.stop();
+
+    EXPECT_GE(writeCountFor(client, REG_RUNNING_MODE), 1);
+    EXPECT_EQ(writeCountFor(client, REG_RUNNING_MODE), 1)
+        << "a write the device confirmed is final; the loop must not keep pushing the mode";
+}
+
+TEST(ModeWriteVerificationTest, LyingClientIsRetried) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = MODE_SET_OFF;
+
+    // The device takes the write and still claims it is off: exactly what a
+    // rejected value looks like on the wire.
+    LyingModeClient client(registers, MODE_SET_OFF);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 46.0f, 40.0f));
+    runner.tick();
+    runner.tick();
+    runner.tick();
+    runner.stop();
+
+    EXPECT_GE(writeCountFor(client, REG_RUNNING_MODE), 2)
+        << "a read-back mismatch must not be recorded as success";
+}
+
+TEST(ModeWriteVerificationTest, ThrowingClientKeepsTheLoopAlive) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = MODE_SET_OFF;
+
+    ThrowingModeClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 46.0f, 40.0f));
+    runner.tick();
+    runner.tick();
+    StatusSnapshot snapshot = runner.latest();
+    runner.stop();
+
+    EXPECT_GE(client.modeAttempts(), 2)
+        << "a failed mode write is retried on the next tick";
+    EXPECT_EQ(writeCountFor(client, REG_RUNNING_MODE), 0)
+        << "nothing may be recorded as written while the device refuses";
+    EXPECT_TRUE(snapshot.device_online)
+        << "one register failing to write must not take the status down";
+}

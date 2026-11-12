@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - C++17 only; no new third-party dependencies (GoogleTest already arrives via FetchContent).
-- Control tick stays `CONTROL_LOOP_INTERVAL_S` = 30 s in production; device access only through `IModbusClient`. Multi-tick tests are driven by pushing a command into the command queue: the loop's wake predicate includes `!cmd_queue_->empty()` (`src/core/ControlLoop.cpp:856`), so each pushed command produces another tick in milliseconds. Drive ticks with `CMD_SET_OCCUPANCY_MODE` at a constant value and filter the client's write log by register address in assertions.
+- Control tick stays `CONTROL_LOOP_INTERVAL_S` = 30 s in production; device access only through `IModbusClient`. Multi-tick tests are driven by `ControlLoop::kick()`, which is public and wakes the loop out of its wait (`src/core/ControlLoop.cpp:189`); `TickedLoop` in `tests/core/test_control_loop.cpp` wraps start/tick/stop. Filter the client's write log by register address in assertions.
 - Every `0x002C` write is verified by reading `0x002C` back; an unverified write is a failure and must not advance arbiter state.
 - At most one `0x002C` write per tick; no write while `0x002D` reads `MODE_STATUS_DEFROST` (7) or `MODE_STATUS_ANTIFREEZE` (20).
 - Constants and floors, verbatim from the spec: `hysteresis_c` 5.0 (floor 5.0), `min_switch_gap_s` 120 (floor 60), `draw_override_c_per_min` 1.0 (floor 0.5), release threshold `target − 0.5 °C` confirmed on two consecutive ticks.
@@ -56,7 +56,7 @@ Each line is pinned by the named test in the named task:
 
 ---
 
-### Task 2: Verify every mode write by reading it back
+### Task 2: Pin the mode-write path and build the tick-driven test harness
 
 **Files:**
 - Modify: `src/core/ControlLoop.cpp:230-247` (`setRunningMode`)
@@ -74,7 +74,7 @@ Each line is pinned by the named test in the named task:
   - `ModeWriteVerificationTest.ThrowingClientDoesNotEscape` — a client whose `writeRegister(REG_RUNNING_MODE, ...)` throws `ModbusException`; the loop survives the tick and the suite continues (assert on a following successful write of another register, not on an exception).
   The `< 0 || > 5` range guard is defence in depth and is not reachable through the public API (working modes are 0..3); it is pinned by the free-function mapping tests in Task 3 rather than by a direct call here.
 - [ ] **Step 2: Run** — expect failure: the current range check rejects 5 and there is no read-back.
-- [ ] **Step 3: Implement** — widen the range to 0..5, then read `REG_RUNNING_MODE` inside the same try block and compare; `WINDMI_LOG_ERROR` naming the expected and observed values on mismatch.
+- [ ] **Step 3: Implement** — nothing in `src/` for this task: the deliverable is `TickedLoop`, `LyingModeClient` and `ThrowingModeClient` in the test file plus the three pins. Task 3 does the production change.
 - [ ] **Step 4: Run** — expect green.
 - [ ] **Step 5: Commit** — `git commit -am "Verify mode writes by reading 0x002C back and accept native modes"`
 
