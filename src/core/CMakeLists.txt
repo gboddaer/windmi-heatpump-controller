@@ -1,4 +1,5 @@
 add_library(windmi_core STATIC
+    Arbitration.cpp
     ControlLoop.cpp
     Scheduler.cpp
     StatusMonitor.cpp

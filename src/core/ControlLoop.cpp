@@ -4,6 +4,7 @@
  */
 
 #include "core/ControlLoop.hpp"
+#include "core/Arbitration.hpp"
 #include "modbus/IModbusClient.hpp"
 #include "utils/Logger.hpp"
 #include "utils/LogTags.hpp"
@@ -195,15 +196,27 @@ void ControlLoop::kick() {
 int ControlLoop::setRunningMode(int mode) {
     if (!modbus_client_) return -1;
 
-    // Validate: only 0, 1, 2 are valid device modes
-    if (mode < 0 || mode > 2) {
-        WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Invalid device mode %d: only 0 (Off), 1 (Cool+DHW), 2 (Heat+DHW) supported", mode);
+    // 0..5: the vendor modes 0-2 plus the GCHV modes 3-4-5 this unit accepts and
+    // the display controller writes itself (spec F1, F2).
+    if (mode < 0 || mode > 5) {
+        WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Invalid device mode %d: supported are 0..5", mode);
         return -1;
     }
 
     try {
         modbus_client_->writeRegister(REG_RUNNING_MODE, static_cast<uint16_t>(mode));
-        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set running mode to %d", mode);
+
+        // A device that does not hold the value has not accepted it. Reading it
+        // back here means a refused mode is reported as the failure it is, on this
+        // tick, instead of looking like a success until the next poll.
+        const int16_t held = modbus_client_->readRegister(REG_RUNNING_MODE);
+        if (held != mode) {
+            WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Device did not accept mode %d: 0x002C reads %d",
+                             mode, static_cast<int>(held));
+            return -1;
+        }
+
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set running mode to %d (verified by read-back)", mode);
         return 0;
     } catch (const ModbusException& e) {
         WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set running mode to %d: %s", mode, e.what());
@@ -559,14 +572,7 @@ void ControlLoop::processCommands() {
                 fireSettingsCallback();
 
                 {
-                    int target_device_mode;
-                    switch (cmd.int_val) {
-                        case 0:  target_device_mode = MODE_SET_OFF;       break;
-                        case 1:  target_device_mode = MODE_SET_HEAT_DHW;   break;
-                        case 2:  target_device_mode = MODE_SET_HEAT_DHW;  break;
-                        case 3:  target_device_mode = MODE_SET_HEAT_DHW;  break;
-                        default: target_device_mode = MODE_SET_HEAT_DHW;   break;
-                    }
+                    const int target_device_mode = deviceModeForWorkingMode(cmd.int_val);
 
                     if (setRunningMode(target_device_mode) == 0) {
                         current_mode_ = target_device_mode;
@@ -580,9 +586,9 @@ void ControlLoop::processCommands() {
                     // Override target temperatures and priority based on working mode
                     switch (cmd.int_val) {
                         case 1:  // DHW-only
-                            WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW-only mode, setting heating target to min (%.1f)",
-                                   static_cast<float>(HEATING_TARGET_MIN));
-                            setHeatingTarget(HEATING_TARGET_MIN);
+                            WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP,
+                                   "DHW-only mode: native device mode %d, setpoints left as the user set them",
+                                   MODE_SET_DHW_ONLY);
                             try {
                                 modbus_client_->writeRegister(REG_DHW_PRIORITY, 1);
                                 current_priority_ = PriorityMode::Dhw;
@@ -592,9 +598,9 @@ void ControlLoop::processCommands() {
                             }
                             break;
                         case 2:  // Heating-only
-                            WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Heating-only mode, setting DHW target to min (%.1f)",
-                                   static_cast<float>(DHW_TARGET_MIN));
-                            setDhwTarget(DHW_TARGET_MIN);
+                            WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP,
+                                   "Heating-only mode: native device mode %d, DHW setpoint left alone",
+                                   MODE_SET_HEAT_ONLY);
                             try {
                                 modbus_client_->writeRegister(REG_DHW_PRIORITY, 0);
                                 current_priority_ = PriorityMode::Heating;
@@ -635,18 +641,12 @@ void ControlLoop::processCommands() {
 
 void ControlLoop::applyControlLogic(StatusSnapshot& status) {
     // Determine what device mode we should be in
-    int desired_device_mode;
-    switch (desired_working_mode_) {
-        case 0:  desired_device_mode = MODE_SET_OFF;       break;
-        case 1:  desired_device_mode = MODE_SET_HEAT_DHW;  break;
-        case 2:  desired_device_mode = MODE_SET_HEAT_DHW;  break;
-        case 3:  desired_device_mode = MODE_SET_HEAT_DHW;  break;
-        default: desired_device_mode = MODE_SET_HEAT_DHW;   break;
-    }
+    const int desired_device_mode = deviceModeForWorkingMode(desired_working_mode_);
 
-    // Only change mode if it doesn't match
+    // Only change mode if it doesn't match. A mismatch we did not write ourselves
+    // is the display controller having changed the mode, so say so before correcting.
     if (current_mode_ != desired_device_mode) {
-        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Correcting device mode from %d to %d (desired working mode=%d)",
+        WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Correcting device mode from %d to %d (desired working mode=%d)",
                current_mode_, desired_device_mode, desired_working_mode_);
         if (setRunningMode(desired_device_mode) == 0) {
             current_mode_ = desired_device_mode;
@@ -655,19 +655,9 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
 
     // Enforce target temperature overrides based on working mode
     switch (desired_working_mode_) {
-        case 1:  // DHW-only: keep heating target at minimum
-            if (status.heating_target > HEATING_TARGET_MIN + 0.5f) {
-                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW-only enforcing heating target min (%.1f, was %.1f)",
-                       static_cast<float>(HEATING_TARGET_MIN), status.heating_target);
-                setHeatingTarget(HEATING_TARGET_MIN);
-            }
-            break;
-        case 2:  // Heating-only: keep DHW target at minimum
-            if (status.dhw_target > DHW_TARGET_MIN + 0.5f) {
-                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Heating-only enforcing DHW target min (%.1f, was %.1f)",
-                       static_cast<float>(DHW_TARGET_MIN), status.dhw_target);
-                setDhwTarget(DHW_TARGET_MIN);
-            }
+        case 1:  // DHW-only: native mode 5 does the work; the user's setpoints stay
+        case 2:  // Heating-only: native mode 4 does the work. No setpoint pinning -
+                  // a pinned floor used to be read back as the user's own target.
             break;
         case 3:  // DHW+Heating: ensure user's saved targets are active
             if (fabsf(status.dhw_target - saved_dhw_target_) > 0.5f) {

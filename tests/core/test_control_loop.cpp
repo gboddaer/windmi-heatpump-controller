@@ -90,6 +90,15 @@ bool wroteValue(const FakeModbusClient& client, uint16_t address, uint16_t value
     return false;
 }
 
+bool wrote(const FakeModbusClient& client, uint16_t address) {
+    for (const auto& write : client.writes()) {
+        if (write.first == address) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int writeCountFor(const FakeModbusClient& client, uint16_t address) {
     int count = 0;
     for (const auto& write : client.writes()) {
@@ -693,4 +702,85 @@ TEST(ModeWriteVerificationTest, ThrowingClientKeepsTheLoopAlive) {
         << "nothing may be recorded as written while the device refuses";
     EXPECT_TRUE(snapshot.device_online)
         << "one register failing to write must not take the status down";
+}
+
+// ---- Working mode to device mode mapping ----
+
+TEST(ArbiterMappingTest, DhwOnlyWritesNativeMode5Once) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = MODE_SET_HEAT_DHW;   // unit sits in heat+dhw
+    registers[REG_HEATING_TARGET] = 450;               // 45.0 C, the user's value
+
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(1, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    runner.tick();
+    runner.stop();
+
+    EXPECT_TRUE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_DHW_ONLY))
+        << "DHW-only must use the unit's native DHW-only mode, not a pinned setpoint";
+    EXPECT_EQ(1, writeCountFor(client, REG_RUNNING_MODE))
+        << "one corrective write, then leave the panel alone";
+    EXPECT_FALSE(wrote(client, REG_HEATING_TARGET))
+        << "native mode 5 must not overwrite the user's heating setpoint";
+}
+
+TEST(ArbiterMappingTest, HeatingOnlyWritesNativeMode4AndStopsPinning) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = MODE_SET_HEAT_DHW;
+    registers[REG_DHW_TARGET] = 460;                   // 46.0 C, the user's value
+
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(2, "heating", 46.0f, 45.0f));
+    runner.tick();
+    runner.tick();
+    runner.stop();
+
+    EXPECT_TRUE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_HEAT_ONLY));
+    EXPECT_FALSE(wroteValue(client, REG_DHW_TARGET, 400))
+        << "native mode 4 must not overwrite the user's DHW setpoint with the floor";
+}
+
+TEST(ArbiterMappingTest, BothOnUsesHeatDhwMode) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = MODE_SET_OFF;
+
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 46.0f, 45.0f));
+    runner.tick();
+    runner.stop();
+
+    EXPECT_TRUE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_HEAT_DHW));
+}
+
+TEST(ArbiterMappingTest, BothOffWritesModeZero) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = MODE_SET_HEAT_DHW;
+
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(0, "dhw", 46.0f, 45.0f));
+    runner.tick();
+    runner.stop();
+
+    EXPECT_TRUE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_OFF));
+}
+
+TEST(ArbiterMappingTest, PanelOverrideCorrectedOnce) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = MODE_SET_OFF;   // somebody pressed Off on the panel
+
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 46.0f, 45.0f));
+    runner.tick();
+    runner.tick();
+    runner.tick();
+    runner.stop();
+
+    EXPECT_EQ(1, writeCountFor(client, REG_RUNNING_MODE))
+        << "correct the panel once, then stay out of the way";
 }
