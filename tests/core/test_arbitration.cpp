@@ -101,3 +101,86 @@ TEST(TankStateTest, FreshReadingInsideBandCountsAsCalling) {
     EXPECT_EQ(TankState::Calling,
               advanceTankState(TankState::Unknown, cfg(), reading(47.0f)));
 }
+
+// ---- The device-mode decision ----
+
+namespace {
+
+ArbiterInput input(int working_mode, TankState tank, int current_mode,
+                   int seconds_since_last_write = 3600, bool tank_drawing = false,
+                   bool blocked = false) {
+    ArbiterInput in{};
+    in.working_mode = working_mode;
+    in.tank = tank;
+    in.current_mode = current_mode;
+    in.tank_drawing = tank_drawing;
+    in.blocked = blocked;
+    in.seconds_since_last_write = seconds_since_last_write;
+    return in;
+}
+
+} // namespace
+
+TEST(ArbitrationDecisionTest, StaticRowsIgnoreTankState) {
+    const ArbitrationConfig c = cfg();
+    for (TankState tank : {TankState::Calling, TankState::Satisfied, TankState::Unknown}) {
+        EXPECT_EQ(MODE_SET_DHW_ONLY, decideDeviceMode(c, input(1, tank, MODE_SET_HEAT_DHW)));
+        EXPECT_EQ(MODE_SET_HEAT_ONLY, decideDeviceMode(c, input(2, tank, MODE_SET_HEAT_DHW)));
+    }
+}
+
+TEST(ArbitrationDecisionTest, WorkingModeOffMapsToOff) {
+    EXPECT_EQ(MODE_SET_OFF, decideDeviceMode(cfg(), input(0, TankState::Calling, MODE_SET_HEAT_DHW)));
+}
+
+TEST(ArbitrationDecisionTest, BothOnSatisfiedTankUsesHeatingMode) {
+    EXPECT_EQ(MODE_SET_HEAT_DHW,
+              decideDeviceMode(cfg(), input(3, TankState::Satisfied, MODE_SET_DHW_ONLY)));
+}
+
+TEST(ArbitrationDecisionTest, BothOnCallingTankUsesDhwMode) {
+    EXPECT_EQ(MODE_SET_DHW_ONLY,
+              decideDeviceMode(cfg(), input(3, TankState::Calling, MODE_SET_HEAT_DHW)));
+}
+
+TEST(ArbitrationDecisionTest, BothOnKeepsCurrentModeWhileCandidate) {
+    EXPECT_EQ(MODE_SET_DHW_ONLY,
+              decideDeviceMode(cfg(), input(3, TankState::SatisfiedCandidate, MODE_SET_DHW_ONLY)));
+    EXPECT_EQ(MODE_SET_HEAT_DHW,
+              decideDeviceMode(cfg(), input(3, TankState::SatisfiedCandidate, MODE_SET_HEAT_DHW)));
+}
+
+TEST(ArbitrationDecisionTest, SwitchGapBlocksGrant) {
+    EXPECT_EQ(MODE_SET_HEAT_DHW,
+              decideDeviceMode(cfg(), input(3, TankState::Calling, MODE_SET_HEAT_DHW, 60)));
+}
+
+TEST(ArbitrationDecisionTest, SwitchGapDoesNotBlockRelease) {
+    EXPECT_EQ(MODE_SET_HEAT_DHW,
+              decideDeviceMode(cfg(), input(3, TankState::Satisfied, MODE_SET_DHW_ONLY, 0)))
+        << "giving the compressor back to the house is never worth delaying";
+}
+
+TEST(ArbitrationDecisionTest, DrawOverridesSwitchGap) {
+    EXPECT_EQ(MODE_SET_DHW_ONLY,
+              decideDeviceMode(cfg(), input(3, TankState::Calling, MODE_SET_HEAT_DHW, 0, true)))
+        << "somebody is at the tap: comfort wins over the debounce";
+}
+
+TEST(ArbitrationDecisionTest, BlockedHoldsCurrentMode) {
+    EXPECT_EQ(MODE_SET_HEAT_DHW,
+              decideDeviceMode(cfg(), input(3, TankState::Calling, MODE_SET_HEAT_DHW, 3600, false, true)));
+    EXPECT_EQ(MODE_SET_DHW_ONLY,
+              decideDeviceMode(cfg(), input(3, TankState::Satisfied, MODE_SET_DHW_ONLY, 3600, false, true)));
+    EXPECT_EQ(MODE_SET_HEAT_DHW,
+              decideDeviceMode(cfg(), input(1, TankState::Calling, MODE_SET_HEAT_DHW, 3600, false, true)))
+        << "no writes during defrost or anti-freeze; the decision is deferred, not lost";
+}
+
+TEST(ArbitrationDecisionTest, UnknownTankHoldsMode) {
+    EXPECT_EQ(MODE_SET_DHW_ONLY,
+              decideDeviceMode(cfg(), input(3, TankState::Unknown, MODE_SET_DHW_ONLY)));
+    EXPECT_EQ(MODE_SET_HEAT_DHW,
+              decideDeviceMode(cfg(), input(3, TankState::Unknown, MODE_SET_HEAT_DHW)))
+        << "an unreadable tank probe must never be read as freezing and start a charge";
+}

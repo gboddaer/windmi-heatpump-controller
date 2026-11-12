@@ -79,6 +79,24 @@ struct TankReading {
 TankState advanceTankState(TankState previous, const ArbitrationConfig& cfg,
                            const TankReading& reading);
 
+/** Everything the decision needs, evaluated once per control tick. */
+struct ArbiterInput {
+    int working_mode = 3;              ///< application working mode, 0..3
+    TankState tank = TankState::Unknown;
+    int current_mode = MODE_SET_HEAT_DHW;   ///< device mode we believe is active
+    bool tank_drawing = false;         ///< falling at or above draw_override_c_per_min
+    bool blocked = false;              ///< defrost or anti-freeze in progress
+    int seconds_since_last_write = 0;  ///< since the last verified device-mode write
+};
+
+/**
+ * The device mode the unit should be in, or @p current_mode to leave it alone.
+ *
+ * Nothing here writes; ControlLoop applies the answer. Holding the current mode
+ * is the fallthrough, so an unrecognised state can never trigger a write.
+ */
+int decideDeviceMode(const ArbitrationConfig& cfg, const ArbiterInput& in);
+
 } // namespace windmi
 
 #endif // WINDMI_CORE_ARBITRATION_HPP

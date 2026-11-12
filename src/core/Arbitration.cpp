@@ -59,4 +59,40 @@ TankState advanceTankState(TankState previous, const ArbitrationConfig& cfg,
     return (previous == TankState::Unknown) ? TankState::Calling : previous;
 }
 
+int decideDeviceMode(const ArbitrationConfig& cfg, const ArbiterInput& in) {
+    // Defrost and anti-freeze are the unit's own business; a mode change in the
+    // middle of one is a write it will not honour. The decision is not lost -
+    // next tick asks the same question again.
+    if (in.blocked) {
+        return in.current_mode;
+    }
+
+    // Only "both enabled" has anything to arbitrate: the single-demand rows are
+    // one native mode each.
+    if (in.working_mode != 3) {
+        return deviceModeForWorkingMode(in.working_mode);
+    }
+
+    switch (in.tank) {
+        case TankState::Satisfied:
+            // Release immediately. Delaying here punishes the house for a
+            // debounce that exists to protect the compressor and the valve,
+            // and this transition serves both.
+            return MODE_SET_HEAT_DHW;
+
+        case TankState::Calling:
+            if (in.tank_drawing || in.seconds_since_last_write >= cfg.min_switch_gap_s) {
+                return MODE_SET_DHW_ONLY;
+            }
+            return in.current_mode;
+
+        case TankState::SatisfiedCandidate:
+        case TankState::Unknown:
+        default:
+            // One tick at target is not satisfaction (the probe sits at the top of
+            // the tank), and no reading at all is not a demand either.
+            return in.current_mode;
+    }
+}
+
 } // namespace windmi
