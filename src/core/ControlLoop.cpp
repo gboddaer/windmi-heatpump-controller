@@ -5,6 +5,7 @@
 
 #include "core/ControlLoop.hpp"
 #include "core/Arbitration.hpp"
+#include "core/ModeNames.hpp"
 #include "modbus/IModbusClient.hpp"
 #include "utils/Logger.hpp"
 #include "utils/LogTags.hpp"
@@ -196,6 +197,12 @@ void ControlLoop::kick() {
 int ControlLoop::setRunningMode(int mode) {
     if (!modbus_client_) return -1;
 
+    if (dry_run_) {
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "[dry-run] would write device mode 0x002C = %d (%s)",
+                        mode, mode_to_string(mode));
+        return 0;
+    }
+
     // 0..5: the vendor modes 0-2 plus the GCHV modes 3-4-5 this unit accepts and
     // the display controller writes itself (spec F1, F2).
     if (mode < 0 || mode > 5) {
@@ -216,6 +223,7 @@ int ControlLoop::setRunningMode(int mode) {
             return -1;
         }
 
+        last_mode_write_ms_ = nowMs();
         WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set running mode to %d (verified by read-back)", mode);
         return 0;
     } catch (const ModbusException& e) {
@@ -226,6 +234,12 @@ int ControlLoop::setRunningMode(int mode) {
 
 int ControlLoop::setDhwTarget(float temp) {
     if (!modbus_client_) return -1;
+
+    if (dry_run_) {
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "[dry-run] would write DHW target %.1f C", temp);
+        mDhwTarget_ = temp;
+        return 0;
+    }
 
     int16_t raw_temp = temp_to_raw(temp);
     try {
@@ -242,6 +256,12 @@ int ControlLoop::setDhwTarget(float temp) {
 
 int ControlLoop::setHeatingTarget(float temp) {
     if (!modbus_client_) return -1;
+
+    if (dry_run_) {
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "[dry-run] would write heating target %.1f C", temp);
+        mHeatingTarget_ = temp;
+        return 0;
+    }
 
     int16_t raw_temp = temp_to_raw(temp);
     try {
@@ -615,17 +635,53 @@ void ControlLoop::processCommands() {
 
 void ControlLoop::applyControlLogic(StatusSnapshot& status) {
     // Determine what device mode we should be in
-    const int desired_device_mode = deviceModeForWorkingMode(desired_working_mode_);
+    // ---- Demand arbiter: domestic hot water first, heating in the gaps ----
+    const bool blocked = (status.running_status == MODE_STATUS_DEFROST ||
+                          status.running_status == MODE_STATUS_ANTIFREEZE);
+    updateTankState(status);
 
-    // Only change mode if it doesn't match. A mismatch we did not write ourselves
-    // is the display controller having changed the mode, so say so before correcting.
-    if (current_mode_ != desired_device_mode) {
-        WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Correcting device mode from %d to %d (desired working mode=%d)",
-               current_mode_, desired_device_mode, desired_working_mode_);
-        if (setRunningMode(desired_device_mode) == 0) {
-            current_mode_ = desired_device_mode;
+    ArbiterInput in;
+    in.working_mode = desired_working_mode_;
+    in.tank = tank_state_;
+    in.current_mode = current_mode_;
+    in.tank_drawing = tank_drawing_;
+    in.blocked = blocked;
+    // No mode write since startup means no churn to debounce against, so the gap
+    // counts as satisfied rather than as a very large or very small elapsed time.
+    const bool wrote_mode_before = (last_mode_write_ms_ != 0);
+    in.seconds_since_last_write = wrote_mode_before
+        ? static_cast<int>((nowMs() - last_mode_write_ms_) / 1000u)
+        : arbitration_.min_switch_gap_s;
+
+    const int wanted_mode = decideDeviceMode(arbitration_, in);
+    // A device mode that is neither what we asked for nor what we are about to
+    // ask for was set by somebody else, normally the display controller.
+    const bool set_elsewhere = (current_mode_ != requested_device_mode_);
+    requested_device_mode_ = wanted_mode;
+
+    if (wanted_mode != current_mode_) {
+        if (set_elsewhere) {
+            WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP,
+                            "Device mode %d was set elsewhere (we last asked for %d)",
+                            current_mode_, requested_device_mode_);
+        }
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP,
+                        "DHW arbiter: device mode %d -> %d (tank %.1f C vs target %.1f C, state %s, "
+                        "draw %s, blocked %s, gap %d/%d s%s)",
+                        current_mode_, wanted_mode, status.dhw_tank_temp, status.dhw_target,
+                        tankStateName(tank_state_), tank_drawing_ ? "yes" : "no",
+                        blocked ? "yes" : "no", in.seconds_since_last_write,
+                        arbitration_.min_switch_gap_s, wrote_mode_before ? "" : ", none since startup");
+        if (setRunningMode(wanted_mode) == 0) {
+            current_mode_ = wanted_mode;
         }
     }
+
+    status.dhw_calling = (tank_state_ == TankState::Calling);
+    status.dhw_state_known = (tank_state_ != TankState::Unknown);
+    status.requested_device_mode = requested_device_mode_;
+    status.seconds_since_mode_write =
+        wrote_mode_before ? static_cast<int>((nowMs() - last_mode_write_ms_) / 1000u) : -1;
 
     // Enforce target temperature overrides based on working mode
     switch (desired_working_mode_) {
@@ -807,6 +863,65 @@ void ControlLoop::threadFunc() {
 
     WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Thread stopped");
     running_.store(false);
+}
+
+void ControlLoop::setArbitration(const ArbitrationConfig& arbitration) {
+    arbitration_ = arbitration;
+    arbitration_.applyFloors();
+    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP,
+                    "DHW arbiter: hysteresis %.1f C, switch gap %d s, draw override %.2f C/min%s",
+                    arbitration_.hysteresis_c, arbitration_.min_switch_gap_s,
+                    arbitration_.draw_override_c_per_min, dry_run_ ? " [dry-run]" : "");
+}
+
+uint64_t ControlLoop::nowMs() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+void ControlLoop::updateTankState(const StatusSnapshot& status) {
+    const uint64_t now = nowMs();
+
+    if (status.dhw_tank_temp <= 0.0f || status.dhw_target <= 0.0f) {
+        // A failed read leaves the field at zero. That is not a freezing tank, and
+        // treating it as one would start a charge on every Modbus hiccup.
+        if (tank_state_ != TankState::Unknown) {
+            WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "DHW tank reading unusable; holding device mode %d",
+                            current_mode_);
+        }
+        ++tank_read_failures_;
+        if (tank_read_failures_ == 3) {
+            WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP,
+                             "DHW tank temperature unreadable for %d ticks in a row", tank_read_failures_);
+        }
+        tank_state_ = TankState::Unknown;
+        tank_drawing_ = false;
+        ticks_at_target_ = 0;
+        return;
+    }
+    tank_read_failures_ = 0;
+
+    const double elapsed_s = (last_tank_sample_ms_ == 0)
+        ? 0.0
+        : static_cast<double>(now - last_tank_sample_ms_) / 1000.0;
+    tank_drawing_ = tankIsDrawing(last_tank_temp_c_, status.dhw_tank_temp, elapsed_s,
+                                  arbitration_.draw_override_c_per_min);
+    if (tank_drawing_) {
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW draw: tank %.1f -> %.1f C in %.0f s",
+                        last_tank_temp_c_, status.dhw_tank_temp, elapsed_s);
+    }
+
+    if (status.dhw_tank_temp >= status.dhw_target - ArbitrationConfig::kReleaseMarginC) {
+        ++ticks_at_target_;
+    } else {
+        ticks_at_target_ = 0;
+    }
+
+    const TankReading reading{status.dhw_tank_temp, status.dhw_target, true, ticks_at_target_};
+    tank_state_ = advanceTankState(tank_state_, arbitration_, reading);
+
+    last_tank_temp_c_ = status.dhw_tank_temp;
+    last_tank_sample_ms_ = now;
 }
 
 } // namespace windmi

@@ -184,3 +184,27 @@ TEST(ArbitrationDecisionTest, UnknownTankHoldsMode) {
               decideDeviceMode(cfg(), input(3, TankState::Unknown, MODE_SET_HEAT_DHW)))
         << "an unreadable tank probe must never be read as freezing and start a charge";
 }
+
+// ---- Draw detection: rate, not direction ----
+
+TEST(TankDrawRateTest, FastFallIsADraw) {
+    // Measured 2026-11-11: a bath pulled the top probe 41.6 -> 27.2 C in 4.5 min.
+    EXPECT_TRUE(tankIsDrawing(41.6f, 27.2f, 270.0, 1.0f));
+}
+
+TEST(TankDrawRateTest, SlowSagIsNotADraw) {
+    // Stratification relaxing after a release: a couple of degrees over ten minutes.
+    EXPECT_FALSE(tankIsDrawing(49.8f, 48.4f, 600.0, 1.0f));
+}
+
+TEST(TankDrawRateTest, AFirstSampleHasNoRate) {
+    EXPECT_FALSE(tankIsDrawing(-1.0f, 40.0f, 0.0, 1.0f));
+}
+
+TEST(TankDrawRateTest, TooShortAnIntervalIsNotADraw) {
+    EXPECT_FALSE(tankIsDrawing(49.0f, 48.0f, 2.0, 1.0f));
+}
+
+TEST(TankDrawRateTest, RisingIsNeverADraw) {
+    EXPECT_FALSE(tankIsDrawing(20.0f, 25.0f, 60.0, 1.0f));
+}

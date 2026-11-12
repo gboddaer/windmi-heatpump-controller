@@ -18,7 +18,6 @@ let pendingMode = null;  // Prevents status poll from reverting mode before comm
 
 // Working mode: 0=OFF, 1=DHW Only, 2=Heating Only, 3=Heating+DHW Priority, 4=Heating Priority+DHW
 let currentMode = 3; // default: Heating + DHW Priority
-let currentPriority = 'dhw'; // 'dhw' or 'heating' (derived from mode)
 let currentOccupancy = 'home'; // 'away', 'sleep', 'home'
 
 // Schedule state
@@ -31,13 +30,11 @@ const elements = {
     runStatus: document.getElementById('runStatus'),
     powerBtn: document.getElementById('powerBtn'),
     modeValue: document.getElementById('modeValue'),
-    priorityValue: document.getElementById('priorityValue'),
-    prioritySection: document.getElementById('prioritySection'),
+    dhwDemandValue: document.getElementById('dhwDemandValue'),
     mode0Btn: document.getElementById('mode0Btn'),
     mode1Btn: document.getElementById('mode1Btn'),
     mode2Btn: document.getElementById('mode2Btn'),
     mode3Btn: document.getElementById('mode3Btn'),
-    mode4Btn: document.getElementById('mode4Btn'),
     outdoorTempValue: document.getElementById('outdoorTempValue'),
     dhwTempValue: document.getElementById('dhwTempValue'),
     heatingTempValue: document.getElementById('heatingTempValue'),
@@ -146,23 +143,20 @@ function setWorkingMode(mode) {
     setTimeout(() => { pendingMode = null; }, 10000);
 
     // Update button active states
-    for (let i = 0; i <= 4; i++) {
+    for (let i = 0; i <= 3; i++) {
         const btn = document.getElementById('mode' + i + 'Btn');
         if (btn) btn.classList.toggle('active', i === mode);
     }
 
-    // Map to backend working_mode and priority
-    // Mode 0: OFF → working_mode=0
-    // Mode 1: DHW Only → working_mode=1, priority=dhw
-    // Mode 2: Heating Only → working_mode=2, priority=heating
-    // Mode 3: Heating + DHW Priority → working_mode=3, priority=dhw
-    // Mode 4: Heating Priority + DHW → working_mode=3, priority=heating
-    const backendMode = (mode === 0) ? 0 : (mode === 3 || mode === 4) ? 3 : mode;
-    currentPriority = (mode === 3 || mode === 1) ? 'dhw' : 'heating';
+    // The UI mode is the backend working mode, one to one. There is no
+    // "heating priority" mode to offer: the unit is arbitrated by demand and
+    // domestic hot water always comes first (docs/superpowers/specs/
+    // 2026-11-11-native-dhw-only-mode-and-dhw-priority.md).
+    const backendMode = mode;
 
-    apiPost('/api/set-mode', { mode: backendMode, priority: currentPriority })
+    apiPost('/api/set-mode', { mode: backendMode })
         .then(() => {
-            const labels = ['OFF', 'DHW Only', 'Heating Only', 'Heating + DHW Priority', 'Heating Priority + DHW'];
+            const labels = ['OFF', 'DHW Only', 'Heating Only', 'Heating + DHW (DHW first)'];
             showNotification('Mode set to ' + labels[mode], 'success');
         })
         .catch(error => {
@@ -280,24 +274,21 @@ function updateUI(status) {
         elements.modeValue.textContent = setModeStr;
     }
 
-    // Priority display
-    elements.priorityValue.textContent = status.priority.toUpperCase();
-
-    // Map working mode + priority to our 5-mode system
-    // Server: workingMode 0=off, 1=dhw, 2=heat, 3=both
-    // Server: priority 'dhw' or 'heating'
-    // Our modes: 0=OFF, 1=DHW Only, 2=Heating Only, 3=Heating+DHW Priority, 4=Heating Priority+DHW
-    const serverMode = status.workingMode || 0;
-    const serverPriority = (status.priority || 'dhw').toLowerCase();
-    let displayMode;
-    if (serverMode === 0) displayMode = 0;
-    else if (serverMode === 1) displayMode = 1;
-    else if (serverMode === 2) displayMode = 2;
-    else if (serverMode === 3) {
-        displayMode = (serverPriority === 'dhw') ? 3 : 4;
-    } else {
-        displayMode = 3; // default
+    // DHW demand: what the arbiter is doing for the tank right now
+    let demand = 'unknown';
+    if (status.dhwStateKnown) {
+        demand = status.dhwCalling ? 'demanding' : 'satisfied';
     }
+    if (status.requestedDeviceMode && status.requestedDeviceMode !== status.mode) {
+        demand += ' → ' + status.requestedDeviceMode;
+    }
+    elements.dhwDemandValue.textContent = demand;
+
+    // The UI mode is the backend working mode
+    const serverMode = status.workingMode || 0;
+    let displayMode;
+    if (serverMode >= 0 && serverMode <= 3) displayMode = serverMode;
+    else displayMode = 3; // default
 
     // If we have a pending mode change, only accept server state once it matches
     if (pendingMode !== null) {
@@ -310,7 +301,6 @@ function updateUI(status) {
         currentMode = displayMode;
     }
 
-    currentPriority = (currentMode === 3 || currentMode === 1) ? 'dhw' : 'heating';
 
     // Update mode button active states (always reflect currentMode)
     for (let i = 0; i <= 4; i++) {

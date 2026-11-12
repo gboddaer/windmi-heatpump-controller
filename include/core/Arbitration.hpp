@@ -47,7 +47,8 @@ enum class TankState : uint8_t {
 struct ArbitrationConfig {
     float hysteresis_c = 5.0f;             ///< width of the window heating may run in
     int min_switch_gap_s = 120;            ///< debounce between device-mode writes
-    float draw_override_c_per_min = 1.0f;  ///< a fall this fast is somebody using hot water
+    float draw_override_c_per_min = 1.0f;
+    int charge_watchdog_min = 120;  ///< a fall this fast is somebody using hot water
 
     /// How far below the target counts as "at temperature", in degC.
     static constexpr float kReleaseMarginC = 0.5f;
@@ -96,6 +97,30 @@ struct ArbiterInput {
  * is the fallthrough, so an unrecognised state can never trigger a write.
  */
 int decideDeviceMode(const ArbitrationConfig& cfg, const ArbiterInput& in);
+
+/// Shortest interval over which a fall in tank temperature can be judged at all.
+constexpr double kMinDrawSampleS = 10.0;
+
+/**
+ * Is the tank falling because somebody is using hot water?
+ *
+ * Rate, not direction: a hot-water draw measured 3.2 degC/min, while
+ * stratification relaxing after a release is around 0.1-0.2 degC/min. Only a
+ * draw may override the switch gap, because only a draw has a person waiting.
+ */
+bool tankIsDrawing(float previous_c, float current_c, double elapsed_s,
+                   float override_c_per_min);
+
+/// Name of a tank state, for logs and the status payload.
+inline const char* tankStateName(TankState state) {
+    switch (state) {
+        case TankState::Unknown:            return "unknown";
+        case TankState::Calling:            return "calling";
+        case TankState::SatisfiedCandidate: return "candidate";
+        case TankState::Satisfied:          return "satisfied";
+    }
+    return "unknown";
+}
 
 } // namespace windmi
 

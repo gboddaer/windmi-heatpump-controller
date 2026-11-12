@@ -15,6 +15,7 @@
 #include <functional>
 #include <string>
 #include "utils/Platform.hpp"
+#include "core/Arbitration.hpp"
 #include "config.h"
 #include "core/Scheduler.hpp"
 
@@ -84,6 +85,11 @@ struct StatusSnapshot {
     int running_mode = 0;        // From REG_RUNNING_MODE (0x002C)
     int running_status = 0;      // From REG_RUNNING_STATUS (0x002D)
     bool dhw_priority = false;
+    // DHW arbiter view: what the unit is doing for the tank and why.
+    bool dhw_calling = false;             ///< tank below target - hysteresis
+    bool dhw_state_known = false;         ///< tank state derived from a usable reading
+    int requested_device_mode = 0;        ///< the mode the arbiter last decided on
+    int seconds_since_mode_write = 0;     ///< since the last verified 0x002C write
     bool is_running = false;
     bool device_online = false;
     // Power monitoring
@@ -264,11 +270,31 @@ public:
      */
     static int shutdownDeviceMode() { return MODE_SET_HEAT_DHW; }
 
+    /**
+     * @brief Tunables for the DHW demand arbiter
+     *
+     * Values below a floor are clamped and logged, because the floors are the
+     * compressor's and the diverter valve's, not a preference.
+     */
+    void setArbitration(const ArbitrationConfig& arbitration);
+
+    /**
+     * @brief Run the whole control loop without writing anything to the unit
+     *
+     * Decisions are evaluated and logged, and the status payload says what the
+     * arbiter would have done, so the logic can be watched against a live unit
+     * before it is allowed to touch it.
+     */
+    void setDryRun(bool enabled) { dry_run_ = enabled; }
+    bool dryRun() const { return dry_run_; }
+
 private:
     void threadFunc();
     bool readStatus(StatusSnapshot& status);
     void processCommands();
     void applyControlLogic(StatusSnapshot& status);
+    void updateTankState(const StatusSnapshot& status);
+    static uint64_t nowMs();
     int setRunningMode(int mode);
     int setDhwTarget(float temp);
     int setHeatingTarget(float temp);
@@ -294,6 +320,17 @@ private:
     int desired_working_mode_;      // Application-level (0-3)
     float last_heating_target_;
     float saved_dhw_target_;
+    // DHW demand arbiter state
+    ArbitrationConfig arbitration_;
+    TankState tank_state_ = TankState::Unknown;
+    bool tank_drawing_ = false;
+    int ticks_at_target_ = 0;
+    int tank_read_failures_ = 0;
+    float last_tank_temp_c_ = -1.0f;
+    uint64_t last_tank_sample_ms_ = 0;
+    uint64_t last_mode_write_ms_ = 0;
+    int requested_device_mode_ = MODE_SET_HEAT_DHW;
+    bool dry_run_ = false;
     float saved_heating_target_;
     bool saved_targets_initialized_;
 

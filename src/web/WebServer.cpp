@@ -235,7 +235,11 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         "\"workingMode\":%d,"
         "\"occupancyMode\":%d,"
         "\"scheduleActive\":%s,"
-        "\"schedulePaused\":%s}\n",
+        "\"schedulePaused\":%s,"
+        "\"dhwCalling\":%s,"
+        "\"dhwStateKnown\":%s,"
+        "\"requestedDeviceMode\":\"%s\","
+        "\"secondsSinceModeWrite\":%d}\n",
         last_status_.dhw_tank_temp,
         last_status_.dhw_target,
         last_status_.leaving_water_temp,
@@ -270,7 +274,11 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         last_status_.working_mode,
         last_status_.occupancy_mode,
         last_status_.schedule_active ? "true" : "false",
-        last_status_.schedule_paused ? "true" : "false"
+        last_status_.schedule_paused ? "true" : "false",
+        last_status_.dhw_calling ? "true" : "false",
+        last_status_.dhw_state_known ? "true" : "false",
+        mode_to_string(last_status_.requested_device_mode),
+        last_status_.seconds_since_mode_write
     );
 
     sendJsonReply(c, 200, response);

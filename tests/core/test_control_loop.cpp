@@ -604,6 +604,8 @@ public:
         loop_.kick();
     }
 
+    void enableDryRun() { loop_.setDryRun(true); }
+
     void sendPriority(int priority) {
         Command cmd{};
         cmd.type = CommandType::CMD_SET_PRIORITY;
@@ -759,9 +761,11 @@ TEST(ArbiterMappingTest, HeatingOnlyWritesNativeMode4AndStopsPinning) {
         << "native mode 4 must not overwrite the user's DHW setpoint with the floor";
 }
 
-TEST(ArbiterMappingTest, BothOnUsesHeatDhwMode) {
+TEST(ArbiterMappingTest, BothOnStartsInDhwModeWhileTheTankIsCalling) {
     auto registers = fullRegisters();
     registers[REG_RUNNING_MODE] = MODE_SET_OFF;
+    // Tank 45.0 against a 46.0 target is inside the band; with no history that
+    // counts as a demand, so the tank gets the compressor first.
 
     FakeModbusClient client(registers);
     TickedLoop runner(client);
@@ -769,7 +773,9 @@ TEST(ArbiterMappingTest, BothOnUsesHeatDhwMode) {
     runner.tick();
     runner.stop();
 
-    EXPECT_TRUE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_HEAT_DHW));
+    EXPECT_TRUE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_DHW_ONLY));
+    EXPECT_FALSE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_HEAT_DHW))
+        << "both demands enabled never means heating-first while the tank is starved";
 }
 
 TEST(ArbiterMappingTest, BothOffWritesModeZero) {
@@ -867,4 +873,140 @@ TEST(ShutdownModeTest, ShutdownAlwaysLeavesHeatingAndDhwAvailable) {
         << "mode 0 leaves the unit with neither space heating nor domestic hot water";
     EXPECT_NE(MODE_SET_DHW_ONLY, ControlLoop::shutdownDeviceMode())
         << "mode 5 would switch space heating off and leave it off after we exit";
+}
+
+// ---- The arbiter running in the control loop ----
+
+namespace {
+
+/** Registers for an arbiter test: 50.0 C DHW target, tank where you want it. */
+std::map<uint16_t, int16_t> arbiterRegisters(int device_mode, int tank_raw, int status = MODE_STATUS_HEAT) {
+    auto registers = fullRegisters();
+    registers[REG_RUNNING_MODE] = static_cast<int16_t>(device_mode);
+    registers[REG_RUNNING_STATUS] = static_cast<int16_t>(status);
+    registers[REG_DHW_TARGET] = 500;                 // 50.0 C
+    registers[REG_DHW_TANK_TEMP] = static_cast<int16_t>(tank_raw);
+    return registers;
+}
+
+} // namespace
+
+TEST(ArbitrationExecutionTest, GrantOnColdTankAtStartup) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_HEAT_DHW, 440));   // tank 44.0 < 50.0 - 5.0
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    runner.stop();
+
+    EXPECT_TRUE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_DHW_ONLY))
+        << "with both demands on and the tank starved, the tank gets the compressor";
+}
+
+TEST(ArbitrationExecutionTest, ReleaseAfterTwoTicksAtTarget) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 496));   // 49.6 >= 50.0 - 0.5
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();   // first tick at target: candidate, hold
+    EXPECT_FALSE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_HEAT_DHW))
+        << "one tick at the top of the tank is not satisfaction (spec F9)";
+    runner.tick();   // second tick: satisfied, release to heating
+    runner.stop();
+
+    EXPECT_TRUE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_HEAT_DHW));
+}
+
+TEST(ArbitrationExecutionTest, BandHoldsAcrossASag) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_HEAT_DHW, 496));
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    runner.tick();                                   // satisfied; already in heat+dhw, no write
+    client.writeRegister(REG_DHW_TANK_TEMP, 470);    // sag to 47.0, still inside the band
+    runner.tick();
+    runner.tick();
+    runner.stop();
+
+    EXPECT_EQ(0, writeCountFor(client, REG_RUNNING_MODE))
+        << "a sag inside the 5 degC band must not start a DHW episode";
+}
+
+TEST(ArbitrationExecutionTest, UnreadableTankHoldsMode) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_HEAT_DHW, 0));   // 0 = no usable reading
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    runner.tick();
+    runner.stop();
+
+    EXPECT_EQ(0, writeCountFor(client, REG_RUNNING_MODE))
+        << "an unusable tank reading must never look like a freezing tank";
+}
+
+TEST(ArbitrationExecutionTest, WriteDeferredDuringDefrostThenRetried) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_HEAT_DHW, 440, MODE_STATUS_DEFROST));
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    EXPECT_EQ(0, writeCountFor(client, REG_RUNNING_MODE)) << "no mode writes during defrost";
+
+    client.writeRegister(REG_RUNNING_STATUS, MODE_STATUS_DHW);   // defrost ends
+    runner.tick();
+    runner.stop();
+
+    EXPECT_TRUE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_DHW_ONLY))
+        << "the deferred decision is still made once defrost ends";
+}
+
+TEST(ArbitrationExecutionTest, FailedWriteDoesNotAdvanceState) {
+    // Tank satisfied, unit in DHW-only: the release to heat+DHW must happen.
+    LyingModeClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 496), MODE_SET_DHW_ONLY);
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    runner.tick();
+    runner.tick();
+    runner.tick();
+    runner.stop();
+
+    EXPECT_GE(writeCountFor(client, REG_RUNNING_MODE), 2)
+        << "a device that does not hold the mode is retried, not believed";
+}
+
+TEST(ArbitrationExecutionTest, DryRunSuppressesWrites) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_HEAT_DHW, 440));
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.enableDryRun();
+    runner.tick();
+    runner.tick();
+    StatusSnapshot snapshot = runner.latest();
+    runner.stop();
+
+    EXPECT_EQ(0, static_cast<int>(client.writes().size())) << "dry run writes nothing at all";
+    EXPECT_EQ(MODE_SET_DHW_ONLY, snapshot.requested_device_mode)
+        << "but it still says what it would have done";
+    EXPECT_TRUE(snapshot.dhw_calling);
+}
+
+TEST(ArbitrationExecutionTest, StatusExposesArbitration) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_HEAT_DHW, 440));
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    StatusSnapshot snapshot = runner.latest();
+    runner.stop();
+
+    EXPECT_TRUE(snapshot.dhw_state_known);
+    EXPECT_TRUE(snapshot.dhw_calling);
+    EXPECT_EQ(MODE_SET_DHW_ONLY, snapshot.requested_device_mode);
+    EXPECT_EQ(-1, snapshot.seconds_since_mode_write)
+        << "negative means no device-mode write has happened since startup";
 }

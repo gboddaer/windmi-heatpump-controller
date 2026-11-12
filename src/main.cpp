@@ -81,6 +81,7 @@ int main(int argc, char* argv[]) {
     std::string log_file_path;
     windmi::LogLevel log_level = windmi::LogLevel::Info;
     bool run_selftest = false;
+    bool dry_run = false;
     bool demo_mode = false;
     bool force_lock = false;
     std::string config_path;
@@ -100,6 +101,7 @@ int main(int argc, char* argv[]) {
             printf("  -o, --log-file <path>   Log to file (in addition to console)\n");
             printf("  -f, --force             Force start even if lock is held by stale process\n");
             printf("  -s, --selftest          Run self-test and exit\n");
+            printf("      --dry-run           Evaluate control decisions without writing any register\n");
             printf("  -d, --demo              Run in demo mode with simulated Windmi device\n");
             printf("      --serial <device>   Serial device for Modbus RTU (e.g., /dev/ttyUSB0 or COM3)\n");
             printf("      --baud <rate>       Baud rate (default: %d)\n", SERIAL_DEFAULT_BAUD);
@@ -127,6 +129,8 @@ int main(int argc, char* argv[]) {
             log_file_path = argv[++i];
         } else if (strcmp(argv[i], "--selftest") == 0 || strcmp(argv[i], "-s") == 0) {
             run_selftest = true;
+        } else if (strcmp(argv[i], "--dry-run") == 0) {
+            dry_run = true;
         } else if (strcmp(argv[i], "--demo") == 0 || strcmp(argv[i], "-d") == 0) {
             demo_mode = true;
         } else if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0) {
@@ -282,6 +286,24 @@ int main(int argc, char* argv[]) {
         g_control_loop->scheduler().setRanges(scheduleConfig.getRanges());
         g_control_loop->scheduler().setEnabled(scheduleConfig.isEnabled());
     }
+    // Domestic hot water always has priority; these are the margins it is
+    // exercised with, not a switch for whether it applies.
+    windmi::ArbitrationConfig arbitration;
+    arbitration.hysteresis_c = static_cast<float>(
+        config.getDouble("arbitration.dhw_hysteresis_c", arbitration.hysteresis_c));
+    arbitration.min_switch_gap_s =
+        config.getInt("arbitration.dhw_min_switch_gap_s", arbitration.min_switch_gap_s);
+    arbitration.charge_watchdog_min =
+        config.getInt("arbitration.dhw_charge_watchdog_min", arbitration.charge_watchdog_min);
+    arbitration.draw_override_c_per_min = static_cast<float>(
+        config.getDouble("arbitration.dhw_draw_override_c_per_min",
+                         arbitration.draw_override_c_per_min));
+    g_control_loop->setArbitration(arbitration);
+    if (dry_run) {
+        g_control_loop->setDryRun(true);
+        WINDMI_LOG_WARN(LOG_TAG_MAIN, "Dry run: no register will be written to the unit");
+    }
+
     g_control_loop->setSettingsCallback([&config, config_path](
         int working_mode, const std::string& priority,
         float dhw_target, float heating_target) {

@@ -95,4 +95,19 @@ int decideDeviceMode(const ArbitrationConfig& cfg, const ArbiterInput& in) {
     }
 }
 
+bool tankIsDrawing(float previous_c, float current_c, double elapsed_s,
+                   float override_c_per_min) {
+    if (previous_c <= 0.0f || current_c <= 0.0f) {
+        return false;          // no previous sample, or a reading we cannot use
+    }
+    if (elapsed_s < kMinDrawSampleS) {
+        return false;          // too short an interval to speak of a rate
+    }
+    const double fall_c = static_cast<double>(previous_c) - current_c;
+    if (fall_c <= 0.0) {
+        return false;          // rising or steady
+    }
+    return (fall_c / (elapsed_s / 60.0)) >= override_c_per_min;
+}
+
 } // namespace windmi
