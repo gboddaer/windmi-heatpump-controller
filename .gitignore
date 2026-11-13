@@ -19,3 +19,7 @@ tests/test_spsc
 
 # Register readout snapshots (tools/windmi_regdump.py)
 regdumps/
+
+# Python bytecode from the tools/ scripts
+__pycache__/
+*.pyc

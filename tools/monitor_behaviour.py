@@ -186,6 +186,7 @@ class Monitor:
         self.seq_gaps = []
         self.last_seq = None
         self.last_seq_ts = None
+        self.mode_writes = []
         self.grant_idle_since = None       # mode 5, nothing actuating
         self.calling_idle_since = None     # mode 2, DHW calling, nothing actuating
         self.mismatch_since = None         # requested != actual
@@ -496,6 +497,18 @@ class Monitor:
                 self.rep.emit("LOG-ERROR", "ERROR", line.split("]", 3)[-1].strip()[:200])
             elif "[warn]" in low:
                 self.rep.emit("LOG-WARN", "WARN", line.split("]", 3)[-1].strip()[:200])
+            if "set running mode" in low:
+                # Found by watching: after a restart the controller wrote mode 2 twice
+                # thirty seconds apart. Once is a correction; a run of them is the
+                # controller and the display fighting over 0x002C, and each write is a
+                # command the compressor has to react to.
+                self.mode_writes.append(time.time())
+                recent = [t for t in self.mode_writes if time.time() - t < 600]
+                if len(recent) > 3:
+                    self.rep.emit("MODE-WRITE-STORM", "ERROR",
+                                  f"{len(recent)} device-mode writes in 10 min: something else "
+                                  "is setting 0x002C, or a read that fails is being answered "
+                                  "with another write")
             for needle, rule in (("crc error", "MODBUS-CRC"),
                                  ("unexpected byte count", "MODBUS-BYTECOUNT"),
                                  ("failed to read", "READ-FAILED"),
@@ -619,6 +632,19 @@ def selftest():
         mon.last_seq, mon.last_seq_ts = 7, time.time() - 200
         mon.rule_sequence(status(statusSequence=7))
     cases.append(("STATUS-STALE", case_stale))
+
+    def case_write_storm(mon):
+        mon.log_offset = 0
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".log", delete=False, encoding="utf-8") as fh:
+            for i in range(5):
+                fh.write(f"[2026-11-13 12:00:0{i}.000] [Info ] [ControlLoop] Set running "
+                         f"mode to 2 (verified by read-back)\n")
+            name = fh.name
+        global APP_LOG
+        APP_LOG = name
+        mon.rule_log()
+    cases.append(("MODE-WRITE-STORM", case_write_storm))
 
     def case_contract(mon):
         d = status()
