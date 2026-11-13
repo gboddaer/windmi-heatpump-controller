@@ -295,3 +295,24 @@ this project before that date should be treated as unverified.
 Mode 5 was confirmed by writing it, watching the unit react, writing 2 back, and watching
 it revert in about 7 s. The 8-minute panel walk that followed moved exactly three
 registers: `0x002C`, `0x002D`, `0x00D2`.
+
+# Corrections, 2026-11-13 (which DHW setpoint the unit obeys)
+
+Two more claims in this file and in `docs/rotenso_windmi_manual_summary.md` did not survive
+contact with the unit. Both were found by watching a tank that would not finish charging.
+
+| Claim | Measured |
+|---|---|
+| `0x0194` is *the* DHW setpoint; `0x0033` is the control point the unit regulates to | `0x0194` is the **normal** sub-mode setpoint and `0x0196` the **economic** one (manual's own table). With `0x00C9 = 2` the unit charged to `0x0196 = 45.0` and stopped, while `0x0194` said 50.0 and the tank sat there for 80 minutes. Raising `0x0196` to 52.0 started the compressor within 2 minutes (31 → 59 Hz, valve closed, flow 1.07 m³/h). `0x0033` read 45.0 in every snapshot ever taken and followed neither DHW setpoint nor the heating setpoint (raising `0x0191` from 45.0 to 55.0 left it at 45.0 and started nothing), so whatever it is, it is not the DHW target |
+| A DHW-only grant means the unit is charging | Only if the unit agrees. A grant with `0x0017` (compressor) at 0 and `0x102A` (flow) at 0 can last an hour and more: the restart temperature belongs to the unit's own differential below `0x0196`, not to anything we write. Priority has to be measured as progress, which is why the arbiter releases a declined charge (`chargeIsParked`, `docs/superpowers/specs/...`) instead of holding the compressor for a register |
+
+`0x000B` (manual: T5, "DHW tank temperature") reads 8.5 °C while `0x00CE` (T4) reads 44.4 °C
+in a tank that has been running. One of those two sensors is not in the tank. The controller
+uses `0x00CE` only; if a future change touches `0x000B`, find out where that probe is first.
+
+**One Modbus client at a time.** On 2026-11-13 a logging script polled the same gateway the
+application was using. Frames collided: `Unexpected byte count: 242 (expected 2)`, values
+appearing and vanishing between reads, and — found in the log, not on the tank — a garbled
+DHW read of 52.0 °C became a real write to `0x0194` because drift correction trusted the
+first reading. Observe through `/api/status`; the writing tools are for when the application
+is stopped. Drift correction now needs a plausible value confirmed on two consecutive ticks.

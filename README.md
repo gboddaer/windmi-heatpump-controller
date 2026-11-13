@@ -309,14 +309,25 @@ waits 120 s after the last mode write unless the tank is falling at 1 °C/min or
 which is somebody using hot water; a release never waits; and nothing is written during
 defrost or anti-freeze. Every mode write is verified by read-back.
 
+Two of those rules exist because the unit does not do what its registers say. The tank is
+measured against the **higher** of `0x0194` and `0x0196`, because with the unit in its
+economic DHW sub-mode the charge runs to `0x0196` and stops there whatever `0x0194` asks,
+and `setDhwTarget` writes both. And a grant the unit does not act on is not a demand being
+served: compressor and flow idle for 10 minutes means the charge was declined, the house
+gets the compressor back, and the next attempt waits 15 minutes — a hot-water draw is served
+immediately. Without that cooldown the release was a metronome, because a unit that will not
+charge to a setpoint does not change its mind when asked again.
+
 The margins are configurable, the priority is not:
 
 ```ini
 [arbitration]
 dhw_hysteresis_c = 5.0            # floor 5.0
 dhw_min_switch_gap_s = 120        # floor 60
-dhw_charge_watchdog_min = 120     # floor 60
+dhw_charge_watchdog_min = 120     # floor 60, counted in compressor minutes
 dhw_draw_override_c_per_min = 1.0 # floor 0.5
+dhw_park_timeout_s = 600          # floor 180, idle on a grant before the house gets it back
+dhw_park_cooldown_s = 900         # floor 300, before asking the unit to charge again
 ```
 
 Values below a floor are clamped with a warning: the floors are the compressor's and the

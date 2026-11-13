@@ -94,6 +94,33 @@ There is no DHW flow register — `0x102A` is the heating loop — so the temper
 | 11 | If the app dies | No watchdog, no systemd unit — accepted risk |
 | 12 | Anti-legionella / eco | Left to the unit; observe `0x00C9` (currently `2` = regular) and document |
 
+## Revisions, 2026-11-13 (measured, same unit)
+
+Three rulings below were written against registers rather than against the machine. They are
+revised here; the ruling text above is left in place so the reasoning stays readable.
+
+**Ruling 5 (satisfaction at `target − 0.5`) is measured against the higher of `0x0194` and
+`0x0196`.** The unit charges to whichever DHW setpoint its active sub-mode uses — with
+`0x00C9 = 2` that is `0x0196` — and does not expose which one governs. `effectiveDhwTargetC()`
+takes the higher of the two; `setDhwTarget()` writes both; `/api/status` reports both and the
+effective one.
+
+**Ruling 9 (sensor fault is a flag only) now counts compressor minutes.** A charge that runs
+for `dhw_charge_watchdog_min` of compressor time without rising 0.25 °C/min raises
+`dhwSensorFaultSuspected` and still never relieves heating. Minutes since the grant are no
+longer the input: a unit that never ran is not a lying tank sensor.
+
+**New ruling 13: priority is earned by progress.** `chargeIsParked()` — DHW granted,
+compressor and flow both idle for `dhw_park_timeout_s`, tank not falling — releases the
+compressor to the house. `dhw_park_cooldown_s` then has to pass before the same call is made
+again, because a unit that will not charge to a setpoint does not change its mind; a hot-water
+draw overrides the cooldown.
+
+**New ruling 14: one register read is not evidence.** A setpoint is restored only when the
+value is inside the writable range and two consecutive ticks agree (ruling 8's seeding gained
+the same plausibility test). A second Modbus client on this gateway garbles frames, and on
+2026-11-13 a garbled 12.0 °C read became a real write of 52.0 °C.
+
 ## Non-goals
 
 Cooling (`MODE_SET_COOL_DHW`), schedule-engine changes, and any web UI redesign. The scheduler continues to set working modes; the arbiter only decides which device mode a working mode implies.
