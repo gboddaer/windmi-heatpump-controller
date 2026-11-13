@@ -1,0 +1,36 @@
+# The arbiter only exists while this process does. On exit it leaves the unit in
+# DHW-only mode, which is the safest state for a house with a wood burner, but it
+# also means no central heating and no hot-water arbitration until the process is
+# back. So: start after the network is actually up (the gateway is a TCP endpoint),
+# and come back on any exit.
+#
+# Install (paths and user are yours to check first):
+#
+#   sudo cp contrib/windmi-control.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now windmi-control
+#   systemctl status windmi-control
+#
+# Do not run this service and tools/*.py hardware scripts at the same time: two
+# Modbus clients on the Waveshare gateway corrupt each other's frames.
+
+[Unit]
+Description=Windmi heat pump controller (DHW arbiter and web UI)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=gbo
+WorkingDirectory=/home/gbo/develop/wpomp
+ExecStart=/home/gbo/develop/wpomp/build/windmi-control -o /var/tmp/wpomp.log
+Restart=always
+RestartSec=5
+# Ctrl-C and `systemctl stop` must take the same path as SIGINT: drain, then leave
+# the unit in DHW-only mode, verified by read-back. Anything faster kills that write.
+TimeoutStopSec=60
+KillMode=mixed
+GuessMainPID=yes
+
+[Install]
+WantedBy=multi-user.target

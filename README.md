@@ -139,6 +139,25 @@ make
 ./build/windmi-control --help
 ```
 
+### As a service
+
+The arbiter exists only while this process does. On exit it leaves the unit in DHW-only
+mode, so a crashed or stopped process means no central heating and nobody arguing for the
+tank. `contrib/windmi-control.service` is a unit file for that: it starts after the network
+is up (the gateway is a TCP endpoint), restarts on any exit, and gives SIGINT the time to
+drain and write the exit mode instead of killing it. Read it before installing: the user,
+paths and log location are yours.
+
+```bash
+cp contrib/windmi-control.service /etc/systemd/system/   # as root
+systemctl daemon-reload
+systemctl enable --now windmi-control
+```
+
+Do not run the service and the `tools/*.py` hardware scripts at the same time: two Modbus
+clients on this gateway corrupt each other's frames (see `docs/learned.md`). Observe the
+running controller through `/api/status`.
+
 ### Serial Port (Modbus RTU over RS-485)
 
 For devices connected via RS-485 without a TCP gateway, use the serial port mode. The controller uses **9600 8N1** as the default configuration (matching Windmi device defaults).
