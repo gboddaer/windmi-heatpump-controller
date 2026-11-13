@@ -264,3 +264,23 @@ static ChargeVerdict advanceChargeWatchdog(ChargeVerdict prev, bool charging,
 - [x] **Step 3: Correct the priority docs** — in `docs/dhw_priority_report.md`, replace "writes fail with `exception 0x02`" with the measured result (writes succeed and are ignored, F5/F6; priority is a property of the mode, F4/F7; the workaround was setpoint pinning) and point to the arbiter spec. In `docs/learned.md`, retire the stale claims that `0x02BF` and `0x0209` are unreadable — both read on the current firmware — and name `tools/windmi_regdump.py`, `tools/watch_changes.py` and `tools/test_set_*.py` as the way to re-derive any of it.
 - [x] **Step 4: Align the README** — status payload key is `"temperature"`, not `"target"`; self-test flag is `-s`/`--selftest`, not `-t`; demo gateway listens on 10000; GoogleTest comes via FetchContent, not a submodule; document the working-mode table with native device modes 5/4/2/0, the `[arbitration]` settings with their defaults and floors, `--dry-run`, `dhw_sensor_fault_suspected`, and the operator note that when the app is not running the unit reverts to heating-first and the panel's DHW-only is the manual override.
 - [x] **Step 5: Verify and commit** — `ctest --test-dir build --output-on-failure` green, then `git add tools/test_set_mode.py docs README.md && git commit -m "Document the arbiter and align the README with the code"`
+
+---
+
+## After the plan: what the unit taught us the same week
+
+All ten tasks above shipped, and the first full day of real arbitration found four things
+the plan could not have known. They are recorded here rather than rewriting the tasks, so
+the reasoning that produced the original shape stays readable; the spec carries the revised
+rulings.
+
+| Commit | What was wrong | What changed |
+|---|---|---|
+| `89847c2` | Ruling 4 said the unit was safer in `heat+dhw` when the process exits. It is not: with no arbiter, `heat+dhw` is heating-first and the tank is orphaned | Exit leaves the unit in **DHW only**, verified by read-back. Accepted consequence: no central heating while the process is not running |
+| `21ee5d5` | The page showed "Offline"/"Off" against a healthy API: `app.js` still attached a listener to the mode-4 button that Task 7 deleted, and threw on load | Dead line removed, dead `acPowerValue` mapping removed, and `tools/check_ui_refs.py` now fails the build-time check when the script reaches for an element the HTML does not define |
+| `75c6a70` | The unit charges to `0x0196` (economic DHW setpoint), not the `0x0194` we wrote; a grant the unit does not act on held the compressor from the house for 80 minutes; the charge watchdog blamed the tank sensor for a unit that never ran; and a garbled frame from a second Modbus client became a real 52.0 °C write | Demand is measured against `effectiveDhwTargetC()` (higher of the two setpoints, both written); `chargeIsParked()` releases a declined charge with `park_cooldown_s` against a metronome, overridden by a draw; the watchdog counts compressor minutes; drift restoration needs a plausible value confirmed on two ticks |
+| `4ec3c05` | No process, no arbiter, and nothing was bringing the process back | `contrib/windmi-control.service` |
+
+The plan's method held up: every one of the four was found by read-only measurement against
+the unit (`tools/watch_changes.py`, `/api/status`, the log), and each was fixed test-first
+with the failing case written from the measurement rather than from the register table.
