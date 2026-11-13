@@ -644,6 +644,12 @@ public:
         loop_.kick();
     }
 
+    /** The snapshot published by the tick that was just driven. */
+    StatusSnapshot tickSnapshot() {
+        tick();
+        return latest();
+    }
+
     StatusSnapshot latest() {
         StatusSnapshot snapshot{};
         waitForLatest(status_queue_, snapshot);
@@ -658,6 +664,16 @@ private:
     ControlLoop loop_;
     CmdQueue cmd_queue_;
     StatusQueue status_queue_;
+};
+
+/** A gateway that never comes back: connect() fails for ever. */
+class UnreachableClient : public FakeModbusClient {
+public:
+    explicit UnreachableClient(std::map<uint16_t, int16_t> registers)
+        : FakeModbusClient(std::move(registers)) {}
+
+    bool connect() override { return false; }
+    bool isConnected() const override { return false; }
 };
 
 /** Accepts the write but keeps reporting a different value in 0x002C. */
@@ -1228,4 +1244,59 @@ TEST(SetpointDriftTest, AnImplausibleReadingIsNeverWrittenBack) {
 
     EXPECT_FALSE(wroteValue(client, REG_DHW_TARGET, 500))
         << "measured 2026-11-13: a garbled read became a real write of 52.0 C";
+}
+
+// ---- Liveness has to be in the payload ----
+// A calm unit and a stalled control loop look identical from outside: the registers
+// stop moving in both cases, because there is nothing to move. Measured 2026-11-13
+// while watching for misbehaviour: publish gaps of 30, 60 and 120 s all mean "fine"
+// when the tank is stable, so an external monitor cannot tell them from a loop that
+// died holding the last snapshot. One monotonic counter makes the question answerable.
+
+TEST(StatusLivenessTest, EveryPublishedSnapshotAdvancesTheSequence) {
+    FakeModbusClient client(fullRegisters());
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    StatusSnapshot first = runner.tickSnapshot();
+    runner.tick();
+    StatusSnapshot second = runner.tickSnapshot();
+    runner.stop();
+
+    EXPECT_GT(first.status_sequence, 0u);
+    EXPECT_GT(second.status_sequence, first.status_sequence)
+        << "a monitor needs to see a new snapshot, not just different numbers";
+}
+
+TEST(StatusLivenessTest, AUnitThatDoesNotAnswerIsPublishedAsOffline) {
+    // Connected to the gateway, but no register answers: readStatus() fails, and the
+    // snapshot that says so has to be fresh, not the last good one.
+    FakeModbusClient client({});
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    StatusSnapshot first = runner.tickSnapshot();
+    runner.tick();
+    StatusSnapshot second = runner.tickSnapshot();
+    runner.stop();
+
+    EXPECT_FALSE(first.device_online);
+    EXPECT_GT(second.status_sequence, first.status_sequence);
+}
+
+TEST(StatusLivenessTest, AGatewayThatIsDownIsSaidToBeDown) {
+    // Found by watching the controller, not by reading the code: while the gateway was
+    // unreachable the loop retried and published nothing at all, so /api/status kept
+    // serving the last good snapshot with deviceOnline true. A page full of numbers
+    // from before the failure, presented as now.
+    UnreachableClient client(fullRegisters());
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    StatusSnapshot snap = runner.tickSnapshot();
+    runner.stop();
+
+    EXPECT_FALSE(snap.device_online)
+        << "an unreachable gateway must be reported, not hidden behind stale numbers";
+    EXPECT_GT(snap.status_sequence, 0u) << "and said again each cycle, so its age is knowable";
 }

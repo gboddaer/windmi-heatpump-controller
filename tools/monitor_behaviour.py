@@ -34,6 +34,7 @@ SAMPLES = "/var/tmp/wpomp_samples.csv"
 FINDINGS = "/var/tmp/wpomp_findings.log"
 APP_LOG = os.environ.get("WPOMP_LOG", "/var/tmp/wpomp.log")
 PROC_MATCH = "build/windmi-control"
+APP_NAME = "windmi-control"
 
 # Setpoints as they were when the monitor started. A change is not a fault, but
 # it must be reported: the display controller moving them means the arbiter's
@@ -50,7 +51,20 @@ MONITORED = (
     "compressorRuntimeHours", "pumpRuntimeHours", "acPowerW", "cop",
 )
 
-COLUMNS = ("ts", "latency_ms", "mode", "requestedDeviceMode", "runningStatus",
+# Keys the UI and this monitor read. A rename or a dropped field used to be able to
+# make the page silently wrong (the mode-4 button crash of 2026-11-13 was the same
+# class of fault on the other side of the wire), so the payload is checked for them.
+REQUIRED_KEYS = (
+    "dhwTemperature", "dhwTarget", "dhwEcoTarget", "effectiveDhwTarget",
+    "heatingTarget", "heatingTemperature", "outdoorTemperature",
+    "leavingWaterTemperature", "enteringWaterTemperature", "mode", "runningStatus",
+    "status", "deviceOnline", "compressorFrequency", "waterFlow", "dhwValveStatus",
+    "workingMode", "dhwCalling", "dhwStateKnown", "dhwState", "unitActuating",
+    "requestedDeviceMode", "dhwSensorFaultSuspected", "tankReadFailures",
+    "waterControlPoint", "statusSequence",
+)
+
+COLUMNS = ("ts", "pid", "latency_ms", "statusSequence", "mode", "requestedDeviceMode", "runningStatus",
            "dhwState", "dhwCalling", "unitActuating", "dhwTemperature",
            "dhwTarget", "dhwEcoTarget", "effectiveDhwTarget", "waterControlPoint",
            "heatingTarget", "heatingTemperature", "outdoorTemperature",
@@ -99,14 +113,23 @@ def fetch(base, timeout):
 
 
 def find_pids():
+    """The controller's pids, matched on the executable name.
+
+    Matching the command line instead also matches any shell whose command happens to
+    contain the path, which is how a restart meant for the controller ended up sending
+    SIGINT to a bash wrapper while the controller kept running. /proc/pid/comm is the
+    executable name and cannot be confused with a command line.
+    """
     pids = []
     for pid in (p for p in os.listdir("/proc") if p.isdigit()):
         try:
+            with open(f"/proc/{pid}/comm", encoding="utf-8") as fh:
+                name = fh.read().strip()
             with open(f"/proc/{pid}/cmdline", "rb") as fh:
                 cmd = fh.read().replace(b"\0", b" ").decode(errors="replace")
         except OSError:
             continue
-        if PROC_MATCH in cmd and "monitor_behaviour" not in cmd:
+        if name == APP_NAME and "-m pyenv" not in cmd and "monitor_behaviour" not in cmd:
             pids.append(int(pid))
     return pids
 
@@ -160,8 +183,9 @@ class Monitor:
         self.prev_ts = None
         self.prev_all = None
         self.frozen_since = None
-        self.gaps = []
-        self.last_change = None
+        self.seq_gaps = []
+        self.last_seq = None
+        self.last_seq_ts = None
         self.grant_idle_since = None       # mode 5, nothing actuating
         self.calling_idle_since = None     # mode 2, DHW calling, nothing actuating
         self.mismatch_since = None         # requested != actual
@@ -217,42 +241,66 @@ class Monitor:
             if p95 < 100:
                 self.rep.last.pop("API-SLOW-P95", None)
 
-    def rule_loop_period(self, all_key):
-        """Estimate the control loop's publish period from when values actually change.
+    def rule_sequence(self, d):
+        """Publish cadence, measured from the loop's own counter.
 
-        The loop polls the unit on a fixed interval and the API serves the last
-        snapshot, so the registers move on that rhythm. A period far beyond it means
-        the loop is spending its time somewhere else: Modbus timeouts, a stuck
-        reconnect, or a thread that died and left the last snapshot on the shelf.
+        Before the counter existed this was guessed from when the registers moved,
+        which punished a calm unit: a stable tank publishes identical snapshots for
+        minutes and that looked like a stalled loop.
         """
-        if self.prev_all is not None and all_key != self.prev_all:
-            now = time.time()
-            if self.last_change is not None:
-                gap = now - self.last_change
-                if gap > 300:
-                    self.rep.emit("LOOP-GAP", "ERROR",
-                                  f"nothing changed for {gap / 60:.1f} min between two updates")
-                self.gaps.append(gap)
-                if len(self.gaps) >= 12:
-                    recent = self.gaps[-12:]
-                    med = statistics.median(recent)
-                    if med > 75:
-                        self.rep.emit("LOOP-SLOW", "ERROR",
-                                      f"updates arrive every {med:.0f} s (median of 12); the "
-                                      "loop is meant to run every 30 s")
-                    elif med > 50:
-                        self.rep.emit("LOOP-SLOW", "WARN",
-                                      f"updates arrive every {med:.0f} s (median of 12)")
-                    elif med < 15:
-                        self.rep.emit("LOOP-FAST", "WARN",
-                                      f"updates arrive every {med:.0f} s: faster than the tick, "
-                                      "so something is polling the unit off-rhythm")
-                    else:
-                        self.rep.last.pop("LOOP-SLOW", None)
-                        self.rep.last.pop("LOOP-FAST", None)
-            self.last_change = now
-        elif self.last_change is None:
-            self.last_change = time.time()
+        seq = d.get("statusSequence")
+        if seq is None:
+            return
+        seq = int(seq)
+        now = time.time()
+        if self.last_seq is None:
+            self.last_seq, self.last_seq_ts = seq, now
+            return
+
+        if seq == self.last_seq:
+            held = now - self.last_seq_ts
+            if held > 150:
+                self.rep.emit("STATUS-STALE", "ERROR",
+                              f"statusSequence has not moved for {held:.0f} s: the control "
+                              "loop is publishing nothing, so every number on the page is "
+                              f"{held / 60:.1f} min old")
+            elif held > 75:
+                self.rep.emit("STATUS-STALE", "WARN",
+                              f"statusSequence unchanged for {held:.0f} s")
+            return
+
+        gap = now - self.last_seq_ts
+        self.seq_gaps.append(gap)
+        self.last_seq, self.last_seq_ts = seq, now
+
+        if gap > 150:
+            self.rep.emit("LOOP-GAP", "ERROR",
+                          f"a {gap:.0f} s gap between published snapshots")
+
+        if len(self.seq_gaps) >= 10:
+            recent = self.seq_gaps[-10:]
+            med = statistics.median(recent)
+            if med > 75:
+                self.rep.emit("LOOP-SLOW", "ERROR",
+                              f"snapshots every {med:.0f} s (median of 10); the loop is meant "
+                              "to publish every 30 s")
+            elif med > 50:
+                self.rep.emit("LOOP-SLOW", "WARN",
+                              f"snapshots every {med:.0f} s (median of 10)")
+            elif med < 20:
+                self.rep.emit("LOOP-FAST", "WARN",
+                              f"snapshots every {med:.0f} s: faster than the tick, so something "
+                              "is polling the unit off-rhythm")
+            else:
+                self.rep.last.pop("LOOP-SLOW", None)
+                self.rep.last.pop("LOOP-FAST", None)
+                self.rep.last.pop("LOOP-GAP", None)
+
+    def rule_contract(self, d):
+        missing = [k for k in REQUIRED_KEYS if k not in d]
+        if missing:
+            self.rep.emit("API-CONTRACT", "ERROR",
+                          "missing from /api/status: " + ", ".join(missing))
 
     def rule_frozen(self, all_key):
         """Nothing moved at all: an idle unit does this, a stalled loop does too."""
@@ -476,14 +524,19 @@ class Monitor:
         self.rule_transitions(d)
         self.rule_priority_laws(d)
         self.rule_physics(d)
+        self.rule_contract(d)
+        self.rule_sequence(d)
         all_key = tuple(d.get(k) for k in MONITORED)
-        self.rule_loop_period(all_key)
         self.rule_frozen(all_key)
         self.prev = d
         self.prev_ts = time.time()
         self.prev_all = all_key
-        self.csv.writerow([int(time.time()), round(latency, 1)] +
-                          [d.get(c) for c in COLUMNS[2:]])
+        row = ([int(time.time()), os.getpid(), round(latency, 1)] +
+               [d.get(c) for c in COLUMNS[3:]])
+        # A header and a row that drift apart makes every column lie by one, and the
+        # rules above would then read a valve state out of a temperature. Assert it.
+        assert len(row) == len(COLUMNS), f"row {len(row)} fields, header {len(COLUMNS)}"
+        self.csv.writerow(row)
         self.csv_fh.flush()
 
     def summary(self):
@@ -522,7 +575,10 @@ def selftest():
         return name, seen
 
     def status(**kw):
-        base = dict.fromkeys(MONITORED, 0)
+        # A payload the app would actually send: every required key present, so the
+        # healthy tick stays silent and API-CONTRACT only fires on a real omission.
+        base = dict.fromkeys(REQUIRED_KEYS, 0)
+        base.update(dict.fromkeys(MONITORED, 0))
         base.update(mode="heat+dhw", runningStatus="heat", dhwState="satisfied",
                     dhwCalling=False, unitActuating=True, requestedDeviceMode="heat+dhw",
                     dhwTemperature=50.0, dhwTarget=50.0, dhwEcoTarget=50.0,
@@ -547,19 +603,29 @@ def selftest():
     cases.append(("API-UNRESPONSIVE", case_dead))
 
     def case_loop_slow(mon):
-        # Twelve updates, each 90 s apart: the loop is meant to publish every 30 s.
-        mon.last_change = time.time()
-        for i in range(12):
-            mon.prev_all = ("a", i)
-            mon.rule_loop_period(("a", i + 1))
-            mon.last_change -= 90          # backdate so the gaps read as 90 s each
+        # Twelve snapshots, 90 s apart: the loop is meant to publish every 30 s.
+        mon.last_seq, mon.last_seq_ts = 0, time.time()
+        for i in range(1, 11):
+            mon.last_seq_ts -= 90          # backdate so each gap reads as 90 s
+            mon.rule_sequence(status(statusSequence=i))
     cases.append(("LOOP-SLOW", case_loop_slow))
 
     def case_loop_gap(mon):
-        mon.last_change = time.time() - 400
-        mon.prev_all = ("x",)
-        mon.rule_loop_period(("y",))
+        mon.last_seq, mon.last_seq_ts = 1, time.time() - 200
+        mon.rule_sequence(status(statusSequence=2))
     cases.append(("LOOP-GAP", case_loop_gap))
+
+    def case_stale(mon):
+        mon.last_seq, mon.last_seq_ts = 7, time.time() - 200
+        mon.rule_sequence(status(statusSequence=7))
+    cases.append(("STATUS-STALE", case_stale))
+
+    def case_contract(mon):
+        d = status()
+        for key in ("statusSequence", "dhwState", "effectiveDhwTarget"):
+            d.pop(key, None)
+        mon.rule_contract(d)
+    cases.append(("API-CONTRACT", case_contract))
 
     def case_frozen(mon):
         d = status()
@@ -663,9 +729,29 @@ def selftest():
         else:
             print(f"  ok    {got_name:22} fired")
 
+    # Row shape: a shifted column turns every rule into nonsense.
+    def case_shape(mon):
+        mon.fetch = lambda: (status(), 1.0, None)
+    shape_case, shape_seen = run("shape", case_shape)
+    mon = Monitor("http://unused", 10, Reporter(path, 0))
+    mon.open_csv()
+    probe = Monitor.__mro__ and status()
+    mon.csv.writerow([0, 0, 0.0] + [probe.get(c) for c in COLUMNS[3:]])
+    mon.csv_fh.close()
+    written = list(csv.reader(open(mon.csv.path, encoding="utf-8"))) if hasattr(mon.csv, "path") else []
+    if written and len(written[-1]) != len(COLUMNS):
+        print(f"  FAIL  row shape              {len(written[-1])} fields vs {len(COLUMNS)}")
+        return 1
+    print(f"  ok    row shape              {len(COLUMNS)} fields, header and row agree")
+
     # And the other direction: a healthy tick must be silent.
-    name, seen = run("healthy", lambda mon: mon.rule_priority_laws(status()) or
-                     mon.rule_physics(status()))
+    def healthy(mon):
+        mon.rule_priority_laws(status())
+        mon.rule_physics(status())
+        mon.last_seq, mon.last_seq_ts = 1, time.time() - 30      # on-rhythm publish
+        mon.rule_sequence(status(statusSequence=2))
+        mon.rule_contract(status())
+    name, seen = run("healthy", healthy)
     if seen:
         failures.append(f"healthy tick reported {seen}")
     else:
@@ -682,6 +768,7 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--pidfile", default="/var/tmp/wpomp_monitor.pid")
     ap.add_argument("--selftest", action="store_true",
                     help="verify the rules fire, against synthetic violations")
     ap.add_argument("--base", default=BASE_DEFAULT)
@@ -696,6 +783,12 @@ def main():
 
     if a.selftest:
         return selftest()
+
+    # A pidfile so the instance can be stopped without hunting the process table:
+    # a pattern match on the script name also matches the shell that runs it.
+    if a.pidfile:
+        with open(a.pidfile, "w", encoding="utf-8") as fh:
+            fh.write(str(os.getpid()) + "\n")
 
     rep = Reporter(FINDINGS, a.dedup)
     m = Monitor(a.base, a.interval, rep, from_start=a.from_start)

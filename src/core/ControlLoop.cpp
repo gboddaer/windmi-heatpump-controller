@@ -837,6 +837,7 @@ void ControlLoop::threadFunc() {
         // Check connection and reconnect if needed
         if (!modbus_client_ || !modbus_client_->isConnected()) {
             WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP, "Not connected, attempting to reconnect...");
+            publishOfflineStatus();
 
             int retries = 0;
             while (!stop_requested_.load() && retries < MODBUS_MAX_RETRIES) {
@@ -845,6 +846,7 @@ void ControlLoop::threadFunc() {
                     break;
                 }
                 retries++;
+                publishOfflineStatus();
                 windmi::UniqueLock lock(kick_mutex_);
                 kick_cond_.wait_for(lock, MODBUS_RECONNECT_INTERVAL_S * 1000,
                                     [this]() { return stop_requested_.load(); });
@@ -852,6 +854,7 @@ void ControlLoop::threadFunc() {
 
             if (retries >= MODBUS_MAX_RETRIES) {
                 WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to reconnect after %d attempts", retries);
+                publishOfflineStatus();
                 windmi::UniqueLock lock(kick_mutex_);
                 kick_cond_.wait_for(lock, MODBUS_RECONNECT_INTERVAL_S * 1000,
                                     [this]() { return stop_requested_.load(); });
@@ -929,6 +932,7 @@ void ControlLoop::threadFunc() {
             status.working_mode = desired_working_mode_;
 
             // Publish status to queue (always succeeds with ring buffer)
+            status.status_sequence = ++status_sequence_;
             if (status_queue_) {
                 status_queue_->push(status);
             }
@@ -937,6 +941,9 @@ void ControlLoop::threadFunc() {
             // Publish offline status (always succeeds with ring buffer)
             status.device_online = false;
             status.working_mode = desired_working_mode_;
+            // Offline is a fresh statement, not an old one: it advances the sequence
+            // so a monitor can tell a quiet unit from a loop that stopped publishing.
+            status.status_sequence = ++status_sequence_;
             if (status_queue_) {
                 status_queue_->push(status);
             }
@@ -982,6 +989,19 @@ uint64_t ControlLoop::nowMs() const {
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     return static_cast<uint64_t>(static_cast<int64_t>(ms) + clock_offset_ms_);
+}
+
+void ControlLoop::publishOfflineStatus() {
+    if (!status_queue_) {
+        return;
+    }
+    // Deliberately empty apart from the two facts: a snapshot of zeros with
+    // deviceOnline false is honest, one that repeats the last good temperatures is not.
+    StatusSnapshot status{};
+    status.device_online = false;
+    status.working_mode = desired_working_mode_;
+    status.status_sequence = ++status_sequence_;
+    status_queue_->push(status);
 }
 
 void ControlLoop::updateChargeWatchdog(const StatusSnapshot& status) {

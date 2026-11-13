@@ -98,6 +98,15 @@ struct StatusSnapshot {
     float dhw_eco_target = 0.0f;              ///< 0x0196; 0 = the unit does not answer it
     float water_control_point = 0.0f;         ///< 0x0033, informational only
     float effective_dhw_target = 0.0f;        ///< the setpoint the unit will charge to
+    /**
+     * Increments on every published snapshot, offline ones included.
+     *
+     * Without it, a stalled control loop and a unit with nothing to say are the same
+     * page: the registers stop moving in both cases. Measured 2026-11-13 while
+     * watching for misbehaviour - publish gaps of 30, 60 and 120 s were all normal
+     * for a stable tank, so liveness could not be told from calm.
+     */
+    uint64_t status_sequence = 0;
     bool is_running = false;
     bool device_online = false;
     // Power monitoring
@@ -317,6 +326,16 @@ private:
     void updateTankState(const StatusSnapshot& status);
     uint64_t nowMs() const;
     void updateChargeWatchdog(const StatusSnapshot& status);
+
+    /**
+     * Publish a snapshot that says the unit is not answering.
+     *
+     * The retry path used to loop without publishing, so /api/status kept serving the
+     * last good snapshot with deviceOnline true: numbers from before the failure,
+     * presented as now. Say it, and say it again each attempt, so the age of the
+     * statement is knowable from outside.
+     */
+    void publishOfflineStatus();
     int setRunningMode(int mode);
     int setDhwTarget(float temp);
     int setHeatingTarget(float temp);
@@ -358,6 +377,7 @@ private:
     bool unit_actuating_ = false;
     uint64_t last_actuating_ms_ = 0;
     uint64_t parked_at_ms_ = 0;        ///< last release of a declined DHW charge
+    uint64_t status_sequence_ = 0;     ///< published snapshots, for liveness
     float effective_dhw_target_c_ = 0.0f;
     uint64_t charge_sample_ms_ = 0;      ///< end of the last actuating charge sample
     bool charge_was_actuating_ = false;

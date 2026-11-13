@@ -8,6 +8,8 @@
 #include "utils/LogTags.hpp"
 #include "utils/ScheduleConfig.hpp"
 #include "core/ModeNames.hpp"
+#include <cinttypes>
+
 #include "config.h"
 
 #include <mongoose.h>
@@ -247,7 +249,8 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         "\"dhwTarget\":%.1f,"
         "\"dhwEcoTarget\":%.1f,"
         "\"effectiveDhwTarget\":%.1f,"
-        "\"waterControlPoint\":%.1f}\n",
+        "\"waterControlPoint\":%.1f,"
+        "\"statusSequence\":%" PRIu64 "}\n",
         last_status_.dhw_tank_temp,
         last_status_.dhw_target,
         last_status_.leaving_water_temp,
@@ -294,7 +297,8 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         last_status_.dhw_target,
         last_status_.dhw_eco_target,
         last_status_.effective_dhw_target,
-        last_status_.water_control_point
+        last_status_.water_control_point,
+        static_cast<uint64_t>(last_status_.status_sequence)
     );
 
     sendJsonReply(c, 200, response);
