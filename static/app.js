@@ -45,7 +45,6 @@ const elements = {
     setDhwBtn: document.getElementById('setDhwBtn'),
     setHeatingBtn: document.getElementById('setHeatingBtn'),
     refreshCountdown: document.getElementById('refreshCountdown'),
-    acPowerValue: document.getElementById('acPowerValue'),
     occupancyAwayBtn: document.getElementById('occupancyAwayBtn'),
     occupancySleepBtn: document.getElementById('occupancySleepBtn'),
     occupancyHomeBtn: document.getElementById('occupancyHomeBtn'),
@@ -169,7 +168,6 @@ elements.mode0Btn.addEventListener('click', () => setWorkingMode(0));
 elements.mode1Btn.addEventListener('click', () => setWorkingMode(1));
 elements.mode2Btn.addEventListener('click', () => setWorkingMode(2));
 elements.mode3Btn.addEventListener('click', () => setWorkingMode(3));
-elements.mode4Btn.addEventListener('click', () => setWorkingMode(4));
 
 // Power button (ON/OFF toggle)
 elements.powerBtn.addEventListener('click', () => {

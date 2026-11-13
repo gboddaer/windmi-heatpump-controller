@@ -414,11 +414,23 @@ firefox docs/html/index.html
 ctest --output-on-failure
 
 # Specific test suite
-./tests/utils/test_utils --gtest_filter='LoggerTest.*'
+./build/tests/utils/test_utils --gtest_filter='LoggerTest.*'
 
 # Specific test
-./tests/modbus/test_modbus --gtest_filter='ModbusClientTest.ReadWrite'
+./build/tests/modbus/test_modbus --gtest_filter='ModbusClientTest.ReadWrite'
 ```
+
+The web UI has no test framework, so it has a checker instead:
+
+```bash
+./tools/check_ui_refs.py
+```
+
+It fails when `app.js` reaches for a DOM element `index.html` does not define. That is
+not pedantry: a deleted button left one `addEventListener` line behind, `app.js` threw on
+load, the page never polled `/api/status`, and the controller appeared to be offline and
+switched off while the API said online and DHW-only. `node --check` passed, because the
+file was syntactically perfect.
 
 ## Troubleshooting
 
