@@ -316,3 +316,26 @@ appearing and vanishing between reads, and — found in the log, not on the tank
 DHW read of 52.0 °C became a real write to `0x0194` because drift correction trusted the
 first reading. Observe through `/api/status`; the writing tools are for when the application
 is stopped. Drift correction now needs a plausible value confirmed on two consecutive ticks.
+
+# Consequence measured 2026-11-13: the machine rebooted
+
+The controller was killed by a reboot at ~14:46 and the machine came back ~14:46 with
+nothing running. Read directly off the unit ~17:32, with no controller alive:
+
+| Register | Value | Meaning |
+|---|---|---|
+| `0x002C` | 5 | DHW only — the last mode the arbiter wrote, never corrected |
+| `0x00CE` | 50.2 °C | tank at its 50.0 setpoint, so hot water was never at risk |
+| `0x0017`, `0x102A` | 0, 0.0 | unit idle: it charged, reached the setpoint, and stopped |
+| `0x00D2` | 1 | valve still in the DHW position |
+
+Two hours and forty-five minutes without central heating, and a display controller saying
+"DHW only", which is exactly what the design says happens when this process is not running:
+the exit path leaves the unit in DHW-only on purpose, and a hard kill leaves whatever mode
+was written last. Nothing here is a fault; it is the accepted consequence of the shutdown
+ruling, measured.
+
+It is also the argument for `contrib/windmi-control.service` installed and **enabled**: with
+`Restart=always` a crash costs seconds, and `enable` is what survives a reboot. Until that
+is installed, the recovery is manual: start the controller, and the arbiter reclaims the
+compressor for the house within one tick of the tank being satisfied.
