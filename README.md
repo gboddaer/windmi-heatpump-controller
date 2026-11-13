@@ -323,6 +323,12 @@ Values below a floor are clamped with a warning: the floors are the compressor's
 diverter valve's, not preferences. `--dry-run` runs the whole loop, logging every decision
 and publishing it in `/api/status`, without writing a single register.
 
+On exit the application leaves the unit in **DHW only**, verified by read-back: hot water is
+the demand nothing else in this house covers, and `heat+dhw` with no arbiter running means
+heating-first and a tank nobody is arguing for. The flip side is that while the application
+is not running there is no central heating — run it as a service, or use the display
+controller.
+
 Full detail: [working-modes.md](docs/working-modes.md); the measurements behind it:
 [dhw_priority_report.md](docs/dhw_priority_report.md).
 

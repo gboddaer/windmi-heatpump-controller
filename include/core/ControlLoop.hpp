@@ -264,13 +264,17 @@ public:
     /**
      * @brief Device mode written to 0x002C when the application exits
      *
-     * Always MODE_SET_HEAT_DHW. Mode 0 would leave the unit with neither space
-     * heating nor domestic hot water, and mode 5 would leave space heating
-     * switched off after we have stopped arbitrating - with no arbiter running,
-     * nothing would ever hand the compressor back to the house. Arbiter spec,
-     * ruling 4.
+     * Always MODE_SET_DHW_ONLY. Domestic hot water is the one demand nothing else
+     * in the house can cover - space heating has a wood burner and an air-to-air
+     * pump - and with the arbiter stopped, mode 2 is heating-first and the tank
+     * has no advocate, so hot water runs out quietly. Mode 0 is never right: it
+     * stops both.
+     *
+     * Accepted consequence: while the application is not running there is no
+     * central heating, and the way to ask for it is the display controller. This
+     * overruled the original shutdown ruling in the arbiter plan on 2026-11-13.
      */
-    static int shutdownDeviceMode() { return MODE_SET_HEAT_DHW; }
+    static int shutdownDeviceMode() { return MODE_SET_DHW_ONLY; }
 
     /**
      * @brief Tunables for the DHW demand arbiter

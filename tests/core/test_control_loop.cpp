@@ -869,12 +869,14 @@ TEST(PriorityFieldTest, NeverWritesDhwPriorityRegister) {
 
 // ---- Shutdown ----
 
-TEST(ShutdownModeTest, ShutdownAlwaysLeavesHeatingAndDhwAvailable) {
-    EXPECT_EQ(MODE_SET_HEAT_DHW, ControlLoop::shutdownDeviceMode());
+TEST(ShutdownModeTest, ShutdownLeavesTheUnitMakingHotWater) {
+    EXPECT_EQ(MODE_SET_DHW_ONLY, ControlLoop::shutdownDeviceMode());
     EXPECT_NE(MODE_SET_OFF, ControlLoop::shutdownDeviceMode())
         << "mode 0 leaves the unit with neither space heating nor domestic hot water";
-    EXPECT_NE(MODE_SET_DHW_ONLY, ControlLoop::shutdownDeviceMode())
-        << "mode 5 would switch space heating off and leave it off after we exit";
+    EXPECT_NE(MODE_SET_HEAT_DHW, ControlLoop::shutdownDeviceMode())
+        << "mode 2 with no arbiter running is heating-first, and the tank has lost its "
+           "advocate; this house has a wood burner for the air and nothing but this unit "
+           "for hot water";
 }
 
 // ---- The arbiter running in the control loop ----

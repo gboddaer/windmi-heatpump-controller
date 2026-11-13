@@ -355,7 +355,7 @@ int main(int argc, char* argv[]) {
     WINDMI_LOG_INFO(LOG_TAG_MAIN, "Drain period complete");
 
     if (!demo_mode) {
-        WINDMI_LOG_INFO(LOG_TAG_MAIN, "Writing DHW mode (heat+dhw) via dedicated client...");
+        WINDMI_LOG_INFO(LOG_TAG_MAIN, "Leaving the unit in DHW-only mode via dedicated client...");
         bool mode_written = false;
         try {
             std::unique_ptr<windmi::IModbusClient> shutdown_client;
@@ -371,13 +371,24 @@ int main(int argc, char* argv[]) {
                 if (shutdown_client->connect()) {
                     shutdown_client->flushBuffer();
                     try {
-                        // The device mode register only supports Off / Cool+DHW / Heat+DHW.
-                        // Leave the unit serving domestic hot water instead of switching it off.
-                        shutdown_client->writeRegister(REG_RUNNING_MODE, windmi::ControlLoop::shutdownDeviceMode());
-                        WINDMI_LOG_INFO(LOG_TAG_MAIN, "DHW mode write OK (attempt %d)", attempt);
-                        mode_written = true;
-                        shutdown_client->disconnect();
-                        break;
+                        // DHW-only, verified. The tank is the one demand nothing else in
+                        // this house can cover, and with the arbiter stopped, heat+dhw
+                        // means heating-first and a tank that empties quietly.
+                        const int mode = windmi::ControlLoop::shutdownDeviceMode();
+                        shutdown_client->writeRegister(REG_RUNNING_MODE, static_cast<uint16_t>(mode));
+                        const int readback = shutdown_client->readRegister(REG_RUNNING_MODE);
+                        if (readback != mode) {
+                            WINDMI_LOG_ERROR(LOG_TAG_MAIN,
+                                             "Shutdown mode not verified: asked for %d, device says %d (attempt %d)",
+                                             mode, static_cast<int>(readback), attempt);
+                            shutdown_client->disconnect();
+                        } else {
+                            WINDMI_LOG_INFO(LOG_TAG_MAIN,
+                                            "Shutdown mode %d written and verified (attempt %d)", mode, attempt);
+                            mode_written = true;
+                            shutdown_client->disconnect();
+                            break;
+                        }
                     } catch (const windmi::ModbusException&) {
                         WINDMI_LOG_ERROR(LOG_TAG_MAIN, "DHW mode write failed (attempt %d)", attempt);
                         shutdown_client->disconnect();
@@ -393,7 +404,8 @@ int main(int argc, char* argv[]) {
             WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Exception creating shutdown client: %s", e.what());
         }
         if (!mode_written) {
-            WINDMI_LOG_ERROR(LOG_TAG_MAIN, "DHW mode write failed after 3 attempts");
+            WINDMI_LOG_ERROR(LOG_TAG_MAIN,
+                             "Shutdown mode write failed after 3 attempts: the unit keeps whatever mode it was in");
         }
     } else {
         WINDMI_LOG_INFO(LOG_TAG_MAIN, "DEMO MODE: skipping real DHW mode write");

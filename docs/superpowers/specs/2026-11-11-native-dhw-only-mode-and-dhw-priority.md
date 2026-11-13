@@ -84,7 +84,7 @@ There is no DHW flow register — `0x102A` is the heating loop — so the temper
 | 1 | Charge end | The unit stops itself at target; the app only sets the target and never commands a stop. In DHW+heating it switches to `2` at `target − 0.5 °C` |
 | 2 | Band | 5.0 °C, floor 5.0 |
 | 3 | Switch gap | 120 s debounce, floor 60 s, overridden by a draw |
-| 4 | Shutdown | Always writes device mode `2` |
+| 4 | Shutdown | ~~Always writes device mode `2`~~ **Revised 2026-11-13: always writes `5`, DHW only.** With the arbiter stopped, mode `2` is heating-first and the tank has no advocate, so hot water runs out quietly; space heating has a wood burner and an air-to-air pump. Accepted consequence: no central heating while the app is not running — the display controller is the override |
 | 5 | Heating-only | Native `4`, no dedicated hardware test; the new read-back verification checks it on first use |
 | 6 | Both demands off | Device mode `0`; the unit keeps its own anti-freeze logic |
 | 7 | Unreadable tank temp | Hold the mode; flag after three consecutive failures |

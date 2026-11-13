@@ -102,7 +102,13 @@ saved targets. Native modes 4 and 5 replaced it.
 
 ## Shutdown
 
-On exit the loop leaves the unit in `Heat + DHW` (`0x002C = 2`), never Off and never
-DHW-only. Off would mean coming home to a cold house; DHW-only with no arbiter running
-means the house never gets the compressor back. Whatever the unit was doing is also
-recorded so it can be reported after the fact.
+On exit the loop leaves the unit in **DHW only** (`0x002C = 5`), never Off and never
+Heat + DHW. Hot water is the one demand nothing else in this house can cover — the rooms
+have a wood burner and an air-to-air pump — and once the arbiter has stopped, `2` means
+heating-first with the tank unrepresented, which is how hot water runs out at 9 pm. Off
+would stop both.
+
+The consequence is accepted and is the reason to run the app as a service: **while the
+application is not running there is no central heating.** The manual override is the
+display controller. The exit write is verified by read-back; if the device does not confirm
+mode 5 it logs an ERROR and leaves the unit in whatever mode it was in.
