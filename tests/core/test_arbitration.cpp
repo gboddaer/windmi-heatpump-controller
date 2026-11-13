@@ -209,42 +209,181 @@ TEST(TankDrawRateTest, RisingIsNeverADraw) {
     EXPECT_FALSE(tankIsDrawing(20.0f, 25.0f, 60.0, 1.0f));
 }
 
-// ---- Charge watchdog: a flag for a stuck sensor, never a relief valve ----
+// ---- Effective target: the setpoint the unit will actually charge to ----
 
-namespace {
-constexpr uint64_t kMinuteMs = 60000ull;
+TEST(EffectiveTargetTest, ASingleSetpointIsItsOwnTarget) {
+    EXPECT_FLOAT_EQ(50.0f, effectiveDhwTargetC(50.0f, 0.0f));
 }
 
-TEST(ChargeWatchdogTest, StalledChargeIsFlagged) {
-    // 121 minutes of compressor time and the tank moved four tenths of a degree.
-    EXPECT_TRUE(chargeIsStalled(cfg(), 131 * kMinuteMs, 10 * kMinuteMs, 30.0f, 30.4f));
+TEST(EffectiveTargetTest, AHigherEconomicSetpointIsTheLiveTarget) {
+    // Measured 2026-11-13: with the unit in its economic DHW sub-mode, the charge
+    // stopped at 0x0196 (45.0) while 0x0194 said 50.0; raising 0x0196 to 52.0
+    // started the compressor within two minutes.
+    EXPECT_FLOAT_EQ(52.0f, effectiveDhwTargetC(50.0f, 52.0f));
 }
 
-TEST(ChargeWatchdogTest, FallingTankWhileChargingIsFlagged) {
-    EXPECT_TRUE(chargeIsStalled(cfg(), 131 * kMinuteMs, 10 * kMinuteMs, 50.0f, 48.0f));
+TEST(EffectiveTargetTest, ALowerEconomicSetpointDoesNotLowerTheDemand) {
+    EXPECT_FLOAT_EQ(50.0f, effectiveDhwTargetC(50.0f, 45.0f));
+}
+
+TEST(EffectiveTargetTest, AnUnreadSetpointIsSimplyAbsent) {
+    EXPECT_FLOAT_EQ(48.0f, effectiveDhwTargetC(0.0f, 48.0f));
+    EXPECT_FLOAT_EQ(0.0f, effectiveDhwTargetC(0.0f, 0.0f))
+        << "no target at all is not a target of zero";
+}
+
+// ---- Park rule: a grant the unit does not act on is not a demand being served ----
+
+TEST(ParkRuleTest, GrantedAndIdlePastTheTimeoutIsParked) {
+    ArbitrationConfig c = cfg();
+    c.park_timeout_s = 300;   // stated, so the test does not drift with the default
+    EXPECT_TRUE(chargeIsParked(c, true, false, false, 301));
+}
+
+TEST(ParkRuleTest, IdleShorterThanTheTimeoutIsNotParked) {
+    ArbitrationConfig c = cfg();
+    c.park_timeout_s = 300;
+    EXPECT_FALSE(chargeIsParked(c, true, false, false, 299));
+}
+
+TEST(ParkRuleTest, AnActuatingUnitIsNeverParked) {
+    EXPECT_FALSE(chargeIsParked(cfg(), true, true, false, 3600));
+}
+
+TEST(ParkRuleTest, AFallingTankIsNotParked) {
+    EXPECT_FALSE(chargeIsParked(cfg(), true, false, true, 3600))
+        << "somebody is at the tap: the answer is to charge, not to give up";
+}
+
+TEST(ParkRuleTest, NoGrantNoOpinion) {
+    EXPECT_FALSE(chargeIsParked(cfg(), false, false, false, 3600))
+        << "the heating loop idling is normal, not a declined charge";
+}
+
+TEST(ParkRuleTest, ParkTimeoutFloor) {
+    ArbitrationConfig tight;
+    tight.park_timeout_s = 30;
+    tight.applyFloors();
+    EXPECT_EQ(180, tight.park_timeout_s)
+        << "shorter than three minutes punishes every defrost and anti-cycle pause";
+}
+
+TEST(ParkRuleTest, ADeclinedChargeReleasesTheCompressorToTheHouse) {
+    ArbitrationConfig c = cfg();
+    c.park_timeout_s = 300;
+    ArbiterInput in = input(3, TankState::Calling, MODE_SET_DHW_ONLY);
+    in.dhw_granted = true;
+    in.unit_actuating = false;
+    in.seconds_since_actuating = 400;
+    EXPECT_EQ(MODE_SET_HEAT_DHW, decideDeviceMode(c, in))
+        << "the tank is parked with the unit idle: the house gets the compressor";
+}
+
+TEST(ParkRuleTest, ParkingDoesNotPreemptDefrost) {
+    ArbiterInput in = input(3, TankState::Calling, MODE_SET_DHW_ONLY);
+    in.dhw_granted = true;
+    in.unit_actuating = false;
+    in.seconds_since_actuating = 400;
+    in.blocked = true;
+    EXPECT_EQ(MODE_SET_DHW_ONLY, decideDeviceMode(cfg(), in));
+}
+
+TEST(ParkRuleTest, SingleDemandRowsAreNotArbitrated) {
+    ArbiterInput in = input(1, TankState::Calling, MODE_SET_DHW_ONLY);
+    in.dhw_granted = true;
+    in.unit_actuating = false;
+    in.seconds_since_actuating = 400;
+    EXPECT_EQ(MODE_SET_DHW_ONLY, decideDeviceMode(cfg(), in))
+        << "DHW-only asked for by the user stays DHW-only even when the unit is idle";
+}
+
+// ---- Charge watchdog: compressor minutes, not wall clock ----
+
+TEST(ChargeWatchdogTest, StalledChargeWhileRunningIsFlagged) {
+    // 121 minutes of compressor time for DHW and the tank moved four tenths.
+    EXPECT_TRUE(chargeIsStalled(cfg(), 121 * 60, 30.0f, 30.4f));
+}
+
+TEST(ChargeWatchdogTest, FallingTankWhileRunningIsFlagged) {
+    EXPECT_TRUE(chargeIsStalled(cfg(), 121 * 60, 50.0f, 48.0f));
 }
 
 TEST(ChargeWatchdogTest, ARealChargeIsNotFlagged) {
-    // 35 degC over two hours is 0.29 degC/min, slower than this unit ever
-    // measured but plainly alive.
-    EXPECT_FALSE(chargeIsStalled(cfg(), 131 * kMinuteMs, 10 * kMinuteMs, 15.0f, 50.0f));
+    EXPECT_FALSE(chargeIsStalled(cfg(), 121 * 60, 15.0f, 50.0f));
 }
 
-TEST(ChargeWatchdogTest, AYoungChargeIsNotFlagged) {
-    EXPECT_FALSE(chargeIsStalled(cfg(), 130 * kMinuteMs, 100 * kMinuteMs, 30.0f, 30.0f))
-        << "a defrost or a very cold tank can hold the rise back for an hour";
+TEST(ChargeWatchdogTest, TooFewRunningMinutesIsNotFlagged) {
+    EXPECT_FALSE(chargeIsStalled(cfg(), 30 * 60, 30.0f, 30.0f));
 }
 
-TEST(ChargeWatchdogTest, NoChargeSessionMeansNoVerdict) {
-    EXPECT_FALSE(chargeIsStalled(cfg(), 500 * kMinuteMs, 0, 30.0f, 30.0f))
-        << "a start of 0 means no session has begun, not one that began at the epoch";
-    EXPECT_FALSE(chargeIsStalled(cfg(), 500 * kMinuteMs, 10 * kMinuteMs, -1.0f, 30.0f));
+TEST(ChargeWatchdogTest, AUnitThatNeverRanIsNotBlamedOnTheSensor) {
+    EXPECT_FALSE(chargeIsStalled(cfg(), 0, 45.0f, 45.0f))
+        << "an idle unit is the park rule's business; counting granted minutes as "
+           "running minutes would call every parked tank a broken sensor";
 }
 
 TEST(ChargeWatchdogTest, FloorKeepsTheWatchdogFromBarking) {
     ArbitrationConfig tight;
     tight.charge_watchdog_min = 5;      // below the floor
     tight.applyFloors();
-    EXPECT_EQ(60, tight.charge_watchdog_min)
-        << "a charge slower than an hour is normal, not a fault";
+    EXPECT_EQ(60, tight.charge_watchdog_min);
+}
+
+namespace {
+ArbiterInput bothDemands(TankState tank, int current_mode) {
+    ArbiterInput in{};
+    in.working_mode = 3;
+    in.tank = tank;
+    in.current_mode = current_mode;
+    in.seconds_since_last_write = 3600;
+    in.dhw_granted = (current_mode == MODE_SET_DHW_ONLY);
+    in.unit_actuating = true;
+    in.seconds_since_park = ArbitrationConfig::kNoPark;
+    return in;
+}
+} // namespace
+
+// ---- A park must not become a metronome ----
+// A unit that will not charge to a register's value (measured 2026-11-13: parked at
+// 45.0 C for 80 minutes on a grant to 50.0) stays parked when asked again. So the
+// release helps the house, but re-asking every switch-gap would write the mode twice
+// a quarter-hour forever. Once parked, the next attempt waits for the cooldown, or
+// for a hot-water draw: that is a demand we have to serve whatever it cost last time.
+
+TEST(ParkHysteresisTest, ReGrantingAfterAParkWaitsForTheCooldown) {
+    ArbitrationConfig cfg;
+    ArbiterInput in = bothDemands(TankState::Calling, MODE_SET_HEAT_DHW);
+    in.seconds_since_last_write = 600;   // the ordinary switch gap is long gone
+    in.seconds_since_park = 300;
+    EXPECT_EQ(decideDeviceMode(cfg, in), MODE_SET_HEAT_DHW);
+}
+
+TEST(ParkHysteresisTest, AFinishedCooldownGrantsTheChargeAgain) {
+    ArbitrationConfig cfg;
+    ArbiterInput in = bothDemands(TankState::Calling, MODE_SET_HEAT_DHW);
+    in.seconds_since_last_write = 600;
+    in.seconds_since_park = cfg.park_cooldown_s;
+    EXPECT_EQ(decideDeviceMode(cfg, in), MODE_SET_DHW_ONLY);
+}
+
+TEST(ParkHysteresisTest, AHotWaterDrawIsServedThroughTheCooldown) {
+    ArbitrationConfig cfg;
+    ArbiterInput in = bothDemands(TankState::Calling, MODE_SET_HEAT_DHW);
+    in.seconds_since_last_write = 600;
+    in.seconds_since_park = 0;
+    in.tank_drawing = true;
+    EXPECT_EQ(decideDeviceMode(cfg, in), MODE_SET_DHW_ONLY);
+}
+
+TEST(ArbitrationConfigTest, ParkDefaultsAndFloorsAreEnforced) {
+    ArbitrationConfig fresh;
+    EXPECT_EQ(fresh.park_timeout_s, 600);
+    EXPECT_EQ(fresh.park_cooldown_s, 900);
+
+    ArbitrationConfig cfg;
+    cfg.park_timeout_s = 10;
+    cfg.park_cooldown_s = 5;
+    cfg.applyFloors();
+    EXPECT_EQ(cfg.park_timeout_s, ArbitrationConfig::kMinParkTimeoutS);
+    EXPECT_EQ(cfg.park_cooldown_s, ArbitrationConfig::kMinParkCooldownS);
 }

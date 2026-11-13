@@ -298,6 +298,10 @@ int main(int argc, char* argv[]) {
     arbitration.draw_override_c_per_min = static_cast<float>(
         config.getDouble("arbitration.dhw_draw_override_c_per_min",
                          arbitration.draw_override_c_per_min));
+    arbitration.park_timeout_s =
+        config.getInt("arbitration.dhw_park_timeout_s", arbitration.park_timeout_s);
+    arbitration.park_cooldown_s =
+        config.getInt("arbitration.dhw_park_cooldown_s", arbitration.park_cooldown_s);
     g_control_loop->setArbitration(arbitration);
     if (dry_run) {
         g_control_loop->setDryRun(true);

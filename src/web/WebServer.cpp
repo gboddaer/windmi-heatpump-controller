@@ -241,7 +241,13 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         "\"requestedDeviceMode\":\"%s\","
         "\"secondsSinceModeWrite\":%d,"
         "\"dhwSensorFaultSuspected\":%s,"
-        "\"tankReadFailures\":%d}\n",
+        "\"tankReadFailures\":%d,"
+        "\"dhwState\":\"%s\","
+        "\"unitActuating\":%s,"
+        "\"dhwTarget\":%.1f,"
+        "\"dhwEcoTarget\":%.1f,"
+        "\"effectiveDhwTarget\":%.1f,"
+        "\"waterControlPoint\":%.1f}\n",
         last_status_.dhw_tank_temp,
         last_status_.dhw_target,
         last_status_.leaving_water_temp,
@@ -282,7 +288,13 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         mode_to_string(last_status_.requested_device_mode),
         last_status_.seconds_since_mode_write,
         last_status_.dhw_sensor_fault_suspected ? "true" : "false",
-        last_status_.tank_read_failures
+        last_status_.tank_read_failures,
+        last_status_.dhw_state.c_str(),
+        last_status_.unit_actuating ? "true" : "false",
+        last_status_.dhw_target,
+        last_status_.dhw_eco_target,
+        last_status_.effective_dhw_target,
+        last_status_.water_control_point
     );
 
     sendJsonReply(c, 200, response);

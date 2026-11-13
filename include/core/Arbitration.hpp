@@ -49,7 +49,20 @@ struct ArbitrationConfig {
     int min_switch_gap_s = 120;            ///< debounce between device-mode writes
     float draw_override_c_per_min = 1.0f;
     int charge_watchdog_min = 120;
-    static constexpr int kMinChargeWatchdogMin = 60;  ///< a fall this fast is somebody using hot water
+    /* A DHW grant the unit does not act on is not a demand being served: measured
+     * 2026-11-13, the unit sat idle for 80 min on a grant with the tank parked at its
+     * economic setpoint, which locked space heating out for nothing. */
+    int park_timeout_s = 600;
+    /* After releasing a declined charge, the next attempt waits this long. A unit that
+     * will not charge to a register's value will not change its mind either, so
+     * re-asking every switch gap would be a metronome writing the mode twice a
+     * quarter-hour forever. */
+    int park_cooldown_s = 900;
+    static constexpr int kMinChargeWatchdogMin = 60;
+    static constexpr int kMinParkTimeoutS = 180;
+    static constexpr int kMinParkCooldownS = 300;
+    /** ArbiterInput::seconds_since_park for "no park has happened". */
+    static constexpr int kNoPark = 0x7fffffff;  ///< a fall this fast is somebody using hot water
 
     /// How far below the target counts as "at temperature", in degC.
     static constexpr float kReleaseMarginC = 0.5f;
@@ -89,6 +102,10 @@ struct ArbiterInput {
     bool tank_drawing = false;         ///< falling at or above draw_override_c_per_min
     bool blocked = false;              ///< defrost or anti-freeze in progress
     int seconds_since_last_write = 0;  ///< since the last verified device-mode write
+    bool dhw_granted = false;          ///< DHW-only is what we asked for and the unit says
+    bool unit_actuating = true;        ///< compressor or flow is actually moving heat
+    int seconds_since_actuating = 0;   ///< since either did, while DHW was granted
+    int seconds_since_park = ArbitrationConfig::kNoPark;  ///< since a release; never = kNoPark
 };
 
 /**
@@ -122,8 +139,30 @@ constexpr float kMinExpectedChargeRiseCPerMin = 0.25f;
  * unit that cannot make heat; in both cases the answer is a person with a
  * multimeter, not handing the compressor to the house.
  */
-bool chargeIsStalled(const ArbitrationConfig& cfg, uint64_t now_ms, uint64_t started_ms,
-                     float start_c, float now_c);
+/**
+ * The DHW temperature the unit will actually charge to.
+ *
+ * The register the app writes (0x0194) is not the only DHW setpoint: with the unit in
+ * its economic DHW sub-mode the charge runs to 0x0196 and stops there whatever 0x0194
+ * says (measured 2026-11-13: parked at 45.0 for 80 minutes while 0x0194 read 50.0;
+ * raising 0x0196 to 52.0 started the compressor inside two minutes). Neither register
+ * declares which one the firmware is obeying, so demand is measured against the higher
+ * of the two: that is the temperature the unit is willing to reach.
+ */
+float effectiveDhwTargetC(float user_target_c, float eco_target_c);
+
+/**
+ * Has the unit declined a DHW charge?
+ *
+ * A grant with the compressor and the flow both idle for the park timeout, on a tank
+ * that is not falling, means the unit has stopped trying. Releasing the compressor to
+ * the house is the only useful answer; holding it buys a tank that is not charging and
+ * rooms that are not heating.
+ */
+bool chargeIsParked(const ArbitrationConfig& cfg, bool dhw_granted, bool unit_actuating,
+                    bool tank_falling, int seconds_since_actuating);
+
+bool chargeIsStalled(const ArbitrationConfig& cfg, int running_s, float start_c, float now_c);
 
 bool tankIsDrawing(float previous_c, float current_c, double elapsed_s,
                    float override_c_per_min);

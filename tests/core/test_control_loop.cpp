@@ -47,6 +47,8 @@ public:
     std::string getLastError() const override { return {}; }
 
 private:
+    ArbitrationConfig cfg_;
+
     bool connected_ = true;
     std::map<uint16_t, int16_t> registers_;
     std::vector<std::pair<uint16_t, uint16_t>> writes_;
@@ -519,6 +521,10 @@ struct SavedTargetFixture {
         ASSERT_TRUE(loop.start(&client, &cmd_queue, &status_queue));
         StatusSnapshot snapshot{};
         ASSERT_TRUE(waitForLatest(status_queue, snapshot));
+        // A divergent setpoint is only restored after two agreeing ticks, so give it
+        // the second one before judging what was written.
+        loop.kick();
+        ASSERT_TRUE(waitForLatest(status_queue, snapshot));
         windmi::platform::sleep_ms(50);
         loop.stop();
     }
@@ -587,9 +593,17 @@ public:
     explicit TickedLoop(IModbusClient& client) : client_(client) {}
 
     bool start(int working_mode, const char* priority, float dhw_target, float heating_target) {
+        // A short park timeout keeps the park tests minutes-long instead of
+        // ten, and stays above the configured floor so nothing is clamped away.
+        cfg_.park_timeout_s = ArbitrationConfig::kMinParkTimeoutS;
+        cfg_.park_cooldown_s = ArbitrationConfig::kMinParkCooldownS;
+        loop_.setArbitration(cfg_);
         loop_.setInitialSettings(working_mode, priority, dhw_target, heating_target);
         return loop_.start(&client_, &cmd_queue_, &status_queue_);
     }
+
+    /** The arbitration configuration the loop applies, so tests never hard-code it. */
+    const ArbitrationConfig& dcfg() const { return cfg_; }
 
     void tick() {
         loop_.kick();
@@ -604,9 +618,23 @@ public:
         loop_.kick();
     }
 
+    void sendDhwTarget(float temp) {
+        Command cmd{};
+        cmd.type = CommandType::CMD_SET_DHW_TEMP;
+        cmd.float_val = temp;
+        cmd_queue_.push(cmd);
+        loop_.kick();
+    }
+
     void enableDryRun() { loop_.setDryRun(true); }
 
     void advanceTime(int64_t ms) { loop_.advanceClockForTesting(ms); }
+
+    /** Idle for longer than the park timeout, then ask the loop to decide. */
+    void idlePastPark() {
+        advanceTime(static_cast<int64_t>(cfg_.park_timeout_s + 1) * 1000);
+        tick();
+    }
 
     void sendPriority(int priority) {
         Command cmd{};
@@ -625,6 +653,7 @@ public:
     void stop() { loop_.stop(); }
 
 private:
+    ArbitrationConfig cfg_;
     IModbusClient& client_;
     ControlLoop loop_;
     CmdQueue cmd_queue_;
@@ -889,7 +918,10 @@ std::map<uint16_t, int16_t> arbiterRegisters(int device_mode, int tank_raw, int 
     registers[REG_RUNNING_MODE] = static_cast<int16_t>(device_mode);
     registers[REG_RUNNING_STATUS] = static_cast<int16_t>(status);
     registers[REG_DHW_TARGET] = 500;                 // 50.0 C
+    registers[REG_DHW_TARGET_ECO] = 450;             // 45.0 C: below, so 50.0 is the target
     registers[REG_DHW_TANK_TEMP] = static_cast<int16_t>(tank_raw);
+    registers[REG_COMPRESSOR_FREQ] = 0;              // idle until a test says otherwise
+    registers[REG_WATER_FLOW] = 0;
     return registers;
 }
 
@@ -1030,8 +1062,9 @@ TEST(ChargeWatchdogLoopTest, NormalChargeRaisesNothing) {
     EXPECT_EQ(0, snapshot.tank_read_failures);
 }
 
-TEST(ChargeWatchdogLoopTest, StalledChargeRaisesTheFlagAndNeverRelievesHeating) {
+TEST(ChargeWatchdogLoopTest, AChargeThatRunsAndDoesNotRiseRaisesTheFlagAndNeverRelieves) {
     FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 300));
+    client.writeRegister(REG_COMPRESSOR_FREQ, 400);   // the compressor is genuinely working
 
     TickedLoop runner(client);
     ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
@@ -1045,4 +1078,154 @@ TEST(ChargeWatchdogLoopTest, StalledChargeRaisesTheFlagAndNeverRelievesHeating) 
     EXPECT_TRUE(snapshot.dhw_sensor_fault_suspected);
     EXPECT_EQ(0, writeCountFor(client, REG_RUNNING_MODE))
         << "the watchdog reports; it does not hand the compressor to the house";
+}
+
+TEST(ChargeWatchdogLoopTest, AnIdleChargeIsNotBlamedOnTheSensor) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 300));   // compressor at 0 Hz
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    runner.advanceTime(121 * 60 * 1000);
+    runner.tick();
+    StatusSnapshot snapshot = runner.latest();
+    runner.stop();
+
+    EXPECT_FALSE(snapshot.dhw_sensor_fault_suspected)
+        << "a unit that never ran is not a tank sensor that lies; it is the park rule's case";
+}
+
+// ---- A grant the unit does not act on must not lock the house out ----
+
+TEST(ParkExecutionTest, DeclinedChargeReleasesTheCompressorToTheHouse) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 300));   // 3.0 C, clearly calling
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    EXPECT_FALSE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_HEAT_DHW))
+        << "one idle tick is not a declined charge";
+
+    runner.idlePastPark();
+    runner.stop();
+
+    EXPECT_TRUE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_HEAT_DHW))
+        << "the unit has been idle on a DHW grant for the park timeout";
+}
+
+TEST(ParkExecutionTest, AnActuatingUnitIsNotParked) {
+    auto registers = arbiterRegisters(MODE_SET_DHW_ONLY, 300);
+    FakeModbusClient client(registers);
+    client.writeRegister(REG_COMPRESSOR_FREQ, 400);   // 40 Hz: it is charging
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    runner.advanceTime(600 * 1000);
+    runner.tick();
+    runner.stop();
+
+    EXPECT_EQ(0, writeCountFor(client, REG_RUNNING_MODE))
+        << "a unit that is working gets left alone";
+}
+
+TEST(ParkExecutionTest, StatusExplainsTheTankInWords) {
+    auto registers = arbiterRegisters(MODE_SET_DHW_ONLY, 300);
+    FakeModbusClient client(registers);
+    client.writeRegister(REG_COMPRESSOR_FREQ, 400);
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    StatusSnapshot snapshot = runner.latest();
+    runner.stop();
+
+    EXPECT_STREQ("calling", snapshot.dhw_state.c_str());
+    EXPECT_TRUE(snapshot.unit_actuating);
+    EXPECT_FLOAT_EQ(50.0f, snapshot.effective_dhw_target);
+    EXPECT_FLOAT_EQ(45.0f, snapshot.dhw_eco_target);
+}
+
+// ---- Both DHW setpoints carry the user's wish ----
+
+TEST(DhwSetpointTest, TheTargetIsWrittenToNormalAndEconomicSetpoints) {
+    auto registers = arbiterRegisters(MODE_SET_HEAT_DHW, 496);
+    FakeModbusClient client(registers);
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.sendDhwTarget(55.0f);
+    runner.tick();
+    runner.stop();
+
+    EXPECT_TRUE(wroteValue(client, REG_DHW_TARGET, 550));
+    EXPECT_TRUE(wroteValue(client, REG_DHW_TARGET_ECO, 550))
+        << "the unit charges to whichever setpoint its active DHW sub-mode uses, and we "
+           "cannot read which sub-mode is authoritative, so both carry the wish";
+}
+
+TEST(DhwSetpointTest, AMissingEconomicRegisterDoesNotBreakStatusOrWrites) {
+    auto registers = arbiterRegisters(MODE_SET_HEAT_DHW, 496);
+    registers.erase(REG_DHW_TARGET_ECO);        // older firmware may not answer it
+    FakeModbusClient client(registers);
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();
+    StatusSnapshot snapshot = runner.latest();
+    runner.stop();
+
+    EXPECT_TRUE(snapshot.device_online) << "an absent optional register is not a dead device";
+    EXPECT_FLOAT_EQ(0.0f, snapshot.dhw_eco_target);
+    EXPECT_FLOAT_EQ(50.0f, snapshot.effective_dhw_target);
+}
+
+// ---- A garbled read must not move a setpoint ----
+
+TEST(SetpointDriftTest, ASingleDivergentReadIsNotRestored) {
+    auto registers = arbiterRegisters(MODE_SET_HEAT_DHW, 496);
+    FakeModbusClient client(registers);
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();                                // seeds the saved target from 50.0
+    client.writeRegister(REG_DHW_TARGET, 440);    // panel or noise: 44.0
+    runner.tick();
+    runner.stop();
+
+    EXPECT_FALSE(wroteValue(client, REG_DHW_TARGET, 500))
+        << "one divergent reading is not yet a panel change";
+}
+
+TEST(SetpointDriftTest, TwoCorroboratingReadsAreRestored) {
+    auto registers = arbiterRegisters(MODE_SET_HEAT_DHW, 496);
+    FakeModbusClient client(registers);
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();                                // seeds the saved target from 50.0
+    client.writeRegister(REG_DHW_TARGET, 440);
+    runner.tick();
+    client.writeRegister(REG_DHW_TARGET, 440);    // and again: the panel really did move
+    runner.tick();
+    runner.stop();
+
+    EXPECT_TRUE(wroteValue(client, REG_DHW_TARGET, 500));
+}
+
+TEST(SetpointDriftTest, AnImplausibleReadingIsNeverWrittenBack) {
+    auto registers = arbiterRegisters(MODE_SET_HEAT_DHW, 496);
+    FakeModbusClient client(registers);
+
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+    runner.tick();                                // seeds the saved target from 50.0
+    for (int i = 0; i < 3; i++) {
+        client.writeRegister(REG_DHW_TARGET, 120);   // 12.0 C: a colliding frame
+        runner.tick();
+    }
+    runner.stop();
+
+    EXPECT_FALSE(wroteValue(client, REG_DHW_TARGET, 500))
+        << "measured 2026-11-13: a garbled read became a real write of 52.0 C";
 }

@@ -18,6 +18,11 @@
 
 namespace windmi {
 
+namespace {
+/** How many consecutive ticks must agree that a setpoint moved before we write ours back. */
+constexpr int kSetpointDriftConfirmTicks = 2;
+} // namespace
+
 // ---- CmdQueue implementation ----
 
 CmdQueue::CmdQueue() : head_(0), tail_(0) {}
@@ -244,14 +249,28 @@ int ControlLoop::setDhwTarget(float temp) {
     int16_t raw_temp = temp_to_raw(temp);
     try {
         modbus_client_->writeRegister(REG_DHW_TARGET, static_cast<uint16_t>(raw_temp));
-        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Set DHW target to %.1f C", temp);
         mDhwTarget_ = temp;
-        fireSettingsCallback();
-        return 0;
     } catch (const ModbusException& e) {
         WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to set DHW target to %.1f: %s", temp, e.what());
         return -1;
     }
+
+    // And the economic sub-mode's copy. The unit charges to whichever DHW setpoint
+    // its active sub-mode uses and does not expose which one that is (measured
+    // 2026-11-13: parked at 0x0196 = 45.0 while 0x0194 said 50.0), so both carry the
+    // user's wish. Firmware without the register is a warning, not a failed command.
+    try {
+        modbus_client_->writeRegister(REG_DHW_TARGET_ECO, static_cast<uint16_t>(raw_temp));
+        WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP,
+                        "Set DHW target to %.1f C (normal and economic setpoints)", temp);
+    } catch (const ModbusException& e) {
+        WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP,
+                        "DHW economic setpoint not written (%s): the unit will reach %.1f C only "
+                        "in its normal DHW sub-mode", e.what(), temp);
+    }
+
+    fireSettingsCallback();
+    return 0;
 }
 
 int ControlLoop::setHeatingTarget(float temp) {
@@ -353,12 +372,40 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         if (!saved_targets_initialized_) {
             // A target sitting on its minimum is our own demand suppression
             // (heating-only pins DHW to DHW_TARGET_MIN), not a user setpoint,
-            // so seed the saved target from settings.ini instead.
+            // and a value outside the writable range is a garbled frame rather
+            // than a setpoint either (measured 2026-11-13: a colliding Modbus
+            // exchange produced 52.0 and it became the saved target). Seed from
+            // settings.ini in both cases.
             const bool suppressed = (status.dhw_target <= DHW_TARGET_MIN + 0.5f);
-            saved_dhw_target_ = (suppressed && mDhwTarget_ > 0.0f) ? mDhwTarget_ : status.dhw_target;
+            const bool implausible = (status.dhw_target < DHW_TEMP_MIN ||
+                                      status.dhw_target > DHW_TEMP_MAX);
+            saved_dhw_target_ = ((suppressed || implausible) && mDhwTarget_ > 0.0f)
+                ? mDhwTarget_
+                : status.dhw_target;
         }
     } catch (const ModbusException&) {
         ok = false;
+    }
+
+    // Read the DHW setpoint of the economic sub-mode (0x0196). Optional: firmware
+    // that does not answer it simply has one DHW setpoint, and 0x0194 is the whole
+    // story. Not a critical read, so a missing register is not a dead device.
+    try {
+        raw = modbus_client_->readRegister(REG_DHW_TARGET_ECO);
+        status.dhw_eco_target = raw_to_temp(raw);
+    } catch (const ModbusException&) {
+        status.dhw_eco_target = 0.0f;
+    }
+
+    // Water control point (0x0033). Informational: through the 2026-11-13
+    // experiments it did not follow either DHW setpoint or the heating setpoint, so
+    // nothing is decided from it, but an operator wants to see what the unit thinks
+    // its target is.
+    try {
+        raw = modbus_client_->readRegister(REG_WATER_CONTROL_POINT);
+        status.water_control_point = raw_to_temp(raw);
+    } catch (const ModbusException&) {
+        status.water_control_point = 0.0f;
     }
 
     // Read heating target (0x0191)
@@ -646,12 +693,37 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
     in.current_mode = current_mode_;
     in.tank_drawing = tank_drawing_;
     in.blocked = blocked;
+    unit_actuating_ = (status.compressor_freq > 0.0f || status.water_flow > 0.0f);
+    if (unit_actuating_) {
+        last_actuating_ms_ = nowMs();
+    } else if (last_actuating_ms_ == 0) {
+        // First observation of a unit that is already idle: the idle clock starts
+        // here, so a grant the unit never acts on does eventually park.
+        last_actuating_ms_ = nowMs();
+    }
+    in.dhw_granted = (current_mode_ == MODE_SET_DHW_ONLY);
+    in.unit_actuating = unit_actuating_;
+    // Nothing has actuated since startup is not "idle for hours": treat an unseen
+    // sample as just actuated so the first tick never releases on a stale clock.
+    in.seconds_since_actuating = (last_actuating_ms_ == 0)
+        ? 0
+        : static_cast<int>((nowMs() - last_actuating_ms_) / 1000u);
+    in.seconds_since_park = (parked_at_ms_ == 0)
+        ? ArbitrationConfig::kNoPark
+        : static_cast<int>((nowMs() - parked_at_ms_) / 1000u);
     // No mode write since startup means no churn to debounce against, so the gap
     // counts as satisfied rather than as a very large or very small elapsed time.
     const bool wrote_mode_before = (last_mode_write_ms_ != 0);
     in.seconds_since_last_write = wrote_mode_before
         ? static_cast<int>((nowMs() - last_mode_write_ms_) / 1000u)
         : arbitration_.min_switch_gap_s;
+
+    // When this tick releases a declined charge, the cooldown for asking again starts
+    // now. Marking it here rather than in the decision keeps decideDeviceMode() pure.
+    if (chargeIsParked(arbitration_, in.dhw_granted, in.unit_actuating, in.tank_drawing,
+                       in.seconds_since_actuating)) {
+        parked_at_ms_ = nowMs();
+    }
 
     const int wanted_mode = decideDeviceMode(arbitration_, in);
     // A device mode that is neither what we asked for nor what we are about to
@@ -686,6 +758,9 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
     updateChargeWatchdog(status);
     status.dhw_sensor_fault_suspected = dhw_sensor_fault_suspected_;
     status.tank_read_failures = tank_read_failures_;
+    status.dhw_state = tankStateName(tank_state_);
+    status.unit_actuating = unit_actuating_;
+    status.effective_dhw_target = effective_dhw_target_c_;
 
     // Enforce target temperature overrides based on working mode
     switch (desired_working_mode_) {
@@ -694,17 +769,42 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
                   // a pinned floor used to be read back as the user's own target.
             break;
         case 3:  // DHW+Heating: ensure user's saved targets are active
-            if (fabsf(status.dhw_target - saved_dhw_target_) > 0.5f) {
-                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Restoring DHW target (%.1f, was %.1f)",
-                       saved_dhw_target_, status.dhw_target);
-                setDhwTarget(saved_dhw_target_);
+        {
+            // A divergent setpoint normally means the display controller changed it,
+            // and we put ours back. One reading is not enough to conclude that: two
+            // clients on this gateway can garble a frame, and on 2026-11-13 a garbled
+            // DHW read became a real write of 52.0 C that nobody had asked for. So
+            // require a plausible value, seen twice in a row.
+            const bool dhw_plausible = (status.dhw_target >= DHW_TEMP_MIN &&
+                                        status.dhw_target <= DHW_TEMP_MAX);
+            if (dhw_plausible && fabsf(status.dhw_target - saved_dhw_target_) > 0.5f) {
+                if (++dhw_drift_ticks_ >= kSetpointDriftConfirmTicks) {
+                    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP,
+                                    "Restoring DHW target (%.1f, was %.1f after %d ticks)",
+                                    saved_dhw_target_, status.dhw_target, dhw_drift_ticks_);
+                    setDhwTarget(saved_dhw_target_);
+                    dhw_drift_ticks_ = 0;
+                }
+            } else {
+                dhw_drift_ticks_ = 0;
             }
-            if (fabsf(status.heating_target - saved_heating_target_) > 0.5f) {
-                WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Restoring heating target (%.1f, was %.1f)",
-                       saved_heating_target_, status.heating_target);
-                setHeatingTarget(saved_heating_target_);
+
+            const bool heating_plausible = (status.heating_target >= HEATING_TEMP_MIN &&
+                                            status.heating_target <= HEATING_TEMP_MAX);
+            if (heating_plausible && fabsf(status.heating_target - saved_heating_target_) > 0.5f) {
+                if (++heating_drift_ticks_ >= kSetpointDriftConfirmTicks) {
+                    WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP,
+                                    "Restoring heating target (%.1f, was %.1f after %d ticks)",
+                                    saved_heating_target_, status.heating_target,
+                                    heating_drift_ticks_);
+                    setHeatingTarget(saved_heating_target_);
+                    heating_drift_ticks_ = 0;
+                }
+            } else {
+                heating_drift_ticks_ = 0;
             }
             break;
+        }
     }
 
     // No priority enforcement: 0x02BF is accepted and ignored on this firmware
@@ -885,45 +985,59 @@ uint64_t ControlLoop::nowMs() const {
 }
 
 void ControlLoop::updateChargeWatchdog(const StatusSnapshot& status) {
-    const bool charging = ((current_mode_ == MODE_SET_DHW_ONLY ||
-                            requested_device_mode_ == MODE_SET_DHW_ONLY) &&
-                           status.dhw_tank_temp > 0.0f);
-    if (!charging) {
+    const bool granted = (current_mode_ == MODE_SET_DHW_ONLY ||
+                          requested_device_mode_ == MODE_SET_DHW_ONLY);
+    const uint64_t now = nowMs();
+
+    if (!granted || status.dhw_tank_temp <= 0.0f) {
         if (dhw_sensor_fault_suspected_) {
             WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW charge watchdog cleared: not charging");
         }
         charge_started_ms_ = 0;
         charge_start_c_ = -1.0f;
+        dhw_running_s_ = 0;
+        charge_sample_ms_ = 0;
+        charge_was_actuating_ = false;
         dhw_sensor_fault_suspected_ = false;
         return;
     }
 
     if (charge_started_ms_ == 0) {
-        charge_started_ms_ = nowMs();
+        charge_started_ms_ = now;
         charge_start_c_ = status.dhw_tank_temp;
-        return;
     }
+
+    // Compressor minutes only. An interval counts when both ends of it saw the unit
+    // moving heat, so an idle stretch between two samples is not billed to the charge.
+    if (unit_actuating_ && charge_was_actuating_ && charge_sample_ms_ != 0) {
+        dhw_running_s_ += static_cast<int>((now - charge_sample_ms_) / 1000u);
+    }
+    charge_sample_ms_ = now;
+    charge_was_actuating_ = unit_actuating_;
 
     if (dhw_sensor_fault_suspected_) {
         return;   // said it once; saying it every thirty seconds is noise
     }
 
-    if (chargeIsStalled(arbitration_, nowMs(), charge_started_ms_, charge_start_c_,
-                        status.dhw_tank_temp)) {
+    if (chargeIsStalled(arbitration_, dhw_running_s_, charge_start_c_, status.dhw_tank_temp)) {
         dhw_sensor_fault_suspected_ = true;
-        const int minutes = static_cast<int>((nowMs() - charge_started_ms_) / 60000u);
         WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP,
-                         "DHW charge watchdog: tank %.1f -> %.1f C in %d min while the compressor was "
-                         "committed to it. Suspect the tank sensor or a unit that cannot make heat. "
-                         "Space heating is NOT being relieved.",
-                         charge_start_c_, status.dhw_tank_temp, minutes);
+                         "DHW charge watchdog: the compressor ran %d min for domestic hot water and "
+                         "the tank went %.1f -> %.1f C. Suspect the tank sensor or a unit that cannot "
+                         "make heat. Space heating is NOT being relieved.",
+                         dhw_running_s_ / 60, charge_start_c_, status.dhw_tank_temp);
     }
 }
 
 void ControlLoop::updateTankState(const StatusSnapshot& status) {
     const uint64_t now = nowMs();
 
-    if (status.dhw_tank_temp <= 0.0f || status.dhw_target <= 0.0f) {
+    // The temperature the unit is willing to charge to, which is not necessarily the
+    // one the user set: see effectiveDhwTargetC().
+    const float target = effectiveDhwTargetC(status.dhw_target, status.dhw_eco_target);
+    effective_dhw_target_c_ = target;
+
+    if (status.dhw_tank_temp <= 0.0f || target <= 0.0f) {
         // A failed read leaves the field at zero. That is not a freezing tank, and
         // treating it as one would start a charge on every Modbus hiccup.
         if (tank_state_ != TankState::Unknown) {
@@ -952,13 +1066,13 @@ void ControlLoop::updateTankState(const StatusSnapshot& status) {
                         last_tank_temp_c_, status.dhw_tank_temp, elapsed_s);
     }
 
-    if (status.dhw_tank_temp >= status.dhw_target - ArbitrationConfig::kReleaseMarginC) {
+    if (status.dhw_tank_temp >= target - ArbitrationConfig::kReleaseMarginC) {
         ++ticks_at_target_;
     } else {
         ticks_at_target_ = 0;
     }
 
-    const TankReading reading{status.dhw_tank_temp, status.dhw_target, true, ticks_at_target_};
+    const TankReading reading{status.dhw_tank_temp, target, true, ticks_at_target_};
     tank_state_ = advanceTankState(tank_state_, arbitration_, reading);
 
     last_tank_temp_c_ = status.dhw_tank_temp;

@@ -92,6 +92,12 @@ struct StatusSnapshot {
     int seconds_since_mode_write = 0;     ///< since the last verified 0x002C write
     bool dhw_sensor_fault_suspected = false;  ///< charge ran its length without a rise
     int tank_read_failures = 0;               ///< consecutive ticks with no usable tank reading
+    // What the arbiter made of all that, in the terms an operator reads.
+    std::string dhw_state = "unknown";        ///< calling / candidate / satisfied / unknown
+    bool unit_actuating = false;              ///< compressor or flow is moving heat
+    float dhw_eco_target = 0.0f;              ///< 0x0196; 0 = the unit does not answer it
+    float water_control_point = 0.0f;         ///< 0x0033, informational only
+    float effective_dhw_target = 0.0f;        ///< the setpoint the unit will charge to
     bool is_running = false;
     bool device_online = false;
     // Power monitoring
@@ -348,6 +354,15 @@ private:
     int requested_device_mode_ = MODE_SET_HEAT_DHW;
     uint64_t charge_started_ms_ = 0;
     float charge_start_c_ = -1.0f;
+    int dhw_running_s_ = 0;              ///< compressor seconds spent on a DHW charge
+    bool unit_actuating_ = false;
+    uint64_t last_actuating_ms_ = 0;
+    uint64_t parked_at_ms_ = 0;        ///< last release of a declined DHW charge
+    float effective_dhw_target_c_ = 0.0f;
+    uint64_t charge_sample_ms_ = 0;      ///< end of the last actuating charge sample
+    bool charge_was_actuating_ = false;
+    int dhw_drift_ticks_ = 0;            ///< consecutive ticks of a divergent setpoint
+    int heating_drift_ticks_ = 0;
     bool dhw_sensor_fault_suspected_ = false;
     int64_t clock_offset_ms_ = 0;
     bool dry_run_ = false;

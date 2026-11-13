@@ -31,6 +31,7 @@ const elements = {
     powerBtn: document.getElementById('powerBtn'),
     modeValue: document.getElementById('modeValue'),
     dhwDemandValue: document.getElementById('dhwDemandValue'),
+    dhwEffectiveValue: document.getElementById('dhwEffectiveValue'),
     mode0Btn: document.getElementById('mode0Btn'),
     mode1Btn: document.getElementById('mode1Btn'),
     mode2Btn: document.getElementById('mode2Btn'),
@@ -273,14 +274,17 @@ function updateUI(status) {
     }
 
     // DHW demand: what the arbiter is doing for the tank right now
-    let demand = 'unknown';
-    if (status.dhwStateKnown) {
-        demand = status.dhwCalling ? 'demanding' : 'satisfied';
+    let demand = status.dhwState || 'unknown';
+    if (status.dhwStateKnown && !status.unitActuating) {
+        demand += ' (unit idle)';
     }
     if (status.requestedDeviceMode && status.requestedDeviceMode !== status.mode) {
         demand += ' → ' + status.requestedDeviceMode;
     }
     elements.dhwDemandValue.textContent = demand;
+    if (status.dhwSensorFaultSuspected) {
+        elements.dhwDemandValue.textContent = demand + ' · sensor suspect';
+    }
 
     // The UI mode is the backend working mode
     const serverMode = status.workingMode || 0;
@@ -333,6 +337,15 @@ function updateUI(status) {
         }
     }
     const dhwTargetDisplay = pendingDhwTarget !== null ? pendingDhwTarget : status.dhwTarget;
+
+    // The unit charges to whichever DHW setpoint its sub-mode uses, so show the one
+    // it will actually reach when that is not the number the user set.
+    if (elements.dhwEffectiveValue && status.effectiveDhwTarget > 0) {
+        const differs = Math.abs(status.effectiveDhwTarget - status.dhwTarget) > 0.4;
+        elements.dhwEffectiveValue.textContent = differs
+            ? status.effectiveDhwTarget.toFixed(1) + ' °C (unit setpoint)'
+            : '—';
+    }
     const heatingTargetDisplay = pendingHeatingTarget !== null ? pendingHeatingTarget : status.heatingTarget;
 
 

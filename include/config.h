@@ -93,6 +93,10 @@ extern "C" {
 #define REG_RUNNING_MODE          0x002C  // RW - Set mode: 0=Off 1=Cool+DHW 2=Heat+DHW 3=Cool 4=Heat 5=DHW only
 #define REG_HEATING_TARGET        0x0191  // RW - Heating target temperature (0.1°C)
 #define REG_DHW_TARGET            0x0194  // RW - DHW target temperature (0.1°C)
+// RW - DHW target in the economic sub-mode (0.1°C). When 0x00C9 is 2 this is the
+// setpoint the unit charges to, whatever 0x0194 says (measured 2026-11-13).
+#define REG_DHW_TARGET_ECO        0x0196
+
 #define REG_DHW_VALVE_STATUS      0x00D2  // R  - DHW valve status (0=Opened, 1=Closed)
 #define REG_OCCUPANCY_MODE        0x0029  // RW - Occupancy mode: 0=Away, 1=Sleep, 2=Home
 //
