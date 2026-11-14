@@ -16,6 +16,7 @@
 #include <string>
 #include "utils/Platform.hpp"
 #include "core/Arbitration.hpp"
+#include "core/CycleCop.hpp"
 #include "config.h"
 #include "core/Scheduler.hpp"
 
@@ -133,6 +134,12 @@ struct StatusSnapshot {
     float heat_output_w = 0.0f;         // Estimated heat output in Watts
     float cop = 0.0f;                    // Coefficient of Performance (heat_out / power_in)
     bool cop_valid = false;             // True if COP calculation had valid inputs
+    bool heat_output_valid = false;
+    bool compressor_freq_valid = false;
+    double heating_cycle_cop = 0;
+    double dhw_cycle_cop = 0;
+    bool heating_cycle_cop_valid = false;
+    bool dhw_cycle_cop_valid = false;
     
     // Working mode (0=Off, 1=DHW-only, 2=Heating-only, 3=DHW+Heating)
     int working_mode = 0;
@@ -326,6 +333,7 @@ private:
     void updateTankState(const StatusSnapshot& status);
     uint64_t nowMs() const;
     void updateChargeWatchdog(const StatusSnapshot& status);
+    void updateCycleCop(StatusSnapshot& status);
 
     /**
      * Publish a snapshot that says the unit is not answering.
@@ -378,6 +386,7 @@ private:
     uint64_t last_actuating_ms_ = 0;
     uint64_t parked_at_ms_ = 0;        ///< last release of a declined DHW charge
     uint64_t status_sequence_ = 0;     ///< published snapshots, for liveness
+    CycleCop cycle_cop_;
     float effective_dhw_target_c_ = 0.0f;
     uint64_t charge_sample_ms_ = 0;      ///< end of the last actuating charge sample
     bool charge_was_actuating_ = false;

@@ -114,9 +114,9 @@ TEST(PowerScalingEdgeTest, ZeroCurrentVoltage) {
 TEST(PowerScalingEdgeTest, MaximumCurrent) {
   StatusSnapshot status;
 
-  // Simulate maximum current (e.g., 30A)
-  int16_t raw_current = 15;  // 15 * 2 = 30A
-  status.ac_current = static_cast<float>(raw_current) * 2.0f;
+  // Hypothetical scaling, not a measured maximum or verified calibration.
+  int16_t raw_current = 60;  // hypothesis: 60 / 2 = 30A
+  status.ac_current = static_cast<float>(raw_current) / 2.0f;
 
   EXPECT_FLOAT_EQ(status.ac_current, 30.0f);
 }

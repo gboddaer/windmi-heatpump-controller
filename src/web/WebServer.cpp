@@ -199,6 +199,11 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         last_status_ = snapshot;
     }
 
+    char heating_cop[48] = "null", dhw_cop[48] = "null";
+    if (last_status_.heating_cycle_cop_valid)
+        snprintf(heating_cop, sizeof(heating_cop), "%.2f", last_status_.heating_cycle_cop);
+    if (last_status_.dhw_cycle_cop_valid)
+        snprintf(dhw_cop, sizeof(dhw_cop), "%.2f", last_status_.dhw_cycle_cop);
     char response[4096];
     snprintf(response, sizeof(response),
         "{\"dhwTemperature\":%.1f,"
@@ -231,6 +236,10 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         "\"heatOutputW\":%.1f,"
         "\"cop\":%.2f,"
         "\"copValid\":%s,"
+        "\"heatOutputValid\":%s,"
+        "\"heatingCycleCop\":%s,"
+        "\"dhwCycleCop\":%s,"
+        "\"powerCalibration\":\"hypothesis: AC current = raw / 2; PF = 0.90\","
 
         "\"dhwValveStatus\":%d,"
         "\"dhwModeStatus\":%d,"
@@ -280,6 +289,9 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         last_status_.heat_output_w,
         last_status_.cop,
         last_status_.cop_valid ? "true" : "false",
+        last_status_.heat_output_valid ? "true" : "false",
+        heating_cop,
+        dhw_cop,
         last_status_.dhw_valve_status,
         last_status_.dhw_mode_status,
         last_status_.working_mode,

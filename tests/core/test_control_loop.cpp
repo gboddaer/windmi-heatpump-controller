@@ -370,7 +370,7 @@ TEST(ControlLoopTest, CalculatesCopAfterReadingWaterFlow) {
         {REG_DHW_TARGET, 460},
         {REG_HEATING_TARGET, 400},
         {REG_DHW_PRIORITY, 1},
-        {REG_AC_CURRENT, 5},      // actual 10 A
+        {REG_AC_CURRENT, 20},     // hypothesis: raw / 2 = 10 A
         {REG_DC_CURRENT, 3},
         {REG_AC_VOLTAGE, 230},    // actual 230 V
         {REG_DC_VOLTAGE, 24},
@@ -401,11 +401,30 @@ TEST(ControlLoopTest, CalculatesCopAfterReadingWaterFlow) {
 
 // ---- Power scaling tests ----
 
-TEST(PowerScalingTest, AcCurrentMultipliedBy2) {
-    // Master: ac_current = raw * 2.0f
-    int16_t raw = 5;  // 5 displayed
-    float ac_current = static_cast<float>(raw) * 2.0f;
-    EXPECT_FLOAT_EQ(ac_current, 10.0f);
+TEST(PowerScalingTest, AcCurrentHypothesisDividesRawByTwoAndPropagatesToCop) {
+    // User-approved hypothesis, NOT a verified manual correction or calibration.
+    auto registers = fullRegisters();
+    registers[REG_AC_CURRENT] = 14;
+    registers[REG_AC_VOLTAGE] = 226;
+    registers[REG_WATER_FLOW] = 107;
+    registers[REG_ENTERING_WATER_TEMP] = 547;
+    registers[REG_LEAVING_WATER_TEMP] = 573;
+    FakeModbusClient client(registers);
+    CmdQueue commands;
+    StatusQueue statuses;
+    ControlLoop loop;
+    ASSERT_TRUE(loop.start(&client, &commands, &statuses));
+    StatusSnapshot snapshot{};
+    const bool received = waitForLatest(statuses, snapshot);
+    loop.stop();
+    ASSERT_TRUE(received);
+
+    EXPECT_FLOAT_EQ(snapshot.ac_current, 7.0f);
+    EXPECT_NEAR(snapshot.ac_power_va, 1582.0f, 0.1f);
+    EXPECT_NEAR(snapshot.ac_power_w, 1423.8f, 0.1f);
+    EXPECT_NEAR(snapshot.heat_output_w, 3234.8f, 1.0f);
+    EXPECT_TRUE(snapshot.cop_valid);
+    EXPECT_NEAR(snapshot.cop, 2.272f, 0.005f);
 }
 
 TEST(PowerScalingTest, DcCurrentMultipliedBy4) {
@@ -422,11 +441,32 @@ TEST(PowerScalingTest, AcVoltageIsRaw) {
     EXPECT_FLOAT_EQ(ac_voltage, 230.0f);
 }
 
-TEST(PowerScalingTest, DcVoltageDividedBy2) {
-    // Master: dc_voltage = raw / 2.0f
-    int16_t raw = 24;
-    float dc_voltage = static_cast<float>(raw) / 2.0f;
-    EXPECT_FLOAT_EQ(dc_voltage, 12.0f);
+TEST(PowerScalingTest, DcVoltageUsesPolishManualMultiplierWithoutChangingCop) {
+    // Polish manual: actual = displayed * 2; English says / 2.
+    // Recorded raw ~150 is plausible as a ~300 V mains-derived DC bus, not 75 V.
+    // Exercise the actual decoder, not a duplicate expression in this test.
+    auto registers = fullRegisters();
+    registers[REG_DC_VOLTAGE] = 150;
+    registers[REG_AC_CURRENT] = 20;  // hypothesis: raw / 2 = 10 A
+    registers[REG_AC_VOLTAGE] = 230;
+    registers[REG_WATER_FLOW] = 120;
+    registers[REG_ENTERING_WATER_TEMP] = 300;
+    registers[REG_LEAVING_WATER_TEMP] = 350;
+    FakeModbusClient client(registers);
+    CmdQueue commands;
+    StatusQueue statuses;
+    ControlLoop loop;
+    ASSERT_TRUE(loop.start(&client, &commands, &statuses));
+    StatusSnapshot snapshot{};
+    const bool received = waitForLatest(statuses, snapshot);
+    loop.stop();
+    ASSERT_TRUE(received);
+
+    EXPECT_FLOAT_EQ(snapshot.dc_voltage, 300.0f);
+    EXPECT_NEAR(snapshot.ac_power_w, 2070.0f, 0.1f);
+    EXPECT_TRUE(snapshot.cop_valid);
+    EXPECT_NEAR(snapshot.heat_output_w, 6976.7f, 1.0f);
+    EXPECT_NEAR(snapshot.cop, 3.37f, 0.02f);
 }
 
 TEST(PowerScalingTest, AcPowerVaIsVoltageTimesCurrent) {
@@ -1244,6 +1284,45 @@ TEST(SetpointDriftTest, AnImplausibleReadingIsNeverWrittenBack) {
 
     EXPECT_FALSE(wroteValue(client, REG_DHW_TARGET, 500))
         << "measured 2026-11-13: a garbled read became a real write of 52.0 C";
+}
+
+TEST(CycleCopLoopTest, PublishesCompletedEnergyRatioAndRetainsItWhenIdle) {
+    auto registers = fullRegisters();
+    registers[REG_COMPRESSOR_FREQ] = 0;
+    registers[REG_AC_CURRENT] = 20; // hypothesis: 10 A
+    registers[REG_AC_VOLTAGE] = 230;
+    registers[REG_WATER_FLOW] = 120;
+    registers[REG_ENTERING_WATER_TEMP] = 300;
+    registers[REG_LEAVING_WATER_TEMP] = 350;
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(2, "dhw", 50, 45));
+    runner.tick();
+    client.writeRegister(REG_COMPRESSOR_FREQ, 200);
+    runner.tick();
+    EXPECT_FALSE(runner.latest().heating_cycle_cop_valid);
+    runner.advanceTime(60000);
+    client.writeRegister(REG_COMPRESSOR_FREQ, 0);
+    runner.tick();
+    const auto completed = runner.latest();
+    runner.tick();
+    const auto idle = runner.latest();
+    runner.stop();
+    EXPECT_TRUE(completed.heating_cycle_cop_valid);
+    EXPECT_NEAR(completed.heating_cycle_cop, 3.37, 0.02);
+    EXPECT_FALSE(completed.dhw_cycle_cop_valid);
+    EXPECT_DOUBLE_EQ(idle.heating_cycle_cop, completed.heating_cycle_cop);
+}
+
+TEST(ControlLoopTest, MissingFlowIsNotAValidHeatMeasurement) {
+    auto registers = fullRegisters();
+    registers.erase(REG_WATER_FLOW);
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(2, "dhw", 50, 45));
+    auto snapshot = runner.tickSnapshot();
+    runner.stop();
+    EXPECT_FALSE(snapshot.heat_output_valid);
 }
 
 // ---- Liveness has to be in the payload ----

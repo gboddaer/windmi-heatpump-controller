@@ -101,10 +101,10 @@ extern "C" {
 #define REG_OCCUPANCY_MODE        0x0029  // RW - Occupancy mode: 0=Away, 1=Sleep, 2=Home
 //
 // === POWER MONITORING REGISTERS (READ-ONLY) ===
-#define REG_AC_CURRENT            0x1014  // R  - AC current (Display * 2 = Actual Amps)
+#define REG_AC_CURRENT            0x1014  // R - AC current: raw / 2 A, UNVERIFIED hypothesis; manual says *2
 #define REG_DC_CURRENT            0x1015  // R  - DC current (Display * 4 = Actual Amps)
 #define REG_AC_VOLTAGE            0x1016  // R  - AC voltage (Display = Actual Volts)
-#define REG_DC_VOLTAGE            0x1017  // R  - DC voltage (Display / 2 = Actual Volts)
+#define REG_DC_VOLTAGE            0x1017  // R  - DC voltage (raw * 2 V; Polish manual p. 52, English /2 is inconsistent)
 //
 // === DIAGNOSTIC REGISTERS (READ-ONLY) ===
 #define REG_UNIT_CAPACITY         0x1006  // R  - Unit capacity (4/6/8/10/12/14/16 = kW)

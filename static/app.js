@@ -37,6 +37,10 @@ const elements = {
     mode2Btn: document.getElementById('mode2Btn'),
     mode3Btn: document.getElementById('mode3Btn'),
     outdoorTempValue: document.getElementById('outdoorTempValue'),
+    powerInputValue: document.getElementById('powerInputValue'),
+    powerOutputValue: document.getElementById('powerOutputValue'),
+    heatingCycleCopValue: document.getElementById('heatingCycleCopValue'),
+    dhwCycleCopValue: document.getElementById('dhwCycleCopValue'),
     dhwTempValue: document.getElementById('dhwTempValue'),
     heatingTempValue: document.getElementById('heatingTempValue'),
     dhwSlider: document.getElementById('dhwSlider'),
@@ -324,6 +328,16 @@ function updateUI(status) {
     elements.dhwTempValue.textContent = status.dhwTemperature + '°C';
     elements.heatingTempValue.textContent = status.heatingTemperature + '°C';
 
+    // The backend already applies the raw/2 current hypothesis. Never scale again here.
+    elements.powerInputValue.textContent = status.deviceOnline && status.powerValid && Number.isFinite(status.acPowerW)
+        ? Math.round(status.acPowerW) + ' W' : 'Unavailable';
+    elements.powerOutputValue.textContent = status.deviceOnline && status.heatOutputValid && Number.isFinite(status.heatOutputW)
+        ? Math.round(status.heatOutputW) + ' W' : 'Unavailable';
+    elements.heatingCycleCopValue.textContent = Number.isFinite(status.heatingCycleCop)
+        ? status.heatingCycleCop.toFixed(2) : 'Awaiting cycle';
+    elements.dhwCycleCopValue.textContent = Number.isFinite(status.dhwCycleCop)
+        ? status.dhwCycleCop.toFixed(2) : 'Awaiting cycle';
+
     // Use pending values if set, otherwise use server values
     if (pendingDhwTarget !== null) {
         // Clear pending once server confirms the value (allow for rounding)
@@ -338,14 +352,9 @@ function updateUI(status) {
     }
     const dhwTargetDisplay = pendingDhwTarget !== null ? pendingDhwTarget : status.dhwTarget;
 
-    // The unit charges to whichever DHW setpoint its sub-mode uses, so show the one
-    // it will actually reach when that is not the number the user set.
-    if (elements.dhwEffectiveValue && status.effectiveDhwTarget > 0) {
-        const differs = Math.abs(status.effectiveDhwTarget - status.dhwTarget) > 0.4;
-        elements.dhwEffectiveValue.textContent = differs
-            ? status.effectiveDhwTarget.toFixed(1) + ' °C (unit setpoint)'
-            : '—';
-    }
+    // Always show the effective setpoint, including when both unit targets agree.
+    elements.dhwEffectiveValue.textContent = status.deviceOnline && Number.isFinite(status.effectiveDhwTarget) && status.effectiveDhwTarget > 0
+        ? status.effectiveDhwTarget.toFixed(1) + ' °C' : 'Unavailable';
     const heatingTargetDisplay = pendingHeatingTarget !== null ? pendingHeatingTarget : status.heatingTarget;
 
 

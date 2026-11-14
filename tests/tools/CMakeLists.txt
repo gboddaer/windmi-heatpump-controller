@@ -1,3 +1,9 @@
+find_program(NODE_EXECUTABLE node)
+if(NODE_EXECUTABLE)
+    add_test(NAME test_ui_power
+        COMMAND ${NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_ui_power.cjs)
+endif()
+
 # probe_registers uses POSIX sockets (arpa/inet.h, unistd.h) — Linux/macOS only
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     add_executable(probe_registers probe_registers.c)

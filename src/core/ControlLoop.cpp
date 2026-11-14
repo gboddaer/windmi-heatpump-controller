@@ -299,6 +299,8 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
     if (!modbus_client_) return false;
 
     bool ok = true;
+    bool got_entering_water = false;
+    bool got_water_flow = false;
     int16_t raw;
 
     // Read outdoor temp (0x0001)
@@ -329,6 +331,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
     try {
         raw = modbus_client_->readRegister(REG_ENTERING_WATER_TEMP);
         status.entering_water_temp = raw_to_temp(raw);
+        got_entering_water = true;
     } catch (const ModbusException&) {
         // Non-critical, leave as 0
     }
@@ -447,7 +450,10 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
         try {
             raw = modbus_client_->readRegister(REG_AC_CURRENT);
-            status.ac_current = static_cast<float>(raw) * 2.0f;   // Manual: Actual = Display × 2
+            // UNVERIFIED, user-approved hypothesis: raw / 2 A.
+            // Contradicts the manual's *2; needs independent power-meter validation.
+            // This quarters estimated AC power and quadruples COP versus the old decoder.
+            status.ac_current = static_cast<float>(raw) / 2.0f;
             ac_current = status.ac_current;
             got_current = true;
         } catch (const ModbusException&) {
@@ -472,7 +478,9 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
         try {
             raw = modbus_client_->readRegister(REG_DC_VOLTAGE);
-            status.dc_voltage = static_cast<float>(raw) / 2.0f;   // Manual: Actual = Display / 2
+            // Polish manual p. 52: actual = displayed * 2; English p. 51
+            // incorrectly says / 2. Recorded raw ~150 fits a ~300 V DC bus.
+            status.dc_voltage = static_cast<float>(raw) * 2.0f;
         } catch (const ModbusException&) {
             status.dc_voltage = 0.0f;
         }
@@ -500,6 +508,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
     try {
         raw = modbus_client_->readRegister(REG_COMPRESSOR_FREQ);
         status.compressor_freq = static_cast<float>(raw);  // 1 Hz units
+        status.compressor_freq_valid = true;
     } catch (const ModbusException&) {
         status.compressor_freq = 0.0f;
     }
@@ -507,6 +516,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
     try {
         raw = modbus_client_->readRegister(REG_WATER_FLOW);
         status.water_flow = static_cast<float>(raw) / 100.0f;  // m³/h × 100
+        got_water_flow = true;
     } catch (const ModbusException&) {
         status.water_flow = 0.0f;
     }
@@ -563,17 +573,16 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
     status.cop = 0.0f;
     status.cop_valid = false;
 
-    if (status.water_flow > 0.01f && status.power_valid &&
-        status.leaving_water_temp > 0.0f && status.entering_water_temp > -50.0f) {
-        float delta_t = status.leaving_water_temp - status.entering_water_temp;
-        if (delta_t > 0.1f) {
-            // flow_m3h / 3600 = m³/s → × 1000 = kg/s, × 4186 J/(kg·K) = W/K
-            float flow_kg_s = (status.water_flow * 1000.0f) / 3600.0f;
-            status.heat_output_w = flow_kg_s * 4186.0f * delta_t;
-            if (status.ac_power_w > 0.0f) {
-                status.cop = status.heat_output_w / status.ac_power_w;
-                status.cop_valid = true;
-            }
+    status.heat_output_valid = ok && got_entering_water && got_water_flow &&
+        status.water_flow >= 0.0f && status.leaving_water_temp > -50.0f &&
+        status.entering_water_temp > -50.0f;
+    if (status.heat_output_valid) {
+        const float delta_t = status.leaving_water_temp - status.entering_water_temp;
+        // Signed heat is essential: defrost removes energy from the water circuit.
+        status.heat_output_w = (status.water_flow * 1000.0f / 3600.0f) * 4186.0f * delta_t;
+        if (status.power_valid && status.ac_power_w > 0.0f && delta_t > 0.1f) {
+            status.cop = status.heat_output_w / status.ac_power_w;
+            status.cop_valid = true;
         }
     }
 
@@ -925,6 +934,8 @@ void ControlLoop::threadFunc() {
                 status.schedule_paused = scheduler_.isPaused();
             }
 
+            // Integrate the observed machine state, before any arbiter writes.
+            updateCycleCop(status);
             // Apply control logic
             applyControlLogic(status);
 
@@ -941,6 +952,7 @@ void ControlLoop::threadFunc() {
             // Publish offline status (always succeeds with ring buffer)
             status.device_online = false;
             status.working_mode = desired_working_mode_;
+            updateCycleCop(status);
             // Offline is a fresh statement, not an old one: it advances the sequence
             // so a monitor can tell a quiet unit from a loop that stopped publishing.
             status.status_sequence = ++status_sequence_;
@@ -1000,8 +1012,27 @@ void ControlLoop::publishOfflineStatus() {
     StatusSnapshot status{};
     status.device_online = false;
     status.working_mode = desired_working_mode_;
+    updateCycleCop(status);
     status.status_sequence = ++status_sequence_;
     status_queue_->push(status);
+}
+
+void ControlLoop::updateCycleCop(StatusSnapshot& status) {
+    CyclePowerSample sample;
+    if (status.running_status == MODE_STATUS_HEAT) sample.service = CopService::Heating;
+    if (status.running_status == MODE_STATUS_DHW) sample.service = CopService::Dhw;
+    sample.protection = status.running_status == MODE_STATUS_DEFROST ||
+                        status.running_status == MODE_STATUS_ANTIFREEZE;
+    sample.compressor_running = status.compressor_freq > 0;
+    sample.valid = status.device_online && status.power_valid && status.heat_output_valid &&
+                   status.compressor_freq_valid;
+    sample.input_w = status.ac_power_w;
+    sample.output_w = status.heat_output_w;
+    cycle_cop_.update(nowMs(), sample);
+    status.heating_cycle_cop = cycle_cop_.heating().cop;
+    status.heating_cycle_cop_valid = cycle_cop_.heating().available;
+    status.dhw_cycle_cop = cycle_cop_.dhw().cop;
+    status.dhw_cycle_cop_valid = cycle_cop_.dhw().available;
 }
 
 void ControlLoop::updateChargeWatchdog(const StatusSnapshot& status) {

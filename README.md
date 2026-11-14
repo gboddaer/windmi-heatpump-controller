@@ -267,6 +267,24 @@ Get current heat pump status.
 off, 1 DHW only, 2 heating only, 3 both. `runningStatus` is what the unit is actually
 doing: `off`, `cool`, `heat`, `dhw`, `defrost`, `antifreeze`.
 
+**Power/COP calibration hypothesis:** AC current is currently decoded as
+`raw(0x1014) / 2` amperes, explicitly unverified and contrary to the manual's `*2`.
+This user-approved hypothesis divides estimated electrical power by four and multiplies
+COP by four relative to the previous decoder. Power still assumes a 0.90 power factor;
+`powerValid`/`copValid` mean the calculation has usable inputs, not verified calibration.
+An independent power meter is needed to validate it. DC voltage uses the Polish manual's
+`raw * 2` (plausible ~300 V DC bus); DC voltage is not used in COP.
+
+The overview shows live estimated input/output watts and the latest completed heating
+and DHW compressor-run COP separately (`heatingCycleCop` / `dhwCycleCop`, JSON `null`
+until available). Each cycle COP is integrated signed heat energy divided by electrical
+energy, not an average of instantaneous COP. Defrost remains part of the preceding run
+and subtracts heat. Runs interrupted by missing data or sampling gaps over 90 seconds,
+startup fragments, and runs shorter than 60 seconds are discarded. Results are held in
+memory and reset on restart. These are compressor-run estimates, not seasonal efficiency
+including off-cycle standby. `heatOutputValid` distinguishes missing thermal readings
+from measured zero output; output watts may be negative during defrost.
+
 The four fields at the end are the DHW arbiter: whether the tank is demanding, whether
 that verdict came from a usable reading, the device mode the arbiter decided on, and
 seconds since the last verified mode write (`-1`: none since startup).
