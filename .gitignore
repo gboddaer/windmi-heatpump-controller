@@ -14,7 +14,8 @@ tests/test_spsc
 # Runtime files
 /tmp/windmi-controller.lock
 
-# Brainstorming mockups
+# Isolated development worktrees and brainstorming mockups
+.worktrees/
 .superpowers/
 
 # Register readout snapshots (tools/windmi_regdump.py)
