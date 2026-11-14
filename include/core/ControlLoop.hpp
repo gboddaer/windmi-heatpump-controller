@@ -17,6 +17,7 @@
 #include "utils/Platform.hpp"
 #include "core/Arbitration.hpp"
 #include "core/CycleCop.hpp"
+#include "core/DiagnosticRegisters.hpp"
 #include "config.h"
 #include "core/Scheduler.hpp"
 
@@ -111,16 +112,18 @@ struct StatusSnapshot {
     bool is_running = false;
     bool device_online = false;
     // Power monitoring
-    float ac_current = 0.0f;       // AC current in Amps (raw * 2)
+    float ac_current = 0.0f;       // AC current in Amps (raw / 2, unverified hypothesis)
     float dc_current = 0.0f;       // DC current in Amps (raw * 4)
     float ac_voltage = 0.0f;       // AC voltage in Volts (raw)
-    float dc_voltage = 0.0f;       // DC voltage in Volts (raw / 2)
+    float dc_voltage = 0.0f;       // DC voltage in Volts (raw * 2, Polish manual)
     float ac_power_va = 0.0f;      // AC apparent power in VA (ac_voltage * ac_current)
     float ac_power_w = 0.0f;       // AC real power in Watts (estimated: VA * power_factor)
     bool power_valid = false;      // True if both AC current and AC voltage were read
     
+    DiagnosticSnapshot diagnostics;
+
     // Diagnostic registers
-    float compressor_freq = 0.0f;       // Actual compressor frequency in Hz
+    float compressor_freq = 0.0f;       // Actual compressor speed register, scale unverified
     float water_flow = 0.0f;            // Water flow in m³/h (from 0x102A, raw/100)
     int unit_capacity_kw = 0;           // Unit capacity in kW (4/6/8/10/12/14/16)
     int actual_capacity_output = 0;     // Actual capacity output (from 0x1004)
@@ -387,6 +390,7 @@ private:
     uint64_t parked_at_ms_ = 0;        ///< last release of a declined DHW charge
     uint64_t status_sequence_ = 0;     ///< published snapshots, for liveness
     CycleCop cycle_cop_;
+    DiagnosticMonitor diagnostic_monitor_;
     float effective_dhw_target_c_ = 0.0f;
     uint64_t charge_sample_ms_ = 0;      ///< end of the last actuating charge sample
     bool charge_was_actuating_ = false;

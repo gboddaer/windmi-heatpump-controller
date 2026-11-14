@@ -158,23 +158,103 @@
 
             <!-- Tab 3: Diagnostics -->
             <div class="tab-panel" id="tab-diagnostics">
-                <section class="status-card">
-                    <h2>Diagnostics</h2>
-                    <div class="temp-grid">
-                        <div class="temp-item">
-                            <span class="label">DHW Valve</span>
-                            <span id="dhwValveValue" class="value">-</span>
-                        </div>
-                        <div class="temp-item">
-                            <span class="label">DHW Mode</span>
-                            <span id="dhwModeValue" class="value">-</span>
-                        </div>
-                        <div class="temp-item">
-                            <span class="label">Capacity Output</span>
-                            <span id="actualCapacityValue" class="value">-</span>
-                        </div>
-                    </div>
-                </section>
+                <div class="diagnostics-heading">
+                    <h2>Diagnostics <span class="diagnostics-readonly">Read-only</span></h2>
+                    <p id="diagTelemetryStatus">Waiting for controller status…</p>
+                </div>
+                <div class="diagnostics-grid">
+                    <section class="status-card diagnostic-wide">
+                        <h3>Connection &amp; faults</h3>
+                        <dl class="diagnostic-values">
+                            <dt>Device connection</dt><dd id="diagConnection">Unavailable</dd>
+                            <dt>Controller freshness</dt><dd id="diagFreshness">Unavailable</dd>
+                            <dt>Snapshot sequence</dt><dd id="diagSequence">Unavailable</dd>
+                            <dt>Consecutive tank read failures</dt><dd id="diagTankReads">Unavailable</dd>
+                            <dt>DHW progress watchdog</dt><dd id="diagWatchdog">Unavailable</dd>
+                            <dt>Hardware alarm coverage</dt><dd id="diagHardwareAlarmStatus">Unavailable</dd>
+                            <dt>IPM protection reason register</dt><dd id="diagIpmReason">Unavailable</dd>
+                        </dl>
+                        <p id="diagHardwareAlarms" class="diagnostic-alarm-list">Hardware alarm telemetry unavailable</p>
+                    </section>
+                    <section class="status-card">
+                        <h3>Control decisions</h3>
+                        <dl class="diagnostic-values">
+                            <dt>Selected working mode</dt><dd id="diagWorkingMode">Unavailable</dd>
+                            <dt>Arbiter requested mode</dt><dd id="diagRequested">Unavailable</dd>
+                            <dt>Device set mode (0x002C)</dt><dd id="diagSetMode">Unavailable</dd>
+                            <dt>Actual operation (0x002D)</dt><dd id="diagOperation">Unavailable</dd>
+                            <dt>DHW demand / state</dt><dd id="diagDhwDemand">Unavailable</dd>
+                            <dt>Compressor or flow active</dt><dd id="diagActuating">Unavailable</dd>
+                            <dt>Since verified mode write</dt><dd id="diagWriteAge">Unavailable</dd>
+                            <dt>Schedule / occupancy</dt><dd id="diagSchedule">Unavailable</dd>
+                        </dl>
+                    </section>
+                    <section class="status-card">
+                        <h3>Compressor, pump &amp; fans</h3>
+                        <dl class="diagnostic-values">
+                            <dt>Actual compressor speed (scale unverified)</dt><dd id="diagCompressor">Unavailable</dd>
+                            <dt>Required compressor frequency</dt><dd id="diagCompressorTarget">Unavailable</dd>
+                            <dt>Pump command (not feedback)</dt><dd id="diagPump">Unavailable</dd>
+                            <dt>Upper fan: actual / required (raw)</dt><dd id="diagFanUpper">Unavailable</dd>
+                            <dt>Lower fan: actual / required (raw)</dt><dd id="diagFanLower">Unavailable</dd>
+                            <dt>Reported compressor runtime</dt><dd id="diagCompressorHours">Unavailable</dd>
+                            <dt>Reported pump runtime</dt><dd id="diagPumpHours">Unavailable</dd>
+                        </dl>
+                    </section>
+                    <section class="status-card">
+                        <h3>Valves &amp; outdoor-unit I/O</h3>
+                        <dl class="diagnostic-values">
+                            <dt>DHW routing (reported)</dt><dd id="diagValve">Unavailable</dd>
+                            <dt>Four-way valve</dt><dd id="diagFourWay">Unavailable</dd>
+                            <dt>SV1</dt><dd id="diagSv1">Unavailable</dd>
+                            <dt>SV2</dt><dd id="diagSv2">Unavailable</dd>
+                            <dt>Expansion valve command (raw)</dt><dd id="diagExv">Unavailable</dd>
+                            <dt>ODU output bitmap</dt><dd id="diagOduOutputs">Unavailable</dd>
+                            <dt>Pressure-switch input bits</dt><dd id="diagInputs">Unavailable</dd>
+                        </dl>
+                        <p class="diagnostic-note">Output commands are not physical valve feedback. Pressure-switch bit polarity is unverified.</p>
+                    </section>
+                    <section class="status-card">
+                        <h3>Water circuit &amp; targets</h3>
+                        <dl class="diagnostic-values">
+                            <dt>Water flow</dt><dd id="diagFlow">Unavailable</dd>
+                            <dt>Supply / leaving water</dt><dd id="diagLwt">Unavailable</dd>
+                            <dt>Return / entering water</dt><dd id="diagEwt">Unavailable</dd>
+                            <dt>Water ΔT (supply − return)</dt><dd id="diagDeltaT">Unavailable</dd>
+                            <dt>DHW tank temperature</dt><dd id="diagTank">Unavailable</dd>
+                            <dt>DHW normal / economic targets</dt><dd id="diagDhwTargets">Unavailable</dd>
+                            <dt>Effective DHW target</dt><dd id="diagEffectiveTarget">Unavailable</dd>
+                            <dt>Heating target</dt><dd id="diagHeatingTarget">Unavailable</dd>
+                            <dt>Water control point (informational)</dt><dd id="diagWaterPoint">Unavailable</dd>
+                            <dt>Reported DHW profile</dt><dd id="diagDhwProfile">Unavailable</dd>
+                        </dl>
+                    </section>
+                    <section class="status-card">
+                        <h3>Electrical &amp; heat estimates</h3>
+                        <dl class="diagnostic-values">
+                            <dt>AC voltage / current</dt><dd id="diagAc">Unavailable</dd>
+                            <dt>DC bus voltage / current</dt><dd id="diagDc">Unavailable</dd>
+                            <dt>Estimated electrical input</dt><dd id="diagElectric">Unavailable</dd>
+                            <dt>Estimated heat output (signed)</dt><dd id="diagThermal">Unavailable</dd>
+                            <dt>Last heating / DHW cycle COP</dt><dd id="diagCycleCop">Awaiting cycles</dd>
+                            <dt>Unit rating</dt><dd id="diagUnitRating">Unavailable</dd>
+                            <dt>Capacity output register (raw)</dt><dd id="diagCapacityRaw">Unavailable</dd>
+                        </dl>
+                    </section>
+                    <section class="status-card">
+                        <h3>Raw registers &amp; sample ages</h3>
+                        <p class="diagnostic-note">Alarm banks rotate every 2 minutes; auxiliary registers every 4½ minutes at the normal 30-second tick. Missing or stale banks cannot confirm the absence of faults.</p>
+                        <details>
+                            <summary>Show register readings</summary>
+                            <div class="diagnostic-table-scroll">
+                                <table class="diagnostic-table">
+                                    <thead><tr><th>Register</th><th>Address</th><th>Raw</th><th>Sample age</th></tr></thead>
+                                    <tbody id="diagRawRows"></tbody>
+                                </table>
+                            </div>
+                        </details>
+                    </section>
+                </div>
             </div>
         </main>
 
@@ -183,6 +263,7 @@
         </footer>
     </div>
 
+    <script src="diagnostics.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

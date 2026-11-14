@@ -1325,6 +1325,31 @@ TEST(ControlLoopTest, MissingFlowIsNotAValidHeatMeasurement) {
     EXPECT_FALSE(snapshot.heat_output_valid);
 }
 
+TEST(DiagnosticLoopTest, CapturesExistingAndOptionalReadingsWithoutNewWrites) {
+    auto registers = fullRegisters();
+    registers[0x0055] = 0;
+    registers[0x1009] = static_cast<int16_t>(0x8001);
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(3, "dhw", 46.0f, 40.0f));
+    auto snapshot = runner.tickSnapshot();
+    runner.stop();
+    EXPECT_TRUE(snapshot.device_online);
+    const auto& readings = snapshot.diagnostics.readings;
+    ASSERT_TRUE(readings[diagnosticIndex(REG_COMPRESSOR_FREQ)].raw);
+    EXPECT_EQ(*readings[diagnosticIndex(REG_COMPRESSOR_FREQ)].raw, 42);
+    ASSERT_TRUE(readings[diagnosticIndex(0x0055)].raw);
+    EXPECT_EQ(*readings[diagnosticIndex(0x0055)].raw, 0);
+    ASSERT_TRUE(readings[diagnosticIndex(0x1009)].raw);
+    EXPECT_EQ(*readings[diagnosticIndex(0x1009)].raw, 0x8001);
+    EXPECT_FALSE(readings[diagnosticIndex(0x100A)].raw);
+    for (const auto& write : client.writes()) {
+        EXPECT_NE(write.first, 0x0055);
+        EXPECT_NE(write.first, 0x1009);
+        EXPECT_NE(write.first, 0x100E);
+    }
+}
+
 // ---- Liveness has to be in the payload ----
 // A calm unit and a stalled control loop look identical from outside: the registers
 // stop moving in both cases, because there is nothing to move. Measured 2026-11-13

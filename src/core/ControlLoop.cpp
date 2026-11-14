@@ -302,10 +302,14 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
     bool got_entering_water = false;
     bool got_water_flow = false;
     int16_t raw;
+    diagnostic_monitor_.beginSample();
+    const auto readRegister = [this](uint16_t address) {
+        return diagnostic_monitor_.readRegister(*modbus_client_, address, nowMs());
+    };
 
     // Read outdoor temp (0x0001)
     try {
-        raw = modbus_client_->readRegister(REG_OUTDOOR_TEMP);
+        raw = readRegister(REG_OUTDOOR_TEMP);
         status.outdoor_temp = raw_to_temp(raw);
     } catch (const ModbusException&) {
         ok = false;
@@ -313,7 +317,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read indoor temp (0x0002)
     try {
-        raw = modbus_client_->readRegister(REG_INDOOR_TEMP);
+        raw = readRegister(REG_INDOOR_TEMP);
         status.indoor_temp = raw_to_temp(raw);
     } catch (const ModbusException&) {
         // Non-critical, ignore
@@ -321,7 +325,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read leaving water temp (0x0004)
     try {
-        raw = modbus_client_->readRegister(REG_LEAVING_WATER_TEMP);
+        raw = readRegister(REG_LEAVING_WATER_TEMP);
         status.leaving_water_temp = raw_to_temp(raw);
     } catch (const ModbusException&) {
         ok = false;
@@ -329,7 +333,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read entering water temp (0x0003)
     try {
-        raw = modbus_client_->readRegister(REG_ENTERING_WATER_TEMP);
+        raw = readRegister(REG_ENTERING_WATER_TEMP);
         status.entering_water_temp = raw_to_temp(raw);
         got_entering_water = true;
     } catch (const ModbusException&) {
@@ -338,7 +342,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read DHW tank temp (0x00CE)
     try {
-        raw = modbus_client_->readRegister(REG_DHW_TANK_TEMP);
+        raw = readRegister(REG_DHW_TANK_TEMP);
         status.dhw_tank_temp = raw_to_temp(raw);
     } catch (const ModbusException&) {
         WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP, "Failed to read DHW tank temp");
@@ -347,7 +351,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read running mode (0x002C)
     try {
-        raw = modbus_client_->readRegister(REG_RUNNING_MODE);
+        raw = readRegister(REG_RUNNING_MODE);
         status.running_mode = raw;
         // Update current_mode from the device (may have been changed externally).
         // Modes 3, 4 and 5 count too: they are what the display controller writes
@@ -361,7 +365,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read running status (0x002D)
     try {
-        raw = modbus_client_->readRegister(REG_RUNNING_STATUS);
+        raw = readRegister(REG_RUNNING_STATUS);
         status.running_status = raw;
         status.is_running = (raw != MODE_STATUS_OFF);
     } catch (const ModbusException&) {
@@ -370,7 +374,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read DHW target (0x0194)
     try {
-        raw = modbus_client_->readRegister(REG_DHW_TARGET);
+        raw = readRegister(REG_DHW_TARGET);
         status.dhw_target = raw_to_temp(raw);
         if (!saved_targets_initialized_) {
             // A target sitting on its minimum is our own demand suppression
@@ -394,7 +398,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
     // that does not answer it simply has one DHW setpoint, and 0x0194 is the whole
     // story. Not a critical read, so a missing register is not a dead device.
     try {
-        raw = modbus_client_->readRegister(REG_DHW_TARGET_ECO);
+        raw = readRegister(REG_DHW_TARGET_ECO);
         status.dhw_eco_target = raw_to_temp(raw);
     } catch (const ModbusException&) {
         status.dhw_eco_target = 0.0f;
@@ -405,7 +409,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
     // nothing is decided from it, but an operator wants to see what the unit thinks
     // its target is.
     try {
-        raw = modbus_client_->readRegister(REG_WATER_CONTROL_POINT);
+        raw = readRegister(REG_WATER_CONTROL_POINT);
         status.water_control_point = raw_to_temp(raw);
     } catch (const ModbusException&) {
         status.water_control_point = 0.0f;
@@ -413,7 +417,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read heating target (0x0191)
     try {
-        raw = modbus_client_->readRegister(REG_HEATING_TARGET);
+        raw = readRegister(REG_HEATING_TARGET);
         status.heating_target = raw_to_temp(raw);
         last_heating_target_ = status.heating_target;
         if (!saved_targets_initialized_) {
@@ -436,7 +440,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read occupancy mode (0x0029) - 0=Away, 1=Sleep, 2=Home
     try {
-        raw = modbus_client_->readRegister(REG_OCCUPANCY_MODE);
+        raw = readRegister(REG_OCCUPANCY_MODE);
         status.occupancy_mode = raw;
     } catch (const ModbusException&) {
         // Non-critical, leave as last known value
@@ -449,7 +453,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         bool got_current = false, got_voltage = false;
 
         try {
-            raw = modbus_client_->readRegister(REG_AC_CURRENT);
+            raw = readRegister(REG_AC_CURRENT);
             // UNVERIFIED, user-approved hypothesis: raw / 2 A.
             // Contradicts the manual's *2; needs independent power-meter validation.
             // This quarters estimated AC power and quadruples COP versus the old decoder.
@@ -461,14 +465,14 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         }
 
         try {
-            raw = modbus_client_->readRegister(REG_DC_CURRENT);
+            raw = readRegister(REG_DC_CURRENT);
             status.dc_current = static_cast<float>(raw) * 4.0f;   // Manual: Actual = Display × 4
         } catch (const ModbusException&) {
             status.dc_current = 0.0f;
         }
 
         try {
-            raw = modbus_client_->readRegister(REG_AC_VOLTAGE);
+            raw = readRegister(REG_AC_VOLTAGE);
             status.ac_voltage = static_cast<float>(raw);           // Manual: Actual = Display
             ac_voltage = status.ac_voltage;
             got_voltage = true;
@@ -477,7 +481,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         }
 
         try {
-            raw = modbus_client_->readRegister(REG_DC_VOLTAGE);
+            raw = readRegister(REG_DC_VOLTAGE);
             // Polish manual p. 52: actual = displayed * 2; English p. 51
             // incorrectly says / 2. Recorded raw ~150 fits a ~300 V DC bus.
             status.dc_voltage = static_cast<float>(raw) * 2.0f;
@@ -499,22 +503,22 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read diagnostic registers (non-critical — failures don't affect ok flag)
     try {
-        raw = modbus_client_->readRegister(REG_UNIT_CAPACITY);
+        raw = readRegister(REG_UNIT_CAPACITY);
         status.unit_capacity_kw = raw;  // Raw = kW rating (4,6,8,10,12,14,16)
     } catch (const ModbusException&) {
         status.unit_capacity_kw = 0;
     }
 
     try {
-        raw = modbus_client_->readRegister(REG_COMPRESSOR_FREQ);
-        status.compressor_freq = static_cast<float>(raw);  // 1 Hz units
+        raw = readRegister(REG_COMPRESSOR_FREQ);
+        status.compressor_freq = static_cast<float>(raw);  // Raw speed, scale unverified
         status.compressor_freq_valid = true;
     } catch (const ModbusException&) {
         status.compressor_freq = 0.0f;
     }
 
     try {
-        raw = modbus_client_->readRegister(REG_WATER_FLOW);
+        raw = readRegister(REG_WATER_FLOW);
         status.water_flow = static_cast<float>(raw) / 100.0f;  // m³/h × 100
         got_water_flow = true;
     } catch (const ModbusException&) {
@@ -522,7 +526,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
     }
 
     try {
-        raw = modbus_client_->readRegister(REG_ACTUAL_CAPACITY_OUTPUT);
+        raw = readRegister(REG_ACTUAL_CAPACITY_OUTPUT);
         status.actual_capacity_output = raw;
     } catch (const ModbusException&) {
         status.actual_capacity_output = 0;
@@ -530,7 +534,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read DHW valve status (0x00D2)
     try {
-        raw = modbus_client_->readRegister(REG_DHW_VALVE_STATUS);
+        raw = readRegister(REG_DHW_VALVE_STATUS);
         status.dhw_valve_status = raw;
     } catch (const ModbusException&) {
         status.dhw_valve_status = -1;
@@ -538,28 +542,28 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
 
     // Read DHW mode status (0x00C9) - 0=Eco, 1=Anti-Legionella, 2=Regular
     try {
-        raw = modbus_client_->readRegister(REG_DHW_MODE_STATUS);
+        raw = readRegister(REG_DHW_MODE_STATUS);
         status.dhw_mode_status = raw;
     } catch (const ModbusException&) {
         status.dhw_mode_status = -1;
     }
 
     try {
-        raw = modbus_client_->readRegister(REG_ODU_INPUT_STATUS);
+        raw = readRegister(REG_ODU_INPUT_STATUS);
         status.odu_input_status = raw;
     } catch (const ModbusException&) {
         status.odu_input_status = 0;
     }
 
     try {
-        raw = modbus_client_->readRegister(REG_COMPRESSOR_RUNTIME);
+        raw = readRegister(REG_COMPRESSOR_RUNTIME);
         status.compressor_runtime_h = raw;
     } catch (const ModbusException&) {
         status.compressor_runtime_h = 0;
     }
 
     try {
-        raw = modbus_client_->readRegister(REG_PUMP_RUNTIME);
+        raw = readRegister(REG_PUMP_RUNTIME);
         status.pump_runtime_h = raw;
     } catch (const ModbusException&) {
         status.pump_runtime_h = 0;
@@ -589,7 +593,9 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
     status.device_online = ok;
     if (ok) {
         saved_targets_initialized_ = true;
+        diagnostic_monitor_.sampleOptional(*modbus_client_, nowMs());
     }
+    status.diagnostics = diagnostic_monitor_.snapshot(nowMs());
     return ok;
 }
 

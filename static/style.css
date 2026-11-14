@@ -809,6 +809,30 @@ footer {
     cursor: pointer;
 }
 
+/* Read-only diagnostics: dense enough for comparisons, responsive on phones. */
+.diagnostics-heading { margin-bottom: 16px; }
+.diagnostics-heading h2 { display: flex; align-items: center; gap: 12px; }
+.diagnostics-heading p, .diagnostic-note { color: #9ca3af; font-size: 0.82rem; line-height: 1.5; margin-top: 10px; }
+.diagnostics-readonly { font-size: 0.7rem; font-weight: 500; color: #93c5fd; border: 1px solid #334155; padding: 4px 8px; border-radius: 12px; }
+.diagnostics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.diagnostics-grid .status-card { margin: 0; min-width: 0; }
+.diagnostics-grid h3 { font-size: 1rem; margin-bottom: 16px; }
+.diagnostic-wide { grid-column: 1 / -1; }
+.diagnostic-values { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 10px 16px; font-size: 0.88rem; margin: 0; }
+.diagnostic-values dt { color: #9ca3af; }
+.diagnostic-values dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.diagnostic-values dd[data-state="warning"], .diagnostic-alarm-list[data-state="warning"] { color: #fbbf24; }
+.diagnostic-alarm-list { white-space: pre-line; margin-top: 14px; font-size: 0.88rem; line-height: 1.6; }
+.diagnostic-table-scroll { overflow-x: auto; margin-top: 12px; }
+.diagnostic-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; text-align: left; }
+.diagnostic-table th, .diagnostic-table td { padding: 8px 6px; border-bottom: 1px solid #334155; }
+.diagnostic-table td { font-variant-numeric: tabular-nums; }
+.diagnostics-grid summary { cursor: pointer; margin-top: 14px; }
+@media (max-width: 700px) {
+    .diagnostics-grid { grid-template-columns: minmax(0, 1fr); }
+    .diagnostic-values { gap: 10px; font-size: 0.82rem; }
+}
+
 /* Mobile */
 @media (max-width: 600px) {
     .range-temps {

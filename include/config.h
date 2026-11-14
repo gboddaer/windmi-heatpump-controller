@@ -112,12 +112,10 @@ extern "C" {
 // documents 0x1006 as "Capacity of the unit" with values 4/6/8/10/12/14/16 = kW.
 // REG_DEVICE_TYPE is kept as alias for backwards compatibility.
 #define REG_DEVICE_TYPE           REG_UNIT_CAPACITY  // Alias: same register, old name
-#define REG_COMPRESSOR_FREQ       0x0017  // R  - Actual compressor frequency (1 Hz)
-// NOTE: Address 0x0017 is from hvdb gist; NOT confirmed in Rotenso Windmi manual.
-// Requires hardware validation. Alternative: 0x100F (required freq) may be more reliable.
-#define REG_WATER_FLOW            0x102A  // R  - Water flow feedback (m3/h × 100)
-// NOTE: Address 0x102A is from hvdb gist; NOT confirmed in Rotenso Windmi manual.
-// Required for COP calculation. Requires hardware validation.
+#define REG_COMPRESSOR_FREQ       0x0017  // R - Actual compressor speed, raw (scale unverified)
+// Original manual confirms address but prints contradictory temperature units.
+// 0x100F is required frequency *10; it is not actual compressor feedback.
+#define REG_WATER_FLOW            0x102A  // R - Water flow feedback (m3/h × 100), original manual
 #define REG_ACTUAL_CAPACITY_OUTPUT 0x1004  // R  - Actual capacity output
 #define REG_ODU_INPUT_STATUS      0x101F  // R  - Outdoor unit input status (bit flags)
 #define REG_COMPRESSOR_RUNTIME    0x0174  // R  - Compressor runtime (hours)

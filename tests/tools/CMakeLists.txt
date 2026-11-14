@@ -2,6 +2,8 @@ find_program(NODE_EXECUTABLE node)
 if(NODE_EXECUTABLE)
     add_test(NAME test_ui_power
         COMMAND ${NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_ui_power.cjs)
+    add_test(NAME test_ui_diagnostics
+        COMMAND ${NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_ui_diagnostics.cjs)
 endif()
 
 # probe_registers uses POSIX sockets (arpa/inet.h, unistd.h) — Linux/macOS only

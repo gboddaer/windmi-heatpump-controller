@@ -4,6 +4,7 @@
  */
 
 #include "web/WebServer.hpp"
+#include "web/DiagnosticsJson.hpp"
 #include "utils/Logger.hpp"
 #include "utils/LogTags.hpp"
 #include "utils/ScheduleConfig.hpp"
@@ -259,7 +260,7 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         "\"dhwEcoTarget\":%.1f,"
         "\"effectiveDhwTarget\":%.1f,"
         "\"waterControlPoint\":%.1f,"
-        "\"statusSequence\":%" PRIu64 "}\n",
+        "\"statusSequence\":%" PRIu64 "}",
         last_status_.dhw_tank_temp,
         last_status_.dhw_target,
         last_status_.leaving_water_temp,
@@ -313,7 +314,12 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         static_cast<uint64_t>(last_status_.status_sequence)
     );
 
-    sendJsonReply(c, 200, response);
+    // Diagnostics can exceed the legacy fixed buffer. Append using a dynamic
+    // string so a full register set cannot truncate the production JSON response.
+    std::string payload(response);
+    payload.pop_back();
+    payload += ",\"diagnostics\":" + diagnosticsJson(last_status_.diagnostics) + '}';
+    sendJsonReply(c, 200, payload.c_str());
 }
 
 void WebServer::apiSetDhwHandler(struct mg_connection* c, struct mg_str* body) {

@@ -52,8 +52,7 @@ const elements = {
     refreshCountdown: document.getElementById('refreshCountdown'),
     occupancyAwayBtn: document.getElementById('occupancyAwayBtn'),
     occupancySleepBtn: document.getElementById('occupancySleepBtn'),
-    occupancyHomeBtn: document.getElementById('occupancyHomeBtn'),
-    dhwModeValue: document.getElementById('dhwModeValue')
+    occupancyHomeBtn: document.getElementById('occupancyHomeBtn')
 };
 
 // State
@@ -358,22 +357,7 @@ function updateUI(status) {
     const heatingTargetDisplay = pendingHeatingTarget !== null ? pendingHeatingTarget : status.heatingTarget;
 
 
-    // Diagnostic values
-    if (status.dhwValveStatus !== undefined) {
-        const valveEl = document.getElementById('dhwValveValue');
-        if (valveEl) valveEl.textContent = status.dhwValveStatus === 0 ? 'Opened' : (status.dhwValveStatus === 1 ? 'Closed' : 'Unknown');
-    }
-    if (status.dhwModeStatus !== undefined) {
-        const dhwModeEl = document.getElementById('dhwModeValue');
-        if (dhwModeEl) {
-            const dhwModes = { 0: 'Eco', 1: 'Anti-Legionella', 2: 'Regular' };
-            dhwModeEl.textContent = dhwModes[status.dhwModeStatus] || 'Unknown';
-        }
-    }
-    if (status.actualCapacityOutput !== undefined) {
-        const capEl = document.getElementById('actualCapacityValue');
-        if (capEl) capEl.textContent = status.actualCapacityOutput;
-    }
+    DiagnosticsUI.update(status);
 
     // Occupancy mode from server (0=Away, 1=Sleep, 2=Home)
     if (status.occupancyMode !== undefined) {
@@ -461,6 +445,7 @@ async function fetchStatus() {
         updateUI(status);
     } catch (error) {
         console.error('Failed to fetch status:', error);
+        DiagnosticsUI.connectionError();
         elements.deviceStatus.textContent = 'Error';
         elements.deviceStatus.className = 'status-indicator offline';
         // Clear pending values so they don't block server updates

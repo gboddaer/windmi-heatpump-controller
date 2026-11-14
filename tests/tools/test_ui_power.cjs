@@ -8,9 +8,9 @@ const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root, 'static/index.html'), 'utf8');
 const ids = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]);
 function element() {
-    return {textContent: '', value: '', style: {}, className: '',
+    return {textContent: '', value: '', style: {}, className: '', dataset: {},
         classList: {add() {}, remove() {}, toggle() {}},
-        addEventListener() {}, appendChild() {}, remove() {}};
+        addEventListener() {}, appendChild() {}, replaceChildren() {}, remove() {}};
 }
 const nodes = Object.fromEntries(ids.map(id => [id, element()]));
 const context = vm.createContext({console, setTimeout() {}, setInterval() {},
@@ -20,6 +20,7 @@ const context = vm.createContext({console, setTimeout() {}, setInterval() {},
 });
 let source = fs.readFileSync(path.join(root, 'static/app.js'), 'utf8');
 source = source.replace(/^init\(\);$/m, ''); // no network startup in unit tests
+vm.runInContext(fs.readFileSync(path.join(root, 'static/diagnostics.js'), 'utf8'), context);
 vm.runInContext(source, context);
 const status = {deviceOnline: true, mode: 'heat+dhw', runningStatus: 'heat',
     workingMode: 3, outdoorTemperature: 3, dhwTemperature: 49.7,
