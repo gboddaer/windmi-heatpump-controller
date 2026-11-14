@@ -58,6 +58,25 @@ TEST(DiagnosticRegistersTest, OptionalReadsAreBoundedAndDoNotRetryOrWrite) {
     EXPECT_EQ(c.writes, 0);
 }
 
+TEST(DiagnosticRegistersTest, ReadTimeJitterDoesNotSkipNormalPollsOrCauseCatchupBursts) {
+    DiagnosticClient c;
+    DiagnosticMonitor m;
+    m.sampleOptional(c, 0);
+    m.sampleOptional(c, 30010);
+    EXPECT_EQ(c.reads.size(), 4u);
+    m.sampleOptional(c, 60005); // only 29995 ms since the previous read
+    EXPECT_EQ(c.reads.size(), 6u);
+    m.sampleOptional(c, 60006); // repeated UI kick must not add traffic
+    EXPECT_EQ(c.reads.size(), 6u);
+    m.sampleOptional(c, 90009);
+    EXPECT_EQ(c.reads.size(), 8u);
+    m.sampleOptional(c, 900000); // missed periods are skipped, never caught up
+    EXPECT_EQ(c.reads.size(), 10u);
+    m.sampleOptional(c, 900001);
+    EXPECT_EQ(c.reads.size(), 10u);
+    EXPECT_EQ(c.writes, 0);
+}
+
 TEST(DiagnosticRegistersTest, CurrentReadsAreCapturedWithoutDuplicateTraffic) {
     DiagnosticClient c;
     c.values[0x0017] = 280;

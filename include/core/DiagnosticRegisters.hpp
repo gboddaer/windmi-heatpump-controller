@@ -86,10 +86,14 @@ public:
         return value;
     }
     void sampleOptional(IModbusClient& client, uint64_t now_ms) {
-        // Kicks caused by UI commands must not accelerate optional polling.
-        if (polled_ && now_ms - last_poll_ms_ < 30000) return;
-        polled_ = true;
-        last_poll_ms_ = now_ms;
+        // Keep a stable deadline: register-read jitter must not turn a normal
+        // 30-second tick into a skipped poll. Skip missed periods without a burst.
+        if (!polled_) {
+            next_poll_ms_ = now_ms;
+            polled_ = true;
+        }
+        if (now_ms < next_poll_ms_) return;
+        next_poll_ms_ += ((now_ms - next_poll_ms_) / 30000 + 1) * 30000;
         sampleNext(client, DiagnosticGroup::Alarm, alarm_cursor_, now_ms);
         sampleNext(client, DiagnosticGroup::Auxiliary, auxiliary_cursor_, now_ms);
     }
@@ -112,7 +116,7 @@ private:
     DiagnosticSnapshot state_;
     size_t alarm_cursor_ = 0, auxiliary_cursor_ = 0;
     bool polled_ = false;
-    uint64_t last_poll_ms_ = 0;
+    uint64_t next_poll_ms_ = 0;
 };
 }
 #endif
