@@ -111,6 +111,8 @@
                         </label>
                     </div>
                     <div id="scheduleState" class="schedule-state"></div>
+                    <button id="resumeScheduleBtn" class="btn btn-resume" hidden>Resume schedule</button>
+                    <p class="schedule-help">Daily schedule, using the controller’s local time. Gaps keep the last settings. Manual mode or temperature changes pause automation until you press Resume.</p>
                 </section>
 
                 <section class="schedule-list">
@@ -127,8 +129,9 @@
                             <input type="time" id="editStart" value="08:00">
                         </div>
                         <div class="form-row">
-                            <label>End</label>
+                            <label>End (00:00 = end of day)</label>
                             <input type="time" id="editEnd" value="10:00">
+                            <small class="schedule-help">An earlier end crosses midnight. 00:00 ends at 24:00; 00:00–00:00 covers the full day.</small>
                         </div>
                         <div class="form-row">
                             <label>Mode</label>

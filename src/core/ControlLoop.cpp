@@ -17,6 +17,13 @@
 #include <ctime>
 
 namespace windmi {
+static void copyScheduleMetadata(StatusSnapshot& status, const ScheduleState& state) {
+    status.schedule_enabled = state.enabled;
+    status.schedule_paused = state.paused;
+    status.schedule_revision = state.revision;
+    status.schedule_instance_id = state.instanceId;
+    status.schedule_persistence_error = state.persistenceError;
+}
 
 namespace {
 /** How many consecutive ticks must agree that a setpoint moved before we write ours back. */
@@ -596,6 +603,7 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         diagnostic_monitor_.sampleOptional(*modbus_client_, nowMs());
     }
     status.diagnostics = diagnostic_monitor_.snapshot(nowMs());
+    copyScheduleMetadata(status, scheduler_.snapshot());
     return ok;
 }
 
@@ -609,6 +617,10 @@ void ControlLoop::processCommands() {
         WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "Processing command #%d - type=%d", cmd_count,
                static_cast<int>(cmd.type));
 
+        // The web thread is the sole queue producer. Scheduled intents are
+        // applied directly below and therefore can never pause themselves.
+        if (cmd.type == CommandType::CMD_SET_DHW_TEMP || cmd.type == CommandType::CMD_SET_HEATING_TEMP ||
+            cmd.type == CommandType::CMD_SET_RUNNING_MODE) scheduler_.pause();
         switch (cmd.type) {
             case CommandType::CMD_SET_DHW_TEMP:
                 WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_DHW_TEMP, temp=%.1f C", cmd.float_val);
@@ -695,6 +707,43 @@ void ControlLoop::processCommands() {
     }
 }
 
+void ControlLoop::updateSchedule(StatusSnapshot& status, int minute) {
+    const auto state = scheduler_.snapshot();
+    copyScheduleMetadata(status, state);
+    ScheduleRange range;
+    status.schedule_active = Scheduler::evaluate(state, minute, range);
+    if (!status.schedule_active) { schedule_was_active_ = false; return; }
+    const bool changed = !schedule_was_active_ || state.revision != last_schedule_revision_ ||
+        range.startMinutes != lastScheduleRange_.startMinutes || range.endMinutes != lastScheduleRange_.endMinutes ||
+        range.mode != lastScheduleRange_.mode || range.heatingTemp != lastScheduleRange_.heatingTemp ||
+        range.dhwTemp != lastScheduleRange_.dhwTemp;
+    schedule_was_active_ = true;
+    if (!changed) return;
+    status.schedule_pending = true;
+    if (status.running_status == MODE_STATUS_DEFROST || status.running_status == MODE_STATUS_ANTIFREEZE) return;
+    // Never feed commands back into the SPSC queue from its consumer thread.
+    // Targets precede enabling a different service; Off must not depend on an
+    // unrelated target write succeeding. The arbiter remains the only automatic
+    // native-mode selector, preserving DHW demand priority.
+    if (range.mode == 0) desired_working_mode_ = 0;
+    const bool dhw_ok = setDhwTarget(range.dhwTemp) == 0;
+    if (dhw_ok) { saved_dhw_target_ = range.dhwTemp; status.dhw_target = range.dhwTemp; }
+    const bool heat_ok = setHeatingTarget(range.heatingTemp) == 0;
+    if (heat_ok) {
+        saved_heating_target_ = range.heatingTemp;
+        last_heating_target_ = range.heatingTemp;
+        status.heating_target = range.heatingTemp;
+    }
+    if (!dhw_ok || !heat_ok) return; // Retry the same revision next normal tick.
+    desired_working_mode_ = range.mode;
+    fireSettingsCallback();
+    lastScheduleRange_ = range;
+    last_schedule_revision_ = state.revision;
+    status.schedule_pending = false;
+    WINDMI_LOG_INFO(LOG_TAG_SCHEDULER, "Applied schedule revision %llu: mode=%d, heat=%.1f, dhw=%.1f",
+        static_cast<unsigned long long>(state.revision), range.mode, range.heatingTemp, range.dhwTemp);
+}
+
 void ControlLoop::applyControlLogic(StatusSnapshot& status) {
     // Determine what device mode we should be in
     // ---- Demand arbiter: domestic hot water first, heating in the gaps ----
@@ -777,6 +826,8 @@ void ControlLoop::applyControlLogic(StatusSnapshot& status) {
     status.unit_actuating = unit_actuating_;
     status.effective_dhw_target = effective_dhw_target_c_;
 
+    // Protection also blocks automatic target restoration, not only mode writes.
+    if (blocked) return;
     // Enforce target temperature overrides based on working mode
     switch (desired_working_mode_) {
         case 1:  // DHW-only: native mode 5 does the work; the user's setpoints stay
@@ -883,67 +934,21 @@ void ControlLoop::threadFunc() {
         // Read current status
         StatusSnapshot status{};
         if (readStatus(status)) {
-            // Evaluate schedule
-            ScheduleRange currentRange{};
-            bool scheduleChanged = false;
-            if (scheduler_.isEnabled() && !scheduler_.isPaused()) {
-                std::time_t now = std::time(nullptr);
-                struct tm tmBuf;
+            std::time_t now = std::time(nullptr);
+            struct tm tmBuf;
 #if defined(_WIN32) || defined(_WIN64)
-                localtime_s(&tmBuf, &now);
+            localtime_s(&tmBuf, &now);
 #else
-                localtime_r(&now, &tmBuf);
+            localtime_r(&now, &tmBuf);
 #endif
-                int minutes = tmBuf.tm_hour * 60 + tmBuf.tm_min;
-
-                if (scheduler_.evaluate(minutes, currentRange)) {
-                    status.schedule_active = true;
-                    status.schedule_paused = false;
-
-                    // Check if the active range changed from last tick
-                    if (lastScheduleRange_.startMinutes == 0 && lastScheduleRange_.endMinutes == 0) {
-                        scheduleChanged = true; // First run
-                    } else if (currentRange.startMinutes != lastScheduleRange_.startMinutes ||
-                               currentRange.mode != lastScheduleRange_.mode) {
-                        scheduleChanged = true;
-                    }
-                    lastScheduleRange_ = currentRange;
-
-                    // Push commands if schedule changed
-                    if (scheduleChanged) {
-                        WINDMI_LOG_INFO(LOG_TAG_SCHEDULER, "Schedule change at %d min: mode=%d, heat=%.1f, dhw=%.1f",
-                                       minutes, currentRange.mode,
-                                       currentRange.heatingTemp, currentRange.dhwTemp);
-
-                        Command modeCmd;
-                        modeCmd.type = CommandType::CMD_SET_RUNNING_MODE;
-                        modeCmd.int_val = currentRange.mode;
-                        cmd_queue_->push(modeCmd);
-
-                        Command heatCmd;
-                        heatCmd.type = CommandType::CMD_SET_HEATING_TEMP;
-                        heatCmd.float_val = currentRange.heatingTemp;
-                        cmd_queue_->push(heatCmd);
-
-                        Command dhwCmd;
-                        dhwCmd.type = CommandType::CMD_SET_DHW_TEMP;
-                        dhwCmd.float_val = currentRange.dhwTemp;
-                        cmd_queue_->push(dhwCmd);
-
-                        kick();
-                    }
-                } else {
-                    status.schedule_active = false;
-                }
-            } else {
-                status.schedule_active = false;
-                status.schedule_paused = scheduler_.isPaused();
-            }
+            const int test_minute = schedule_minute_for_testing_.load();
+            updateSchedule(status, test_minute >= 0 ? test_minute : tmBuf.tm_hour * 60 + tmBuf.tm_min);
 
             // Integrate the observed machine state, before any arbiter writes.
             updateCycleCop(status);
             // Apply control logic
             applyControlLogic(status);
+            if (status.schedule_active && current_mode_ != requested_device_mode_) status.schedule_pending = true;
 
             // Set working mode for status reporting
             status.working_mode = desired_working_mode_;
@@ -1019,6 +1024,7 @@ void ControlLoop::publishOfflineStatus() {
     status.device_online = false;
     status.working_mode = desired_working_mode_;
     updateCycleCop(status);
+    copyScheduleMetadata(status, scheduler_.snapshot());
     status.status_sequence = ++status_sequence_;
     status_queue_->push(status);
 }
@@ -1046,15 +1052,16 @@ void ControlLoop::updateChargeWatchdog(const StatusSnapshot& status) {
                           requested_device_mode_ == MODE_SET_DHW_ONLY);
     const uint64_t now = nowMs();
 
-    if (!granted || status.dhw_tank_temp <= 0.0f) {
+    const bool demanding = tank_state_ == TankState::Calling || tank_state_ == TankState::SatisfiedCandidate;
+    if (!granted || !demanding || status.dhw_tank_temp <= 0.0f) {
         if (dhw_sensor_fault_suspected_) {
-            WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW charge watchdog cleared: not charging");
+            WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "DHW charge watchdog cleared: charge satisfied or no longer granted");
         }
         charge_started_ms_ = 0;
         charge_start_c_ = -1.0f;
         dhw_running_s_ = 0;
         charge_sample_ms_ = 0;
-        charge_was_actuating_ = false;
+        charge_was_compressing_ = false;
         dhw_sensor_fault_suspected_ = false;
         return;
     }
@@ -1064,13 +1071,15 @@ void ControlLoop::updateChargeWatchdog(const StatusSnapshot& status) {
         charge_start_c_ = status.dhw_tank_temp;
     }
 
-    // Compressor minutes only. An interval counts when both ends of it saw the unit
-    // moving heat, so an idle stretch between two samples is not billed to the charge.
-    if (unit_actuating_ && charge_was_actuating_ && charge_sample_ms_ != 0) {
+    // One unsatisfied charge, not the lifetime of mode 5. Pump circulation,
+    // heating and defrost are not compressor minutes spent charging the tank.
+    const bool compressing_dhw = status.compressor_freq_valid && status.compressor_freq > 0 &&
+                                 status.running_status == MODE_STATUS_DHW;
+    if (compressing_dhw && charge_was_compressing_ && charge_sample_ms_ != 0) {
         dhw_running_s_ += static_cast<int>((now - charge_sample_ms_) / 1000u);
     }
     charge_sample_ms_ = now;
-    charge_was_actuating_ = unit_actuating_;
+    charge_was_compressing_ = compressing_dhw;
 
     if (dhw_sensor_fault_suspected_) {
         return;   // said it once; saying it every thirty seconds is noise
@@ -1079,9 +1088,9 @@ void ControlLoop::updateChargeWatchdog(const StatusSnapshot& status) {
     if (chargeIsStalled(arbitration_, dhw_running_s_, charge_start_c_, status.dhw_tank_temp)) {
         dhw_sensor_fault_suspected_ = true;
         WINDMI_LOG_ERROR(LOG_TAG_CONTROLLOOP,
-                         "DHW charge watchdog: the compressor ran %d min for domestic hot water and "
-                         "the tank went %.1f -> %.1f C. Suspect the tank sensor or a unit that cannot "
-                         "make heat. Space heating is NOT being relieved.",
+                         "DHW charge watchdog: observed %d compressor min in one unsatisfied DHW charge; "
+                         "the tank went %.1f -> %.1f C. Low net rise may reflect hot-water use, "
+                         "a sensor or a charging problem. Space heating is NOT being relieved.",
                          dhw_running_s_ / 60, charge_start_c_, status.dhw_tank_temp);
     }
 }

@@ -94,7 +94,7 @@ const DiagnosticsUI = (() => {
         set('diagSchedule', live ? schedule + ' / ' + (['Away', 'Sleep', 'Home'][status.occupancyMode] || 'Unknown') : missing);
         set('diagTankReads', plain(status.tankReadFailures), live && status.tankReadFailures > 0);
         set('diagWatchdog', !live || typeof status.dhwSensorFaultSuspected !== 'boolean' ? missing :
-            status.dhwSensorFaultSuspected ? 'Insufficient DHW progress — sensor/charge problem suspected' :
+            status.dhwSensorFaultSuspected ? 'Prolonged DHW demand with low net tank rise — check hot-water use and charging' :
                 'No progress warning reported', live && status.dhwSensorFaultSuspected);
 
         set('diagCompressor', fmt(get('compressorSpeed', status.compressorFrequency > 0 ? status.compressorFrequency : undefined), n => n + ' raw (scale unverified)'));

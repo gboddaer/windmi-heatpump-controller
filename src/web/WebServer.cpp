@@ -248,6 +248,11 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         "\"occupancyMode\":%d,"
         "\"scheduleActive\":%s,"
         "\"schedulePaused\":%s,"
+        "\"scheduleEnabled\":%s,"
+        "\"schedulePending\":%s,"
+        "\"schedulePersistenceError\":%s,"
+        "\"scheduleRevision\":%" PRIu64 ","
+        "\"scheduleInstanceId\":\"%s\","
         "\"dhwCalling\":%s,"
         "\"dhwStateKnown\":%s,"
         "\"requestedDeviceMode\":\"%s\","
@@ -299,6 +304,11 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         last_status_.occupancy_mode,
         last_status_.schedule_active ? "true" : "false",
         last_status_.schedule_paused ? "true" : "false",
+        last_status_.schedule_enabled ? "true" : "false",
+        last_status_.schedule_pending ? "true" : "false",
+        last_status_.schedule_persistence_error ? "true" : "false",
+        static_cast<uint64_t>(last_status_.schedule_revision),
+        last_status_.schedule_instance_id.c_str(),
         last_status_.dhw_calling ? "true" : "false",
         last_status_.dhw_state_known ? "true" : "false",
         mode_to_string(last_status_.requested_device_mode),
@@ -505,21 +515,9 @@ void WebServer::apiSetOccupancyHandler(struct mg_connection* c, struct mg_str* b
 
 // ---- Schedule API handlers ----
 
-static std::string rangesToJson(const std::vector<ScheduleRange>& ranges) {
-    std::ostringstream oss;
-    oss << "[";
-    for (size_t i = 0; i < ranges.size(); ++i) {
-        if (i > 0) oss << ",";
-        const auto& r = ranges[i];
-        oss << "{\"start\":" << r.startMinutes
-            << ",\"end\":" << r.endMinutes
-            << ",\"mode\":" << r.mode
-            << ",\"heatingTemp\":" << r.heatingTemp
-            << ",\"dhwTemp\":" << r.dhwTemp
-            << "}";
-    }
-    oss << "]";
-    return oss.str();
+static std::string scheduleReply(const Scheduler& scheduler, bool success = false) {
+    auto json = ScheduleConfig::toJson(scheduler.snapshot(), true);
+    return success ? "{\"success\":true," + json.substr(1) : json;
 }
 
 void WebServer::apiScheduleGetHandler(struct mg_connection* c) {
@@ -528,12 +526,7 @@ void WebServer::apiScheduleGetHandler(struct mg_connection* c) {
         return;
     }
 
-    std::ostringstream json;
-    json << "{\"enabled\":" << (scheduler_->isEnabled() ? "true" : "false")
-         << ",\"paused\":" << (scheduler_->isPaused() ? "true" : "false")
-         << ",\"ranges\":" << rangesToJson(scheduler_->getRanges()) << "}";
-
-    sendJsonReply(c, 200, json.str().c_str());
+    sendJsonReply(c, 200, scheduleReply(*scheduler_).c_str());
 }
 
 void WebServer::apiScheduleSetHandler(struct mg_connection* c, struct mg_str* body) {
@@ -547,111 +540,20 @@ void WebServer::apiScheduleSetHandler(struct mg_connection* c, struct mg_str* bo
         return;
     }
 
-    // Parse enabled flag (accepts both JSON bool and JSON number)
-    {
-        bool enabledVal = false;
-        if (mg_json_get_bool(*body, "$.enabled", &enabledVal) >= 1) {
-            scheduler_->setEnabled(enabledVal);
-        } else {
-            double numVal = 0;
-            if (mg_json_get_num(*body, "$.enabled", &numVal) >= 1) {
-                scheduler_->setEnabled(numVal != 0);
-            }
-        }
-    }
-
-    // Parse ranges using hand-parsed approach (same as ScheduleConfig)
-    // For now, delegate to ScheduleConfig to parse the JSON body
-    std::string bodyStr(body->buf, body->len);
-    ScheduleConfig config;
-    // We can't parse from string directly, so we use a temp approach:
-    // Extract ranges array manually
-    std::vector<ScheduleRange> ranges;
-    size_t pos = bodyStr.find("\"ranges\"");
-    if (pos != std::string::npos) {
-        pos = bodyStr.find('[', pos);
-        if (pos != std::string::npos) {
-            int depth = 0;
-            size_t endPos = pos;
-            for (size_t i = pos; i < bodyStr.size(); ++i) {
-                if (bodyStr[i] == '[') depth++;
-                else if (bodyStr[i] == ']') {
-                    depth--;
-                    if (depth == 0) {
-                        endPos = i;
-                        break;
-                    }
-                }
-            }
-            std::string arrayContent = bodyStr.substr(pos, endPos - pos + 1);
-
-            // Parse each object
-            size_t objStart = 0;
-            while ((objStart = arrayContent.find('{', objStart)) != std::string::npos) {
-                size_t objEnd = arrayContent.find('}', objStart);
-                if (objEnd == std::string::npos) break;
-
-                ScheduleRange range;
-                std::string obj = arrayContent.substr(objStart, objEnd - objStart + 1);
-
-                // Helper lambda to extract a field
-                auto extractInt = [&](const std::string& key) -> std::optional<int> {
-                    std::string k = "\"" + key + "\"";
-                    size_t kp = obj.find(k);
-                    if (kp == std::string::npos) return std::nullopt;
-                    size_t cp = obj.find(':', kp + k.size());
-                    if (cp == std::string::npos) return std::nullopt;
-                    std::string val = obj.substr(cp + 1);
-                    // Trim whitespace and comma
-                    auto fs = val.find_first_not_of(" \t");
-                    if (fs == std::string::npos) return std::nullopt;
-                    val = val.substr(fs);
-                    auto ce = val.find_first_of(",}");
-                    if (ce != std::string::npos) val = val.substr(0, ce);
-                    try { return std::stoi(val); } catch (...) { return std::nullopt; }
-                };
-
-                auto extractFloat = [&](const std::string& key) -> std::optional<float> {
-                    std::string k = "\"" + key + "\"";
-                    size_t kp = obj.find(k);
-                    if (kp == std::string::npos) return std::nullopt;
-                    size_t cp = obj.find(':', kp + k.size());
-                    if (cp == std::string::npos) return std::nullopt;
-                    std::string val = obj.substr(cp + 1);
-                    auto fs = val.find_first_not_of(" \t");
-                    if (fs == std::string::npos) return std::nullopt;
-                    val = val.substr(fs);
-                    auto ce = val.find_first_of(",}");
-                    if (ce != std::string::npos) val = val.substr(0, ce);
-                    try { return std::stof(val); } catch (...) { return std::nullopt; }
-                };
-
-                auto s = extractInt("start");
-                auto e = extractInt("end");
-                auto m = extractInt("mode");
-                auto ht = extractFloat("heatingTemp");
-                auto dt = extractFloat("dhwTemp");
-
-                if (s && e && m) {
-                    range.startMinutes = *s;
-                    range.endMinutes = *e;
-                    range.mode = *m;
-                    if (ht) range.heatingTemp = *ht;
-                    if (dt) range.dhwTemp = *dt;
-                    ranges.push_back(range);
-                }
-
-                objStart = objEnd + 1;
-            }
-        }
-    }
-
-    if (!scheduler_->setRanges(ranges)) {
-        sendJsonReply(c, 422, "{\"error\":\"Invalid schedule ranges\"}");
+    ScheduleState candidate;
+    std::string error;
+    if (!ScheduleConfig::parseJson(std::string(body->buf, body->len), candidate, error)) {
+        const std::string reply = "{\"error\":\"" + error + "\"}";
+        sendJsonReply(c, 422, reply.c_str());
         return;
     }
-
-    sendJsonReply(c, 200, "{\"success\":true}");
+    // Never accept paused=false from an editor as an implicit Resume.
+    if (!scheduler_->replace(candidate.enabled, candidate.ranges)) {
+        sendJsonReply(c, 500, "{\"error\":\"Could not save schedule; previous configuration retained\"}");
+        return;
+    }
+    if (wake_callback_) wake_callback_();
+    sendJsonReply(c, 200, scheduleReply(*scheduler_, true).c_str());
 }
 
 void WebServer::apiScheduleToggleHandler(struct mg_connection* c, struct mg_str* body) {
@@ -660,20 +562,21 @@ void WebServer::apiScheduleToggleHandler(struct mg_connection* c, struct mg_str*
         return;
     }
 
-    // Accepts both JSON bool and JSON number
-    bool enabledVal = false;
-    if (mg_json_get_bool(*body, "$.enabled", &enabledVal) >= 1) {
-        scheduler_->setEnabled(enabledVal);
-        sendJsonReply(c, 200, "{\"success\":true}");
-    } else {
-        double numVal = 0;
-        if (mg_json_get_num(*body, "$.enabled", &numVal) >= 1) {
-            scheduler_->setEnabled(numVal != 0);
-            sendJsonReply(c, 200, "{\"success\":true}");
-        } else {
-            sendJsonReply(c, 400, "{\"error\":\"Missing enabled parameter\"}");
-        }
+    bool enabled = false;
+    if (!ScheduleConfig::parseEnabledJson(std::string(body->buf, body->len), enabled)) {
+        sendJsonReply(c, 400, "{\"error\":\"Enabled must be boolean or 0/1\"}");
+        return;
     }
+    if (enabled && scheduler_->getRanges().empty()) {
+        sendJsonReply(c, 422, "{\"error\":\"Cannot enable an empty schedule\"}");
+        return;
+    }
+    if (!scheduler_->setEnabled(enabled)) {
+        sendJsonReply(c, 500, "{\"error\":\"Could not save schedule; previous configuration retained\"}");
+        return;
+    }
+    if (wake_callback_) wake_callback_();
+    sendJsonReply(c, 200, scheduleReply(*scheduler_, true).c_str());
 }
 
 void WebServer::apiScheduleResumeHandler(struct mg_connection* c) {
@@ -682,8 +585,12 @@ void WebServer::apiScheduleResumeHandler(struct mg_connection* c) {
         return;
     }
 
-    scheduler_->resume();
-    sendJsonReply(c, 200, "{\"success\":true}");
+    if (!scheduler_->resume()) {
+        sendJsonReply(c, 500, "{\"error\":\"Could not save schedule; pause retained\"}");
+        return;
+    }
+    if (wake_callback_) wake_callback_();
+    sendJsonReply(c, 200, scheduleReply(*scheduler_, true).c_str());
 }
 
 } // namespace windmi

@@ -283,9 +283,12 @@ int main(int argc, char* argv[]) {
     windmi::ScheduleConfig scheduleConfig;
     std::string schedule_path = windmi::platform::get_home_dir() + "/.windmi/schedule.json";
     if (scheduleConfig.loadFromFile(schedule_path)) {
-        g_control_loop->scheduler().setRanges(scheduleConfig.getRanges());
-        g_control_loop->scheduler().setEnabled(scheduleConfig.isEnabled());
+        g_control_loop->scheduler().restore(scheduleConfig.state());
     }
+    g_control_loop->scheduler().setPersistenceHandler([schedule_path](const windmi::ScheduleState& state) {
+        windmi::ScheduleConfig candidate;
+        return candidate.setState(state) && candidate.saveToFile(schedule_path);
+    });
     // Domestic hot water always has priority; these are the margins it is
     // exercised with, not a switch for whether it applies.
     windmi::ArbitrationConfig arbitration;

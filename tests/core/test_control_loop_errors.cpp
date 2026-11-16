@@ -205,6 +205,7 @@ TEST(SchedulerIntegrationTest, SchedulerAccessibleFromControlLoop) {
 TEST(SchedulerIntegrationTest, SchedulerEnableDisable) {
     ControlLoop loop;
     Scheduler& sched = loop.scheduler();
+    sched.setRanges({{0,1440,3,40,50}});
     sched.setEnabled(true);
     EXPECT_TRUE(sched.isEnabled());
     sched.setEnabled(false);
@@ -214,6 +215,7 @@ TEST(SchedulerIntegrationTest, SchedulerEnableDisable) {
 TEST(SchedulerIntegrationTest, SchedulerPauseResume) {
     ControlLoop loop;
     Scheduler& sched = loop.scheduler();
+    sched.setRanges({{0,1440,3,40,50}});
     sched.setEnabled(true);
     sched.pause();
     EXPECT_TRUE(sched.isPaused());

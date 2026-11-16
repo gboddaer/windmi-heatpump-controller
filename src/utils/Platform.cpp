@@ -243,6 +243,14 @@ std::string get_home_dir() {
 #endif
 }
 
+bool atomic_replace_file(const std::string& source, const std::string& destination) {
+#ifdef _WIN32
+    return MoveFileExA(source.c_str(), destination.c_str(),
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    return std::rename(source.c_str(), destination.c_str()) == 0;
+#endif
+}
 std::string resolve_static_dir(const std::string& dir) {
 #ifdef _WIN32
     char exe_path[MAX_PATH];

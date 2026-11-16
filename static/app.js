@@ -23,6 +23,11 @@ let currentOccupancy = 'home'; // 'away', 'sleep', 'home'
 // Schedule state
 let scheduleData = { enabled: false, paused: false, ranges: [] };
 let editingRangeIndex = -1; // -1 means adding a new range
+let scheduleLoaded = false;
+let scheduleBusy = false;
+let scheduleLoadError = '';
+let scheduleLoadPromise = null;
+let scheduleRuntime = null;
 
 // DOM Elements
 const elements = {
@@ -372,10 +377,7 @@ function updateUI(status) {
     }
 
     // Schedule state from status
-    if (status.scheduleActive !== undefined) {
-        scheduleData.paused = status.schedulePaused || false;
-        renderSchedule();
-    }
+    if (status.scheduleActive !== undefined) updateScheduleStatus(status);
 
     // Last update
     const now = new Date();
@@ -482,14 +484,51 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 // ---- Schedule Functions ----
 
-async function loadSchedule() {
-    try {
-        const data = await apiGet(API_SCHEDULE_URL);
-        scheduleData = data;
-        renderSchedule();
-    } catch (e) {
-        console.error('Failed to load schedule:', e);
+function applyScheduleResponse(data) {
+    if (!data || typeof data.enabled !== 'boolean' || typeof data.paused !== 'boolean' || !Array.isArray(data.ranges))
+        throw new Error('Invalid schedule response');
+    if (data.instanceId && scheduleData.instanceId && data.instanceId !== scheduleData.instanceId) {
+        scheduleLoadError = 'Controller restarted — reload page before editing';
+        throw new Error(scheduleLoadError);
     }
+    if (Number.isInteger(data.revision) && Number.isInteger(scheduleData.revision) && data.revision < scheduleData.revision) return;
+    scheduleData = {...data, ranges: data.ranges.map(r => ({...r}))};
+    scheduleLoaded = true;
+    scheduleLoadError = '';
+    if (!scheduleRuntime || scheduleRuntime.revision !== data.revision) scheduleRuntime = null;
+}
+
+function loadSchedule() {
+    if (scheduleLoadPromise) return scheduleLoadPromise;
+    scheduleLoadPromise = (async () => {
+        try {
+            applyScheduleResponse(await apiGet(API_SCHEDULE_URL));
+        } catch (e) {
+            scheduleLoadError = 'Schedule unavailable — reload before editing';
+            console.error('Failed to load schedule:', e);
+        } finally {
+            scheduleLoadPromise = null;
+            renderSchedule();
+        }
+    })();
+    return scheduleLoadPromise;
+}
+
+function updateScheduleStatus(status) {
+    if (scheduleBusy) return;
+    const revision = status.scheduleRevision;
+    if (status.scheduleInstanceId && scheduleData.instanceId && status.scheduleInstanceId !== scheduleData.instanceId) {
+        scheduleLoadError = 'Controller restarted — reload page before editing';
+        renderSchedule();
+        return;
+    }
+    if (Number.isInteger(revision) && Number.isInteger(scheduleData.revision) && revision < scheduleData.revision) return;
+    if (typeof status.scheduleEnabled === 'boolean') scheduleData.enabled = status.scheduleEnabled;
+    scheduleData.paused = status.schedulePaused === true;
+    scheduleRuntime = {revision, active: status.scheduleActive, pending: status.schedulePending === true,
+        online: status.deviceOnline, persistenceError: status.schedulePersistenceError === true};
+    if (!scheduleLoaded || (Number.isInteger(revision) && revision !== scheduleData.revision)) loadSchedule();
+    renderSchedule();
 }
 
 function minutesToTime(m) {
@@ -499,8 +538,27 @@ function minutesToTime(m) {
 }
 
 function timeToMinutes(t) {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) return NaN;
     const [h, m] = t.split(':').map(Number);
     return h * 60 + m;
+}
+
+function validateScheduleRanges(ranges) {
+    const occupied = new Uint8Array(1440);
+    for (const r of ranges) {
+        if (!Number.isInteger(r.start) || r.start < 0 || r.start >= 1440 || !Number.isInteger(r.end) ||
+            r.end < 0 || r.end > 1440 || r.start === r.end) return 'Choose a valid, non-empty time range';
+        if (!Number.isInteger(r.mode) || r.mode < 0 || r.mode > 3) return 'Choose a valid mode';
+        if (!Number.isFinite(r.heatingTemp) || r.heatingTemp < 25 || r.heatingTemp > 63 ||
+            !Number.isFinite(r.dhwTemp) || r.dhwTemp < 40 || r.dhwTemp > 63)
+            return 'Heating must be 25–63 °C and DHW 40–63 °C';
+        for (let m = 0; m < 1440; m++) {
+            const inside = r.start < r.end ? m >= r.start && m < r.end : m >= r.start || m < r.end;
+            if (inside && occupied[m]) return 'Time ranges overlap, including across midnight';
+            if (inside) occupied[m] = 1;
+        }
+    }
+    return '';
 }
 
 function modeBadgeClass(mode) {
@@ -518,20 +576,50 @@ function modeLabel(mode) {
 function renderSchedule() {
     // Toggle
     const toggle = document.getElementById('scheduleEnabled');
-    if (toggle) toggle.checked = scheduleData.enabled;
+    const unavailable = !scheduleLoaded || Boolean(scheduleLoadError);
+    if (toggle) {
+        toggle.checked = scheduleData.enabled;
+        toggle.disabled = scheduleBusy || unavailable || (!scheduleData.enabled && scheduleData.ranges.length === 0);
+    }
+    const resume = document.getElementById('resumeScheduleBtn');
+    if (resume) {
+        resume.hidden = !scheduleData.paused;
+        resume.disabled = scheduleBusy || unavailable || !scheduleData.enabled;
+    }
+    for (const id of ['addRangeBtn', 'editSaveBtn', 'editDeleteBtn']) {
+        const button = document.getElementById(id);
+        if (button) button.disabled = scheduleBusy || unavailable;
+    }
+    for (const id of ['editStart', 'editEnd', 'editMode', 'editHeatingTemp', 'editDhwTemp', 'editCancelBtn']) {
+        const input = document.getElementById(id);
+        if (input) input.disabled = scheduleBusy;
+    }
 
     // State indicator
     const stateEl = document.getElementById('scheduleState');
     if (stateEl) {
-        if (scheduleData.enabled && scheduleData.paused) {
-            stateEl.textContent = 'Schedule paused — manual control active';
+        stateEl.className = 'schedule-state';
+        if (scheduleBusy) stateEl.textContent = 'Saving schedule…';
+        else if (scheduleLoadError) stateEl.textContent = scheduleLoadError;
+        else if (!scheduleLoaded) stateEl.textContent = 'Loading schedule…';
+        else if (!scheduleData.enabled) stateEl.textContent = scheduleData.paused ?
+            'Schedule disabled — manual pause retained; enable then Resume' : 'Schedule disabled';
+        else if (scheduleData.paused) {
+            stateEl.textContent = 'Schedule paused — manual control active; press Resume to continue';
             stateEl.className = 'schedule-state paused';
-        } else if (scheduleData.enabled) {
+        } else if (scheduleRuntime && scheduleRuntime.online === false)
+            stateEl.textContent = 'Schedule enabled — waiting for device connection';
+        else if (scheduleRuntime && scheduleRuntime.pending)
+            stateEl.textContent = 'Schedule active — device update pending';
+        else if (scheduleRuntime && scheduleRuntime.active === false)
+            stateEl.textContent = 'Schedule enabled — outside a configured range; holding last settings';
+        else if (scheduleRuntime && scheduleRuntime.active === true) {
             stateEl.textContent = 'Schedule active';
             stateEl.className = 'schedule-state active';
-        } else {
-            stateEl.textContent = 'Schedule disabled';
-            stateEl.className = 'schedule-state';
+        } else stateEl.textContent = 'Schedule enabled — awaiting controller update';
+        if (scheduleData.persistenceError || (scheduleRuntime && scheduleRuntime.persistenceError)) {
+            stateEl.textContent += ' · Warning: pause could not be saved; restart may lose the override';
+            stateEl.className = 'schedule-state paused';
         }
     }
 
@@ -548,18 +636,22 @@ function renderSchedule() {
     scheduleData.ranges.forEach((r, i) => {
         const card = document.createElement('div');
         card.className = 'schedule-range-card';
-        card.innerHTML = `
-            <span class="range-time">${minutesToTime(r.start)} – ${minutesToTime(r.end)}</span>
-            <span class="range-mode-badge ${modeBadgeClass(r.mode)}">${modeLabel(r.mode)}</span>
-            <span class="range-temps">H:${r.heatingTemp}° D:${r.dhwTemp}°</span>
-            <span class="range-edit-icon">✎</span>
-        `;
+        for (const [className, value] of [
+            ['range-time', minutesToTime(r.start) + ' – ' + minutesToTime(r.end)],
+            ['range-mode-badge ' + modeBadgeClass(r.mode), modeLabel(r.mode)],
+            ['range-temps', 'H:' + r.heatingTemp + '° D:' + r.dhwTemp + '°'], ['range-edit-icon', '✎']]) {
+            const span = document.createElement('span');
+            span.className = className;
+            span.textContent = value;
+            card.appendChild(span);
+        }
         card.addEventListener('click', () => openEditModal(i));
         container.appendChild(card);
     });
 }
 
 function openEditModal(index) {
+    if (scheduleBusy || !scheduleLoaded || scheduleLoadError) return;
     editingRangeIndex = index;
     const modal = document.getElementById('scheduleEditModal');
     const title = document.getElementById('editModalTitle');
@@ -570,7 +662,7 @@ function openEditModal(index) {
         title.textContent = 'Edit Range';
         deleteBtn.style.display = '';
         document.getElementById('editStart').value = minutesToTime(r.start);
-        document.getElementById('editEnd').value = minutesToTime(r.end);
+        document.getElementById('editEnd').value = minutesToTime(r.end === 1440 ? 0 : r.end);
         document.getElementById('editMode').value = r.mode;
         document.getElementById('editHeatingTemp').value = r.heatingTemp;
         document.getElementById('editDhwTemp').value = r.dhwTemp;
@@ -591,51 +683,48 @@ function closeEditModal() {
     editingRangeIndex = -1;
 }
 
-async function saveEditModal() {
-    const range = {
-        start: timeToMinutes(document.getElementById('editStart').value),
-        end: timeToMinutes(document.getElementById('editEnd').value),
-        mode: parseInt(document.getElementById('editMode').value),
-        heatingTemp: parseFloat(document.getElementById('editHeatingTemp').value),
-        dhwTemp: parseFloat(document.getElementById('editDhwTemp').value)
-    };
-
-    if (editingRangeIndex >= 0) {
-        scheduleData.ranges[editingRangeIndex] = range;
-    } else {
-        scheduleData.ranges.push(range);
-    }
-
-    // Sort by start time
-    scheduleData.ranges.sort((a, b) => a.start - b.start);
-
+async function performScheduleAction(url, payload, message, closeEditor = false) {
+    if (scheduleBusy || !scheduleLoaded || scheduleLoadError) return;
+    scheduleBusy = true;
+    renderSchedule();
     try {
-        await apiPost(API_SCHEDULE_URL, {
-            enabled: scheduleData.enabled,
-            ranges: scheduleData.ranges
-        });
-        closeEditModal();
-        renderSchedule();
-        showNotification('Schedule range saved', 'success');
+        const response = await apiPost(url, payload);
+        // Older backends return only {success:true}; reload rather than guessing.
+        applyScheduleResponse(Array.isArray(response.ranges) ? response : await apiGet(API_SCHEDULE_URL));
+        if (closeEditor) closeEditModal();
+        showNotification(message, 'success');
     } catch (e) {
-        showNotification('Failed to save: ' + e.message, 'error');
+        showNotification('Schedule change failed: ' + e.message, 'error');
+    } finally {
+        scheduleBusy = false;
+        renderSchedule();
     }
 }
 
+async function saveEditModal() {
+    if (scheduleBusy || !scheduleLoaded || scheduleLoadError) return;
+    const end = timeToMinutes(document.getElementById('editEnd').value);
+    const range = {
+        start: timeToMinutes(document.getElementById('editStart').value),
+        end: end === 0 ? 1440 : end,
+        mode: Number(document.getElementById('editMode').value),
+        heatingTemp: Number(document.getElementById('editHeatingTemp').value),
+        dhwTemp: Number(document.getElementById('editDhwTemp').value)
+    };
+    const ranges = scheduleData.ranges.map(r => ({...r}));
+    if (editingRangeIndex >= 0) ranges[editingRangeIndex] = range;
+    else ranges.push(range);
+    ranges.sort((a, b) => a.start - b.start);
+    const error = validateScheduleRanges(ranges);
+    if (error) { showNotification(error, 'error'); return; }
+    await performScheduleAction(API_SCHEDULE_URL, {enabled: scheduleData.enabled, ranges}, 'Schedule range saved', true);
+}
+
 async function deleteEditModal() {
-    if (editingRangeIndex < 0) return;
-    scheduleData.ranges.splice(editingRangeIndex, 1);
-    try {
-        await apiPost(API_SCHEDULE_URL, {
-            enabled: scheduleData.enabled,
-            ranges: scheduleData.ranges
-        });
-        closeEditModal();
-        renderSchedule();
-        showNotification('Range deleted', 'success');
-    } catch (e) {
-        showNotification('Failed to delete: ' + e.message, 'error');
-    }
+    if (editingRangeIndex < 0 || scheduleBusy) return;
+    const ranges = scheduleData.ranges.filter((_, i) => i !== editingRangeIndex).map(r => ({...r}));
+    await performScheduleAction(API_SCHEDULE_URL, {enabled: ranges.length ? scheduleData.enabled : false, ranges},
+        ranges.length ? 'Range deleted' : 'Last range deleted; schedule disabled', true);
 }
 
 // Schedule event bindings
@@ -645,19 +734,21 @@ function bindScheduleEvents() {
     if (toggle) {
         toggle.addEventListener('change', async () => {
             const wanted = toggle.checked;
-            scheduleData.enabled = wanted;
-            try {
-                await apiPost(API_SCHEDULE_TOGGLE_URL, { enabled: wanted });
+            if (wanted && scheduleData.ranges.length === 0) {
+                showNotification('Add a time range before enabling the schedule', 'error');
                 renderSchedule();
-                showNotification('Schedule ' + (wanted ? 'enabled' : 'disabled'), 'success');
-            } catch (e) {
-                toggle.checked = !wanted;
-                scheduleData.enabled = !wanted;
-                renderSchedule();
-                showNotification('Failed to toggle: ' + e.message, 'error');
+                return;
             }
+            await performScheduleAction(API_SCHEDULE_TOGGLE_URL, {enabled: wanted},
+                'Schedule ' + (wanted ? 'enabled' : 'disabled'));
         });
     }
+
+    const resume = document.getElementById('resumeScheduleBtn');
+    if (resume) resume.addEventListener('click', async () => {
+        if (!scheduleData.enabled) return;
+        await performScheduleAction(API_SCHEDULE_RESUME_URL, {}, 'Schedule resumed');
+    });
 
     // Add range button
     const addBtn = document.getElementById('addRangeBtn');

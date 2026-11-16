@@ -153,6 +153,11 @@ struct StatusSnapshot {
     // Schedule state
     bool schedule_active = false;
     bool schedule_paused = false;
+    bool schedule_enabled = false;
+    bool schedule_pending = false;
+    bool schedule_persistence_error = false;
+    uint64_t schedule_revision = 0;
+    std::string schedule_instance_id;
 };
 
 /**
@@ -277,6 +282,7 @@ public:
      * @brief Get reference to the internal scheduler
      */
     Scheduler& scheduler();
+    void setScheduleMinuteForTesting(int minute) { schedule_minute_for_testing_.store(minute); }
 
     /**
      * @brief Kick the control loop to wake it immediately
@@ -337,6 +343,7 @@ private:
     uint64_t nowMs() const;
     void updateChargeWatchdog(const StatusSnapshot& status);
     void updateCycleCop(StatusSnapshot& status);
+    void updateSchedule(StatusSnapshot& status, int minute);
 
     /**
      * Publish a snapshot that says the unit is not answering.
@@ -393,7 +400,7 @@ private:
     DiagnosticMonitor diagnostic_monitor_;
     float effective_dhw_target_c_ = 0.0f;
     uint64_t charge_sample_ms_ = 0;      ///< end of the last actuating charge sample
-    bool charge_was_actuating_ = false;
+    bool charge_was_compressing_ = false;
     int dhw_drift_ticks_ = 0;            ///< consecutive ticks of a divergent setpoint
     int heating_drift_ticks_ = 0;
     bool dhw_sensor_fault_suspected_ = false;
@@ -412,6 +419,9 @@ private:
     // Schedule
     Scheduler scheduler_;
     ScheduleRange lastScheduleRange_;
+    uint64_t last_schedule_revision_ = 0;
+    bool schedule_was_active_ = false;
+    std::atomic<int> schedule_minute_for_testing_{-1};
 };
 
 } // namespace windmi

@@ -54,6 +54,8 @@ assert.match(nodes.diagDeltaT.textContent, /-3.0/);
 assert.match(nodes.diagHardwareAlarmStatus.textContent, /No alarm bits set.*4\/4/);
 assert.match(nodes.diagInputs.textContent, /HP.*1/);
 assert.match(nodes.diagIpmReason.textContent, /not an active alarm/i);
+render({dhwSensorFaultSuspected: true});
+assert.match(nodes.diagWatchdog.textContent, /hot-water use/i, 'a progress warning is not proof of a sensor fault');
 render({acCurrent: 6.3, dcVoltage: 305, dcCurrent: 3.5}, {
     acCurrent: raw(0x1014, 12), acVoltage: raw(0x1016, 230),
     dcVoltage: raw(0x1017, 153), dcCurrent: raw(0x1015, 1)});

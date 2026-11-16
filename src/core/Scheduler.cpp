@@ -1,111 +1,118 @@
-/**
- * @file src/core/Scheduler.cpp
- * @brief Schedule evaluation engine implementation
- */
-
 #include "core/Scheduler.hpp"
+#include "config.h"
 #include "utils/Logger.hpp"
 #include "utils/LogTags.hpp"
-
-#include <algorithm>
-
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <utility>
 namespace windmi {
-
-Scheduler::Scheduler() = default;
-
+Scheduler::Scheduler() {
+    static std::atomic<unsigned long long> serial{0};
+    state_.instanceId = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+                        "-" + std::to_string(++serial);
+}
 bool Scheduler::validateRanges(const std::vector<ScheduleRange>& ranges) {
-    if (ranges.empty()) return false;
-
-    for (size_t i = 0; i < ranges.size(); ++i) {
-        const auto& r = ranges[i];
-        if (r.startMinutes < 0 || r.startMinutes >= 1440) return false;
-        if (r.endMinutes < 0 || r.endMinutes > 1440) return false;
-        // start == end is invalid (zero-length range)
-        if (r.startMinutes == r.endMinutes) return false;
-        if (r.mode < 0 || r.mode > 3) return false;
-    }
-
-    // Check for overlaps and that they're sorted by start
-    for (size_t i = 1; i < ranges.size(); ++i) {
-        if (ranges[i].startMinutes < ranges[i - 1].startMinutes) return false;
-        // If previous range doesn't wrap midnight, check normal overlap
-        if (ranges[i - 1].startMinutes < ranges[i - 1].endMinutes) {
-            if (ranges[i].startMinutes < ranges[i - 1].endMinutes) return false;
+    if (ranges.size() > 1440) return false;
+    std::array<bool, 1440> covered{};
+    int previousStart = -1;
+    for (const auto& r : ranges) {
+        if (r.startMinutes < 0 || r.startMinutes >= 1440 || r.endMinutes < 0 || r.endMinutes > 1440 ||
+            r.startMinutes == r.endMinutes || r.startMinutes < previousStart || r.mode < 0 || r.mode > 3 ||
+            !std::isfinite(r.heatingTemp) || r.heatingTemp < HEATING_TEMP_MIN || r.heatingTemp > HEATING_TEMP_MAX ||
+            !std::isfinite(r.dhwTemp) || r.dhwTemp < DHW_TEMP_MIN || r.dhwTemp > DHW_TEMP_MAX) return false;
+        previousStart = r.startMinutes;
+        for (int minute = 0; minute < 1440; ++minute) {
+            const bool inside = r.startMinutes < r.endMinutes ?
+                minute >= r.startMinutes && minute < r.endMinutes :
+                minute >= r.startMinutes || minute < r.endMinutes;
+            if (!inside) continue;
+            if (covered[minute]) return false;
+            covered[minute] = true;
         }
     }
-
     return true;
 }
-
+ScheduleState Scheduler::snapshot() const { LockGuard lock(mutex_); return state_; }
+std::vector<ScheduleRange> Scheduler::getRanges() const { return snapshot().ranges; }
+bool Scheduler::isEnabled() const { return snapshot().enabled; }
+bool Scheduler::isPaused() const { return snapshot().paused; }
+void Scheduler::setPersistenceHandler(PersistenceHandler handler) {
+    LockGuard lock(mutex_);
+    persist_ = std::move(handler);
+}
+bool Scheduler::commitLocked(ScheduleState candidate) {
+    if (!validateRanges(candidate.ranges) || (candidate.enabled && candidate.ranges.empty())) return false;
+    candidate.revision = state_.revision + 1;
+    candidate.persistenceError = false;
+    try {
+        if (persist_ && !persist_(candidate)) return false;
+    } catch (...) {
+        WINDMI_LOG_ERROR(LOG_TAG_SCHEDULER, "Schedule persistence failed; candidate not published");
+        return false;
+    }
+    state_ = std::move(candidate);
+    return true;
+}
+bool Scheduler::replace(bool enabled, const std::vector<ScheduleRange>& ranges) {
+    LockGuard lock(mutex_);
+    auto candidate = state_;
+    candidate.enabled = enabled;
+    candidate.ranges = ranges;
+    return commitLocked(std::move(candidate));
+}
 bool Scheduler::setRanges(const std::vector<ScheduleRange>& ranges) {
-    if (!validateRanges(ranges)) {
-        WINDMI_LOG_ERROR(LOG_TAG_SCHEDULER, "Invalid schedule ranges provided");
-        return false;
-    }
-
-    // Store sorted copy
-    ranges_ = ranges;
-    std::sort(ranges_.begin(), ranges_.end(),
-              [](const ScheduleRange& a, const ScheduleRange& b) {
-                  return a.startMinutes < b.startMinutes;
-              });
-
-    WINDMI_LOG_INFO(LOG_TAG_SCHEDULER, "Schedule updated with %zu ranges", ranges_.size());
-    return true;
+    LockGuard lock(mutex_);
+    auto candidate = state_;
+    candidate.ranges = ranges;
+    if (ranges.empty()) candidate.enabled = false;
+    return commitLocked(std::move(candidate));
 }
-
-const std::vector<ScheduleRange>& Scheduler::getRanges() const {
-    return ranges_;
+bool Scheduler::setEnabled(bool enabled) {
+    LockGuard lock(mutex_);
+    auto candidate = state_;
+    candidate.enabled = enabled;
+    return commitLocked(std::move(candidate));
 }
-
-bool Scheduler::isEnabled() const {
-    return enabled_;
-}
-
-void Scheduler::setEnabled(bool enabled) {
-    enabled_ = enabled;
-    WINDMI_LOG_INFO(LOG_TAG_SCHEDULER, "Schedule %s", enabled ? "enabled" : "disabled");
-}
-
-bool Scheduler::isPaused() const {
-    return paused_;
-}
-
-void Scheduler::pause() {
-    paused_ = true;
-    WINDMI_LOG_INFO(LOG_TAG_SCHEDULER, "Schedule paused (user override)");
-}
-
-void Scheduler::resume() {
-    paused_ = false;
-    WINDMI_LOG_INFO(LOG_TAG_SCHEDULER, "Schedule resumed");
-}
-
-bool Scheduler::evaluate(int minutes, ScheduleRange& out) const {
-    if (!enabled_ || paused_ || ranges_.empty()) {
-        return false;
-    }
-
-    // Normalize minutes to 0-1439
-    minutes = ((minutes % 1440) + 1440) % 1440;
-
-    for (const auto& range : ranges_) {
-        if (range.startMinutes < range.endMinutes) {
-            // Normal range: start < end
-            if (minutes >= range.startMinutes && minutes < range.endMinutes) {
-                out = range;
-                return true;
-            }
-        } else {
-            // Wrapped range (crosses midnight): e.g., 1380 (23:00) to 360 (06:00)
-            if (minutes >= range.startMinutes || minutes < range.endMinutes) {
-                out = range;
-                return true;
-            }
-        }
-    }
-
+bool Scheduler::pause() {
+    LockGuard lock(mutex_);
+    if (!state_.enabled || (state_.paused && !state_.persistenceError)) return true;
+    auto candidate = state_;
+    candidate.paused = true;
+    if (commitLocked(std::move(candidate))) return true;
+    // A failed disk must never let automation fight a manual command.
+    state_.paused = true;
+    state_.persistenceError = true;
+    ++state_.revision;
+    WINDMI_LOG_ERROR(LOG_TAG_SCHEDULER, "Manual override paused scheduling in memory, but saving the pause failed");
     return false;
 }
-
-} // namespace windmi
+bool Scheduler::resume() {
+    LockGuard lock(mutex_);
+    auto candidate = state_;
+    candidate.paused = false;
+    return commitLocked(std::move(candidate));
+}
+bool Scheduler::restore(const ScheduleState& state) {
+    if (!validateRanges(state.ranges) || (state.enabled && state.ranges.empty())) return false;
+    LockGuard lock(mutex_);
+    auto candidate = state;
+    candidate.instanceId = state_.instanceId;
+    candidate.revision = state_.revision + 1;
+    candidate.persistenceError = false;
+    state_ = std::move(candidate);
+    return true;
+}
+bool Scheduler::evaluate(int minutes, ScheduleRange& out) const { return evaluate(snapshot(), minutes, out); }
+bool Scheduler::evaluate(const ScheduleState& state, int minutes, ScheduleRange& out) {
+    if (!state.enabled || state.paused) return false;
+    minutes = ((minutes % 1440) + 1440) % 1440;
+    for (const auto& r : state.ranges) {
+        const bool inside = r.startMinutes < r.endMinutes ? minutes >= r.startMinutes && minutes < r.endMinutes :
+                                                           minutes >= r.startMinutes || minutes < r.endMinutes;
+        if (inside) { out = r; return true; }
+    }
+    return false;
+}
+}

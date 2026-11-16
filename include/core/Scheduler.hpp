@@ -1,103 +1,55 @@
-/**
- * @file core/Scheduler.hpp
- * @brief Weekly schedule evaluation engine
- *
- * Manages time-based automation for heating and DHW.
- * Evaluates the current time against a list of schedule ranges
- * and returns the active range. Integrates with ControlLoop
- * to push mode/temperature commands automatically.
+/** @file core/Scheduler.hpp
+ * Daily local-time schedule. State is copied under a lock; no mutable references
+ * cross the web/control thread boundary. Gaps retain the last device settings.
  */
-
 #ifndef WINDMI_CORE_SCHEDULER_HPP
 #define WINDMI_CORE_SCHEDULER_HPP
-
+#include "utils/Platform.hpp"
 #include <cstdint>
-#include <vector>
+#include <functional>
 #include <string>
-
+#include <vector>
 namespace windmi {
-
-/**
- * @brief A single time range in the schedule
- *
- * Each range defines a mode and optional temperatures for a time window.
- * Ranges must not overlap and should cover 00:00–24:00 (0–1440 minutes).
- */
 struct ScheduleRange {
-    int startMinutes = 0;       // Minutes from midnight (0–1439)
-    int endMinutes = 0;         // Minutes from midnight (1–1440, 1440 = midnight)
-    int mode = 0;               // 0=OFF, 1=DHW Only, 2=Heating Only, 3=Heating+DHW
-    float heatingTemp = 40.0f;  // Heating target temperature (°C)
-    float dhwTemp = 50.0f;      // DHW target temperature (°C)
+    int startMinutes = 0;
+    int endMinutes = 0;
+    int mode = 0; // Working mode: 0 Off, 1 DHW, 2 Heating, 3 Both
+    float heatingTemp = 40.0f;
+    float dhwTemp = 50.0f;
 };
-
-/**
- * @brief Schedule evaluation engine
- *
- * Holds a list of non-overlapping time ranges and evaluates which
- * range is active for a given time of day. Supports enable/disable
- * and pause/resume for user override handling.
- */
+struct ScheduleState {
+    bool enabled = false;
+    bool paused = false;
+    std::vector<ScheduleRange> ranges;
+    uint64_t revision = 0;
+    std::string instanceId;
+    bool persistenceError = false;
+};
 class Scheduler {
 public:
+    using PersistenceHandler = std::function<bool(const ScheduleState&)>;
     Scheduler();
-
-    /**
-     * @brief Set the schedule ranges (replaces all existing ranges)
-     * @param ranges List of ranges (will be sorted by start time)
-     * @return true if all ranges are valid, false otherwise
-     */
-    bool setRanges(const std::vector<ScheduleRange>& ranges);
-
-    /**
-     * @brief Get the current schedule ranges
-     */
-    const std::vector<ScheduleRange>& getRanges() const;
-
-    /**
-     * @brief Check if the schedule is enabled
-     */
+    ScheduleState snapshot() const;
+    std::vector<ScheduleRange> getRanges() const;
     bool isEnabled() const;
-
-    /**
-     * @brief Enable or disable the schedule
-     */
-    void setEnabled(bool enabled);
-
-    /**
-     * @brief Check if the schedule is paused (user override)
-     */
     bool isPaused() const;
-
-    /**
-     * @brief Pause the schedule (set by manual user changes)
-     */
-    void pause();
-
-    /**
-     * @brief Resume the schedule
-     */
-    void resume();
-
-    /**
-     * @brief Evaluate which range is active at the given time
-     * @param minutes Minutes from midnight (0–1440)
-     * @param out Output: the active range
-     * @return true if a range was found, false if schedule is disabled/paused or no match
-     */
+    bool setRanges(const std::vector<ScheduleRange>& ranges);
+    bool setEnabled(bool enabled);
+    // Atomic configuration replacement; pause is preserved until explicit Resume.
+    bool replace(bool enabled, const std::vector<ScheduleRange>& ranges);
+    bool pause();
+    bool resume();
+    // Startup only: validated restoration before accepting HTTP requests.
+    bool restore(const ScheduleState& state);
+    void setPersistenceHandler(PersistenceHandler handler);
     bool evaluate(int minutes, ScheduleRange& out) const;
-
-    /**
-     * @brief Validate ranges: no overlaps, sorted, within bounds
-     */
+    static bool evaluate(const ScheduleState& state, int minutes, ScheduleRange& out);
     static bool validateRanges(const std::vector<ScheduleRange>& ranges);
-
 private:
-    std::vector<ScheduleRange> ranges_;
-    bool enabled_ = false;
-    bool paused_ = false;
+    bool commitLocked(ScheduleState candidate);
+    mutable Mutex mutex_;
+    ScheduleState state_;
+    PersistenceHandler persist_;
 };
-
-} // namespace windmi
-
-#endif // WINDMI_CORE_SCHEDULER_HPP
+}
+#endif

@@ -48,6 +48,17 @@ Older backends still display existing values where useful, qualified with "valid
 not reported". Fields needing new reads and hardware alarm coverage remain unavailable.
 A new backend read failure never falls back to an older zero-filled API field.
 
+## DHW progress watchdog
+
+The progress warning concerns one unsatisfied DHW demand, not time spent in native
+mode 5. Confirmed satisfaction resets its baseline/runtime and clears the warning,
+even if DHW-only mode remains selected. Count only observed compressor operation
+in DHW running status; pump-only circulation, heating and protection do not count.
+A prolonged charge with low net tank rise can reflect hot-water consumption as well
+as a sensor or charging problem: it is not proof of a faulty sensor. The legacy API
+flag remains `dhwSensorFaultSuspected` for compatibility. This watchdog only reports;
+it does not hand the compressor to space heating.
+
 ## Register evidence
 
 Original installation manual, English printed pp. 50–54:

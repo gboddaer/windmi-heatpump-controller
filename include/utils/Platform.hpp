@@ -25,6 +25,8 @@ std::string resolve_static_dir(const std::string& dir);
 
 /** Return the user's home directory path (e.g., /home/user or C:\\Users\\user). */
 std::string get_home_dir();
+// Atomically replace an existing destination with a same-filesystem temporary file.
+bool atomic_replace_file(const std::string& source, const std::string& destination);
 /** Cross-platform millisecond sleep. */
 void sleep_ms(unsigned int ms);
 

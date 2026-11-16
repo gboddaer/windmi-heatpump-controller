@@ -666,6 +666,8 @@ public:
         loop_.kick();
     }
 
+    Scheduler& schedule() { return loop_.scheduler(); }
+    void setMinute(int minute) { loop_.setScheduleMinuteForTesting(minute); }
     void enableDryRun() { loop_.setDryRun(true); }
 
     void advanceTime(int64_t ms) { loop_.advanceClockForTesting(ms); }
@@ -1119,8 +1121,8 @@ TEST(ChargeWatchdogLoopTest, NormalChargeRaisesNothing) {
 }
 
 TEST(ChargeWatchdogLoopTest, AChargeThatRunsAndDoesNotRiseRaisesTheFlagAndNeverRelieves) {
-    FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 300));
-    client.writeRegister(REG_COMPRESSOR_FREQ, 400);   // the compressor is genuinely working
+    FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 300, MODE_STATUS_DHW));
+    client.writeRegister(REG_COMPRESSOR_FREQ, 400);   // the compressor is genuinely charging DHW
 
     TickedLoop runner(client);
     ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
@@ -1149,6 +1151,58 @@ TEST(ChargeWatchdogLoopTest, AnIdleChargeIsNotBlamedOnTheSensor) {
 
     EXPECT_FALSE(snapshot.dhw_sensor_fault_suspected)
         << "a unit that never ran is not a tank sensor that lies; it is the park rule's case";
+}
+
+TEST(ChargeWatchdogLoopTest, DhwOnlySeparatesSatisfiedChargesInsteadOfSummingTheirRuntime) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 440, MODE_STATUS_DHW));
+    client.writeRegister(REG_COMPRESSOR_FREQ, 400);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(1, "dhw", 50, 45));
+    runner.tick();
+    runner.advanceTime(61 * 60 * 1000);
+    client.writeRegister(REG_DHW_TANK_TEMP, 500);
+    runner.tick(); runner.tick(); // confirmed satisfaction, mode stays DHW-only
+    EXPECT_FALSE(runner.latest().dhw_sensor_fault_suspected);
+    client.writeRegister(REG_DHW_TANK_TEMP, 440);
+    runner.tick();
+    runner.advanceTime(61 * 60 * 1000);
+    client.writeRegister(REG_DHW_TANK_TEMP, 480);
+    auto status = runner.tickSnapshot();
+    runner.stop();
+    EXPECT_FALSE(status.dhw_sensor_fault_suspected)
+        << "two separate healthy charges must not become one 122-minute stall";
+}
+TEST(ChargeWatchdogLoopTest, SatisfactionClearsLatchedWarningWithoutChangingDhwOnlyMode) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 440, MODE_STATUS_DHW));
+    client.writeRegister(REG_COMPRESSOR_FREQ, 400);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(1, "dhw", 50, 45));
+    runner.tick(); runner.advanceTime(121 * 60 * 1000); runner.tick();
+    EXPECT_TRUE(runner.latest().dhw_sensor_fault_suspected);
+    client.writeRegister(REG_DHW_TANK_TEMP, 500);
+    runner.tick(); auto status = runner.tickSnapshot();
+    runner.stop();
+    EXPECT_EQ(status.working_mode, 1);
+    EXPECT_FALSE(status.dhw_sensor_fault_suspected);
+}
+TEST(ChargeWatchdogLoopTest, PumpOnlyCirculationDoesNotCountAsCompressorChargeMinutes) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 440, MODE_STATUS_DHW));
+    client.writeRegister(REG_WATER_FLOW, 107);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(1, "dhw", 50, 45));
+    runner.tick(); runner.advanceTime(121 * 60 * 1000);
+    auto status = runner.tickSnapshot(); runner.stop();
+    EXPECT_FALSE(status.dhw_sensor_fault_suspected);
+}
+TEST(ChargeWatchdogLoopTest, DefrostDoesNotCountAsDhwCompressorChargeMinutes) {
+    FakeModbusClient client(arbiterRegisters(MODE_SET_DHW_ONLY, 440, MODE_STATUS_DHW));
+    client.writeRegister(REG_COMPRESSOR_FREQ, 400);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(1, "dhw", 50, 45));
+    runner.tick(); client.writeRegister(REG_RUNNING_STATUS, MODE_STATUS_DEFROST);
+    runner.advanceTime(121 * 60 * 1000);
+    auto status = runner.tickSnapshot(); runner.stop();
+    EXPECT_FALSE(status.dhw_sensor_fault_suspected);
 }
 
 // ---- A grant the unit does not act on must not lock the house out ----
@@ -1348,6 +1402,175 @@ TEST(DiagnosticLoopTest, CapturesExistingAndOptionalReadingsWithoutNewWrites) {
         EXPECT_NE(write.first, 0x1009);
         EXPECT_NE(write.first, 0x100E);
     }
+}
+
+TEST(ScheduleLoopSafetyTest, ManualTemperaturePausesUntilExplicitResume) {
+    FakeModbusClient client(fullRegisters());
+    TickedLoop runner(client);
+    runner.schedule().replace(true, {{0,1440,3,40,46}});
+    ASSERT_TRUE(runner.start(3, "dhw", 46, 40));
+    auto status = runner.tickSnapshot();
+    EXPECT_FALSE(status.schedule_paused); // scheduled updates are not manual commands
+    runner.sendDhwTarget(52);
+    status = runner.tickSnapshot();
+    EXPECT_TRUE(status.schedule_paused);
+    EXPECT_EQ(status.dhw_target, 52);
+    runner.schedule().setEnabled(false);
+    runner.schedule().setEnabled(true);
+    status = runner.tickSnapshot();
+    EXPECT_TRUE(status.schedule_paused);
+    EXPECT_EQ(status.dhw_target, 52);
+    runner.schedule().resume();
+    status = runner.tickSnapshot();
+    runner.stop();
+    EXPECT_FALSE(status.schedule_paused);
+    EXPECT_FALSE(status.schedule_pending);
+    EXPECT_EQ(status.dhw_target, 46);
+}
+TEST(ScheduleLoopSafetyTest, TemperatureOnlyEditAndReenableReapplyCurrentWindow) {
+    FakeModbusClient client(fullRegisters());
+    TickedLoop runner(client);
+    runner.schedule().replace(true, {{0,1440,3,40,46}});
+    ASSERT_TRUE(runner.start(3, "dhw", 46, 40));
+    runner.tick();
+    runner.schedule().replace(true, {{0,1440,3,44,52}});
+    auto status = runner.tickSnapshot();
+    EXPECT_EQ(status.heating_target, 44);
+    EXPECT_EQ(status.dhw_target, 52);
+    runner.schedule().setEnabled(false);
+    runner.sendWorkingMode(1);
+    status = runner.tickSnapshot();
+    EXPECT_EQ(status.working_mode, 1);
+    EXPECT_FALSE(status.schedule_paused);
+    runner.schedule().setEnabled(true);
+    status = runner.tickSnapshot();
+    runner.stop();
+    EXPECT_EQ(status.working_mode, 3);
+    EXPECT_TRUE(status.schedule_enabled);
+    EXPECT_FALSE(status.schedule_pending);
+}
+TEST(ScheduleLoopSafetyTest, ManualModePausesAndGapKeepsLastSettings) {
+    FakeModbusClient client(fullRegisters());
+    TickedLoop runner(client);
+    runner.setMinute(60);
+    runner.schedule().replace(true, {{0,120,2,42,48}});
+    ASSERT_TRUE(runner.start(1, "dhw", 46, 40));
+    auto status = runner.tickSnapshot();
+    EXPECT_EQ(status.working_mode, 2);
+    runner.setMinute(240);
+    status = runner.tickSnapshot();
+    EXPECT_FALSE(status.schedule_active);
+    EXPECT_EQ(status.working_mode, 2);
+    EXPECT_EQ(status.heating_target, 42);
+    runner.setMinute(60);
+    status = runner.tickSnapshot();
+    EXPECT_TRUE(status.schedule_active);
+    runner.sendWorkingMode(1);
+    status = runner.tickSnapshot();
+    runner.stop();
+    EXPECT_TRUE(status.schedule_paused);
+    EXPECT_EQ(status.working_mode, 1);
+}
+class ScheduleProtectedClient : public FakeModbusClient {
+public:
+    ScheduleProtectedClient() : FakeModbusClient(fullRegisters()) {}
+    std::atomic<int> operation{MODE_STATUS_DEFROST};
+    int16_t readRegister(uint16_t address) override {
+        if (address == REG_RUNNING_STATUS) return static_cast<int16_t>(operation.load());
+        return FakeModbusClient::readRegister(address);
+    }
+};
+TEST(ScheduleLoopSafetyTest, ScheduledWritesWaitForNativeProtectionToFinish) {
+    ScheduleProtectedClient client;
+    TickedLoop runner(client);
+    runner.schedule().replace(true, {{0,1440,2,44,52}});
+    ASSERT_TRUE(runner.start(1, "dhw", 46, 40));
+    auto status = runner.tickSnapshot();
+    EXPECT_TRUE(status.schedule_pending);
+    EXPECT_EQ(status.working_mode, 1);
+    EXPECT_FALSE(wrote(client, REG_HEATING_TARGET));
+    EXPECT_FALSE(wrote(client, REG_DHW_TARGET));
+    EXPECT_FALSE(wrote(client, REG_RUNNING_MODE));
+    client.operation = MODE_STATUS_HEAT;
+    status = runner.tickSnapshot();
+    runner.stop();
+    EXPECT_EQ(status.working_mode, 2);
+    EXPECT_EQ(status.heating_target, 44);
+    EXPECT_FALSE(status.schedule_pending);
+}
+class ScheduleWriteFailClient : public FakeModbusClient {
+public:
+    ScheduleWriteFailClient() : FakeModbusClient(fullRegisters()) {}
+    std::atomic<bool> fail{true};
+    void writeRegister(uint16_t address, uint16_t value) override {
+        if (address == REG_HEATING_TARGET && fail.load()) throw ModbusException("test target write failed");
+        FakeModbusClient::writeRegister(address, value);
+    }
+};
+TEST(ScheduleLoopSafetyTest, FailedTargetWriteRemainsPendingAndRetriesWithoutChangingMode) {
+    ScheduleWriteFailClient client;
+    TickedLoop runner(client);
+    runner.schedule().replace(true, {{0,1440,2,44,52}});
+    ASSERT_TRUE(runner.start(1, "dhw", 46, 40));
+    auto status = runner.tickSnapshot();
+    EXPECT_TRUE(status.schedule_pending);
+    EXPECT_EQ(status.working_mode, 1);
+    client.fail = false;
+    status = runner.tickSnapshot();
+    runner.stop();
+    EXPECT_EQ(status.working_mode, 2);
+    EXPECT_EQ(status.heating_target, 44);
+    EXPECT_FALSE(status.schedule_pending);
+}
+
+TEST(ScheduleLoopSafetyTest, TargetFailureDoesNotPreventScheduledOff) {
+    ScheduleWriteFailClient client;
+    TickedLoop runner(client);
+    runner.schedule().replace(true, {{0,1440,0,44,52}});
+    ASSERT_TRUE(runner.start(1, "dhw", 46, 40));
+    auto status = runner.tickSnapshot();
+    runner.stop();
+    EXPECT_EQ(status.working_mode, 0);
+    EXPECT_TRUE(wroteValue(client, REG_RUNNING_MODE, MODE_SET_OFF));
+    EXPECT_TRUE(status.schedule_pending);
+}
+
+class ProtectionDriftClient : public FakeModbusClient {
+public:
+    ProtectionDriftClient() : FakeModbusClient(fullRegisters()) {}
+    std::atomic<bool> protection{false};
+    int16_t readRegister(uint16_t address) override {
+        if (protection.load()) {
+            if (address == REG_RUNNING_STATUS) return MODE_STATUS_DEFROST;
+            if (address == REG_DHW_TARGET) return 500;
+            if (address == REG_HEATING_TARGET) return 450;
+        }
+        return FakeModbusClient::readRegister(address);
+    }
+};
+TEST(ScheduleLoopSafetyTest, ProtectionAlsoBlocksAutomaticTargetDriftRestoration) {
+    ProtectionDriftClient client;
+    TickedLoop runner(client);
+    runner.schedule().replace(true, {{0,1440,3,40,46}});
+    ASSERT_TRUE(runner.start(3, "dhw", 46, 40));
+    runner.tick();
+    const auto before = client.writes().size();
+    client.protection = true;
+    runner.tick(); runner.tick();
+    runner.stop();
+    EXPECT_EQ(client.writes().size(), before);
+}
+TEST(ScheduleLoopSafetyTest, OfflineStatusStillReportsEnabledAndPausedConfiguration) {
+    FakeModbusClient client({});
+    TickedLoop runner(client);
+    runner.schedule().replace(true, {{0,1440,3,40,46}});
+    runner.schedule().pause();
+    ASSERT_TRUE(runner.start(3, "dhw", 46, 40));
+    auto status = runner.tickSnapshot();
+    runner.stop();
+    EXPECT_FALSE(status.device_online);
+    EXPECT_TRUE(status.schedule_enabled);
+    EXPECT_TRUE(status.schedule_paused);
 }
 
 // ---- Liveness has to be in the payload ----

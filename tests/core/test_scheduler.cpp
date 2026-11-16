@@ -22,6 +22,7 @@ TEST(SchedulerTest, DefaultStateIsDisabled) {
 
 TEST(SchedulerTest, EnableDisableToggles) {
     Scheduler scheduler;
+    scheduler.setRanges({{0,1440,3,40,50}});
     scheduler.setEnabled(true);
     EXPECT_TRUE(scheduler.isEnabled());
     scheduler.setEnabled(false);
@@ -30,6 +31,7 @@ TEST(SchedulerTest, EnableDisableToggles) {
 
 TEST(SchedulerTest, PauseResume) {
     Scheduler scheduler;
+    scheduler.setRanges({{0,1440,3,40,50}});
     scheduler.setEnabled(true);
     EXPECT_FALSE(scheduler.isPaused());
     scheduler.pause();
@@ -46,6 +48,7 @@ TEST(SchedulerTest, EvaluateDisabledReturnsFalse) {
 
 TEST(SchedulerTest, EvaluatePausedReturnsFalse) {
     Scheduler scheduler;
+    scheduler.setRanges({{0,1440,3,40,50}});
     scheduler.setEnabled(true);
     scheduler.pause();
     ScheduleRange range{};
@@ -54,8 +57,8 @@ TEST(SchedulerTest, EvaluatePausedReturnsFalse) {
 
 TEST(SchedulerTest, EvaluateInRange) {
     Scheduler scheduler;
-    scheduler.setEnabled(true);
     scheduler.setRanges({{60, 600, 3, 40.0f, 45.0f}});
+    scheduler.setEnabled(true);
     
     ScheduleRange range{};
     EXPECT_TRUE(scheduler.evaluate(300, range));
@@ -66,8 +69,8 @@ TEST(SchedulerTest, EvaluateInRange) {
 
 TEST(SchedulerTest, EvaluateOutOfRange) {
     Scheduler scheduler;
-    scheduler.setEnabled(true);
     scheduler.setRanges({{60, 600, 3, 40.0f, 45.0f}});
+    scheduler.setEnabled(true);
     
     ScheduleRange range{};
     EXPECT_FALSE(scheduler.evaluate(0, range));
@@ -76,11 +79,11 @@ TEST(SchedulerTest, EvaluateOutOfRange) {
 
 TEST(SchedulerTest, EvaluateAdjacentRanges) {
     Scheduler scheduler;
-    scheduler.setEnabled(true);
     scheduler.setRanges({
         {0, 600, 3, 40.0f, 45.0f},
         {600, 900, 2, 35.0f, 42.0f}
     });
+    scheduler.setEnabled(true);
     
     ScheduleRange range{};
     EXPECT_TRUE(scheduler.evaluate(400, range));
@@ -92,9 +95,9 @@ TEST(SchedulerTest, EvaluateAdjacentRanges) {
 
 TEST(SchedulerTest, EvaluateWrappedRange) {
     Scheduler scheduler;
-    scheduler.setEnabled(true);
     // Range that wraps midnight (e.g., 23:00 to 06:00)
     scheduler.setRanges({{1380, 360, 2, 30.0f, 40.0f}});
+    scheduler.setEnabled(true);
     
     ScheduleRange range{};
     EXPECT_TRUE(scheduler.evaluate(0, range));     // Midnight
@@ -105,12 +108,12 @@ TEST(SchedulerTest, EvaluateWrappedRange) {
 
 TEST(SchedulerTest, EvaluateMultipleRanges) {
     Scheduler scheduler;
-    scheduler.setEnabled(true);
     scheduler.setRanges({
         {0, 120, 3, 40.0f, 45.0f},       // 00:00-02:00
         {480, 600, 3, 38.0f, 45.0f},     // 08:00-10:00
         {1080, 1200, 3, 42.0f, 45.0f}    // 18:00-20:00
     });
+    scheduler.setEnabled(true);
     
     ScheduleRange range{};
     EXPECT_TRUE(scheduler.evaluate(60, range));

@@ -1,70 +1,25 @@
-/**
- * @file utils/ScheduleConfig.hpp
- * @brief Schedule JSON persistence
- *
- * Loads and saves the schedule to a JSON file.
- * Schema: { "enabled": bool, "ranges": [...] }
- */
-
 #ifndef WINDMI_UTILS_SCHEDULE_CONFIG_HPP
 #define WINDMI_UTILS_SCHEDULE_CONFIG_HPP
-
-#include <string>
-#include <vector>
-#include <optional>
 #include "core/Scheduler.hpp"
-
+#include <string>
 namespace windmi {
-
-/**
- * @brief Schedule file persistence
- *
- * Reads and writes schedule.json containing enabled flag and range list.
- */
+// Single-threaded file/JSON adapter; live synchronized ownership belongs to Scheduler.
 class ScheduleConfig {
 public:
-    ScheduleConfig();
-
-    /**
-     * @brief Load schedule from file
-     * @param filename Path to schedule JSON file
-     * @return true if file was loaded successfully
-     */
     bool loadFromFile(const std::string& filename);
-
-    /**
-     * @brief Save schedule to file
-     * @param filename Path to schedule JSON file
-     * @return true if save was successful
-     */
     bool saveToFile(const std::string& filename) const;
-
-    /**
-     * @brief Get enabled state
-     */
-    bool isEnabled() const;
-
-    /**
-     * @brief Set enabled state
-     */
-    void setEnabled(bool enabled);
-
-    /**
-     * @brief Get schedule ranges
-     */
-    const std::vector<ScheduleRange>& getRanges() const;
-
-    /**
-     * @brief Set schedule ranges
-     * @return true if ranges are valid
-     */
+    bool isEnabled() const { return state_.enabled; }
+    bool isPaused() const { return state_.paused; }
+    void setEnabled(bool enabled) { state_.enabled = enabled; }
+    const std::vector<ScheduleRange>& getRanges() const { return state_.ranges; }
     bool setRanges(const std::vector<ScheduleRange>& ranges);
-
+    bool setState(const ScheduleState& state);
+    ScheduleState state() const { return state_; }
+    static bool parseJson(const std::string& json, ScheduleState& out, std::string& error);
+    static bool parseEnabledJson(const std::string& json, bool& enabled);
+    static std::string toJson(const ScheduleState& state, bool runtime = false);
 private:
-    bool enabled_ = false;
-    std::vector<ScheduleRange> ranges_;
+    ScheduleState state_;
 };
-
-} // namespace windmi
-
-#endif // WINDMI_UTILS_SCHEDULE_CONFIG_HPP
+}
+#endif
