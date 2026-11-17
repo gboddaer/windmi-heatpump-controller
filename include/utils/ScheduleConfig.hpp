@@ -15,11 +15,19 @@ public:
     bool setRanges(const std::vector<ScheduleRange>& ranges);
     bool setState(const ScheduleState& state);
     ScheduleState state() const { return state_; }
-    static bool parseJson(const std::string& json, ScheduleState& out, std::string& error);
+    bool hasDefaults() const { return has_defaults_; }
+    ScheduleState stateWithLegacyDefaults(const ScheduleDefaults& fallback) const {
+        auto result = state_;
+        if (!has_defaults_) result.defaults = Scheduler::validateDefaults(fallback) ? fallback : ScheduleDefaults{};
+        return result;
+    }
+    static bool parseJson(const std::string& json, ScheduleState& out, std::string& error, bool* defaultsPresent = nullptr);
+    static bool parseDefaultsJson(const std::string& json, ScheduleDefaults& out, std::string& error);
     static bool parseEnabledJson(const std::string& json, bool& enabled);
     static std::string toJson(const ScheduleState& state, bool runtime = false);
 private:
     ScheduleState state_;
+    bool has_defaults_ = false;
 };
 }
 #endif

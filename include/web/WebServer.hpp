@@ -75,6 +75,7 @@ private:
     void apiSetOccupancyHandler(struct mg_connection* c, struct mg_str* body);
     void apiScheduleGetHandler(struct mg_connection* c);
     void apiScheduleSetHandler(struct mg_connection* c, struct mg_str* body);
+    void apiScheduleDefaultsHandler(struct mg_connection* c, struct mg_str* body);
     void apiScheduleToggleHandler(struct mg_connection* c, struct mg_str* body);
     void apiScheduleResumeHandler(struct mg_connection* c);
 

@@ -13,15 +13,19 @@ Scheduler::Scheduler() {
     state_.instanceId = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
                         "-" + std::to_string(++serial);
 }
+bool Scheduler::validateDefaults(const ScheduleDefaults& value) {
+    return value.mode >= 0 && value.mode <= 3 && std::isfinite(value.heatingTemp) &&
+        value.heatingTemp >= HEATING_TEMP_MIN && value.heatingTemp <= HEATING_TEMP_MAX &&
+        std::isfinite(value.dhwTemp) && value.dhwTemp >= DHW_TEMP_MIN && value.dhwTemp <= DHW_TEMP_MAX;
+}
 bool Scheduler::validateRanges(const std::vector<ScheduleRange>& ranges) {
     if (ranges.size() > 1440) return false;
     std::array<bool, 1440> covered{};
     int previousStart = -1;
     for (const auto& r : ranges) {
         if (r.startMinutes < 0 || r.startMinutes >= 1440 || r.endMinutes < 0 || r.endMinutes > 1440 ||
-            r.startMinutes == r.endMinutes || r.startMinutes < previousStart || r.mode < 0 || r.mode > 3 ||
-            !std::isfinite(r.heatingTemp) || r.heatingTemp < HEATING_TEMP_MIN || r.heatingTemp > HEATING_TEMP_MAX ||
-            !std::isfinite(r.dhwTemp) || r.dhwTemp < DHW_TEMP_MIN || r.dhwTemp > DHW_TEMP_MAX) return false;
+            r.startMinutes == r.endMinutes || r.startMinutes < previousStart ||
+            !validateDefaults({r.mode,r.heatingTemp,r.dhwTemp})) return false;
         previousStart = r.startMinutes;
         for (int minute = 0; minute < 1440; ++minute) {
             const bool inside = r.startMinutes < r.endMinutes ?
@@ -43,7 +47,7 @@ void Scheduler::setPersistenceHandler(PersistenceHandler handler) {
     persist_ = std::move(handler);
 }
 bool Scheduler::commitLocked(ScheduleState candidate) {
-    if (!validateRanges(candidate.ranges) || (candidate.enabled && candidate.ranges.empty())) return false;
+    if (!validateRanges(candidate.ranges) || !validateDefaults(candidate.defaults)) return false;
     candidate.revision = state_.revision + 1;
     candidate.persistenceError = false;
     try {
@@ -62,11 +66,24 @@ bool Scheduler::replace(bool enabled, const std::vector<ScheduleRange>& ranges) 
     candidate.ranges = ranges;
     return commitLocked(std::move(candidate));
 }
+bool Scheduler::replace(bool enabled, const std::vector<ScheduleRange>& ranges, const ScheduleDefaults& defaults) {
+    LockGuard lock(mutex_);
+    auto candidate = state_;
+    candidate.enabled = enabled;
+    candidate.ranges = ranges;
+    candidate.defaults = defaults;
+    return commitLocked(std::move(candidate));
+}
 bool Scheduler::setRanges(const std::vector<ScheduleRange>& ranges) {
     LockGuard lock(mutex_);
     auto candidate = state_;
     candidate.ranges = ranges;
-    if (ranges.empty()) candidate.enabled = false;
+    return commitLocked(std::move(candidate));
+}
+bool Scheduler::setDefaults(const ScheduleDefaults& defaults) {
+    LockGuard lock(mutex_);
+    auto candidate = state_;
+    candidate.defaults = defaults;
     return commitLocked(std::move(candidate));
 }
 bool Scheduler::setEnabled(bool enabled) {
@@ -95,7 +112,7 @@ bool Scheduler::resume() {
     return commitLocked(std::move(candidate));
 }
 bool Scheduler::restore(const ScheduleState& state) {
-    if (!validateRanges(state.ranges) || (state.enabled && state.ranges.empty())) return false;
+    if (!validateRanges(state.ranges) || !validateDefaults(state.defaults)) return false;
     LockGuard lock(mutex_);
     auto candidate = state;
     candidate.instanceId = state_.instanceId;
@@ -103,6 +120,19 @@ bool Scheduler::restore(const ScheduleState& state) {
     candidate.persistenceError = false;
     state_ = std::move(candidate);
     return true;
+}
+ScheduleSelection Scheduler::select(const ScheduleState& state, int minutes) {
+    ScheduleSelection result;
+    if (!state.enabled || state.paused) return result;
+    ScheduleRange range;
+    if (evaluate(state, minutes, range)) {
+        result.source = ScheduleSource::Period;
+        result.settings = {range.mode,range.heatingTemp,range.dhwTemp};
+    } else {
+        result.source = ScheduleSource::Default;
+        result.settings = state.defaults;
+    }
+    return result;
 }
 bool Scheduler::evaluate(int minutes, ScheduleRange& out) const { return evaluate(snapshot(), minutes, out); }
 bool Scheduler::evaluate(const ScheduleState& state, int minutes, ScheduleRange& out) {

@@ -171,6 +171,10 @@ void WebServer::handleRequest(struct mg_connection* c, struct mg_http_message* h
         } else {
             sendJsonReply(c, 405, "{\"error\":\"Method not allowed\"}");
         }
+    } else if (mg_strcmp(hm->uri, mg_str("/api/schedule/defaults")) == 0) {
+        if (mg_strcasecmp(hm->method, mg_str("POST")) == 0) {
+            apiScheduleDefaultsHandler(c, &hm->body);
+        } else sendJsonReply(c, 405, "{\"error\":\"Method not allowed\"}");
     } else if (mg_strcmp(hm->uri, mg_str("/api/schedule/toggle")) == 0) {
         if (mg_strcasecmp(hm->method, mg_str("POST")) == 0) {
             apiScheduleToggleHandler(c, &hm->body);
@@ -253,6 +257,8 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         "\"schedulePersistenceError\":%s,"
         "\"scheduleRevision\":%" PRIu64 ","
         "\"scheduleInstanceId\":\"%s\","
+        "\"controlSource\":\"%s\","
+        "\"scheduleDefaults\":{\"mode\":%d,\"heatingTemp\":%.1f,\"dhwTemp\":%.1f},"
         "\"dhwCalling\":%s,"
         "\"dhwStateKnown\":%s,"
         "\"requestedDeviceMode\":\"%s\","
@@ -309,6 +315,10 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
         last_status_.schedule_persistence_error ? "true" : "false",
         static_cast<uint64_t>(last_status_.schedule_revision),
         last_status_.schedule_instance_id.c_str(),
+        last_status_.control_source.c_str(),
+        last_status_.schedule_defaults.mode,
+        last_status_.schedule_defaults.heatingTemp,
+        last_status_.schedule_defaults.dhwTemp,
         last_status_.dhw_calling ? "true" : "false",
         last_status_.dhw_state_known ? "true" : "false",
         mode_to_string(last_status_.requested_device_mode),
@@ -541,14 +551,16 @@ void WebServer::apiScheduleSetHandler(struct mg_connection* c, struct mg_str* bo
     }
 
     ScheduleState candidate;
-    std::string error;
-    if (!ScheduleConfig::parseJson(std::string(body->buf, body->len), candidate, error)) {
+    std::string error; bool defaultsPresent = false;
+    if (!ScheduleConfig::parseJson(std::string(body->buf, body->len), candidate, error, &defaultsPresent)) {
         const std::string reply = "{\"error\":\"" + error + "\"}";
         sendJsonReply(c, 422, reply.c_str());
         return;
     }
     // Never accept paused=false from an editor as an implicit Resume.
-    if (!scheduler_->replace(candidate.enabled, candidate.ranges)) {
+    const bool saved = defaultsPresent ? scheduler_->replace(candidate.enabled, candidate.ranges, candidate.defaults)
+                                       : scheduler_->replace(candidate.enabled, candidate.ranges);
+    if (!saved) {
         sendJsonReply(c, 500, "{\"error\":\"Could not save schedule; previous configuration retained\"}");
         return;
     }
@@ -556,6 +568,18 @@ void WebServer::apiScheduleSetHandler(struct mg_connection* c, struct mg_str* bo
     sendJsonReply(c, 200, scheduleReply(*scheduler_, true).c_str());
 }
 
+void WebServer::apiScheduleDefaultsHandler(struct mg_connection* c, struct mg_str* body) {
+    if (!scheduler_) { sendJsonReply(c,503,"{\"error\":\"Scheduler not available\"}"); return; }
+    ScheduleDefaults defaults; std::string error;
+    if (!ScheduleConfig::parseDefaultsJson(std::string(body->buf,body->len),defaults,error)) {
+        sendJsonReply(c,422,"{\"error\":\"Invalid or incomplete schedule defaults\"}"); return;
+    }
+    if (!scheduler_->setDefaults(defaults)) {
+        sendJsonReply(c,500,"{\"error\":\"Could not save default; previous configuration retained\"}"); return;
+    }
+    if (wake_callback_) wake_callback_();
+    sendJsonReply(c,200,scheduleReply(*scheduler_,true).c_str());
+}
 void WebServer::apiScheduleToggleHandler(struct mg_connection* c, struct mg_str* body) {
     if (!scheduler_) {
         sendJsonReply(c, 503, "{\"error\":\"Scheduler not available\"}");
@@ -565,10 +589,6 @@ void WebServer::apiScheduleToggleHandler(struct mg_connection* c, struct mg_str*
     bool enabled = false;
     if (!ScheduleConfig::parseEnabledJson(std::string(body->buf, body->len), enabled)) {
         sendJsonReply(c, 400, "{\"error\":\"Enabled must be boolean or 0/1\"}");
-        return;
-    }
-    if (enabled && scheduler_->getRanges().empty()) {
-        sendJsonReply(c, 422, "{\"error\":\"Cannot enable an empty schedule\"}");
         return;
     }
     if (!scheduler_->setEnabled(enabled)) {

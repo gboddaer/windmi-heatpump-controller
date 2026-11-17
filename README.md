@@ -17,7 +17,7 @@ This project provides a web-based interface for monitoring and controlling Roten
 - **Web Interface**: Built-in HTTP server with static HTML page for local control
 - **REST API**: JSON-based endpoints for status, mode control, and temperature setpoints
 - **[Read-only Diagnostics](docs/diagnostics.md)**: Control decisions, compressor/pump/fan/valve registers, hardware alarm bitmaps, sample validity and freshness
-- **[Daily Scheduling](docs/scheduling.md)**: Validated, persisted time ranges; manual changes pause automation until explicit Resume
+- **[Daily Scheduling](docs/scheduling.md)**: Independent default mode/targets with temporary daily overrides; Overview manual changes pause automation until explicit Resume
 - **Modbus TCP**: Direct TCP communication with Waveshare gateway (transparent mode)
 - **Modbus RTU over Serial (RS-485)**: Serial port communication for devices without TCP gateway
 - **Multi-threaded**: Separate threads for HTTP server and Modbus operations

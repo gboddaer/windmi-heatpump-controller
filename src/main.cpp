@@ -282,9 +282,11 @@ int main(int argc, char* argv[]) {
     // Load schedule
     windmi::ScheduleConfig scheduleConfig;
     std::string schedule_path = windmi::platform::get_home_dir() + "/.windmi/schedule.json";
-    if (scheduleConfig.loadFromFile(schedule_path)) {
-        g_control_loop->scheduler().restore(scheduleConfig.state());
-    }
+    scheduleConfig.loadFromFile(schedule_path);
+    // Old files had no independent default; preserve current startup UI values
+    // without rewriting the file or guessing a previous pre-schedule mode.
+    g_control_loop->scheduler().restore(scheduleConfig.stateWithLegacyDefaults(
+        {init_working_mode, init_heating_target, init_dhw_target}));
     g_control_loop->scheduler().setPersistenceHandler([schedule_path](const windmi::ScheduleState& state) {
         windmi::ScheduleConfig candidate;
         return candidate.setState(state) && candidate.saveToFile(schedule_path);

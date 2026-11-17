@@ -150,7 +150,9 @@ struct StatusSnapshot {
     // Occupancy mode (0=Away, 1=Sleep, 2=Home)
     int occupancy_mode = 2;
     
-    // Schedule state
+    // Schedule state; "active" means a matching period, not default application.
+    ScheduleDefaults schedule_defaults;
+    std::string control_source = "manual";
     bool schedule_active = false;
     bool schedule_paused = false;
     bool schedule_enabled = false;
@@ -418,9 +420,9 @@ private:
 
     // Schedule
     Scheduler scheduler_;
-    ScheduleRange lastScheduleRange_;
+    ScheduleDefaults last_schedule_settings_;
     uint64_t last_schedule_revision_ = 0;
-    bool schedule_was_active_ = false;
+    bool schedule_was_applying_ = false;
     std::atomic<int> schedule_minute_for_testing_{-1};
 };
 

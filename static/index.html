@@ -80,13 +80,15 @@
                     </div>
 
                     <div class="control-group mode-group">
-                        <label>Working Mode</label>
+                        <label>Working Mode — manual override</label>
+                        <div id="controlSourceValue" class="control-source" role="status" aria-live="polite">Awaiting controller update</div>
                         <div class="mode-selector">
                             <button id="mode0Btn" class="mode-btn mode-off">OFF</button>
                             <button id="mode1Btn" class="mode-btn">DHW Only</button>
                             <button id="mode2Btn" class="mode-btn">Heating Only</button>
                             <button id="mode3Btn" class="mode-btn mode-active">Heating + DHW (DHW first)</button>
                         </div>
+                        <p class="schedule-help">Any mode selection (even the active one) or target change pauses scheduling until Resume. Edit normal defaults on Schedule.</p>
                     </div>
 
                     <div class="control-group occupancy-group">
@@ -112,7 +114,32 @@
                     </div>
                     <div id="scheduleState" class="schedule-state"></div>
                     <button id="resumeScheduleBtn" class="btn btn-resume" hidden>Resume schedule</button>
-                    <p class="schedule-help">Daily schedule, using the controller’s local time. Gaps keep the last settings. Manual mode or temperature changes pause automation until you press Resume.</p>
+                    <p class="schedule-help">Daily periods use the controller’s local time and temporarily override the default below. Outside periods, the default applies — never an implicit OFF. Overview mode or target changes pause automation until you press Resume.</p>
+                </section>
+                <section class="schedule-default" aria-labelledby="scheduleDefaultTitle">
+                    <h3 id="scheduleDefaultTitle">Default between periods</h3>
+                    <p class="schedule-help">With no periods, this default runs all day while scheduling is enabled and not paused. Saving a default does not clear a manual pause.</p>
+                    <div class="schedule-default-fields">
+                        <div class="form-row">
+                            <label for="scheduleDefaultMode">Default working mode</label>
+                            <select id="scheduleDefaultMode" disabled>
+                                <option value="0">OFF</option>
+                                <option value="1">DHW Only</option>
+                                <option value="2">Heating Only</option>
+                                <option value="3">Heating + DHW (DHW first)</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label for="scheduleDefaultHeating">Default heating (°C)</label>
+                            <input type="number" id="scheduleDefaultHeating" min="25" max="63" step="0.5" disabled>
+                        </div>
+                        <div class="form-row">
+                            <label for="scheduleDefaultDhw">Default DHW (°C)</label>
+                            <input type="number" id="scheduleDefaultDhw" min="40" max="63" step="0.5" disabled>
+                        </div>
+                    </div>
+                    <button id="saveScheduleDefaultBtn" class="btn btn-save-default" disabled>Save default</button>
+                    <p id="scheduleDefaultState" class="schedule-help" role="status">Loading saved default settings…</p>
                 </section>
 
                 <section class="schedule-list">

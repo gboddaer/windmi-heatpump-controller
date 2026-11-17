@@ -810,6 +810,12 @@ footer {
 }
 
 .schedule-help { color: #9ca3af; font-size: 0.8rem; line-height: 1.5; margin-top: 10px; }
+.control-source { color: #93c5fd; font-size: 0.85rem; margin: 8px 0; }
+.schedule-default { background: #1f2937; border: 1px solid #374151; border-radius: 12px; padding: 20px; margin: 16px 0; }
+.schedule-default-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-top: 16px; }
+.schedule-default-fields .form-row { min-width: 0; }
+.schedule-default-fields select, .schedule-default-fields input { width: 100%; min-width: 0; }
+.btn-save-default { padding: 10px 16px; background: #1d4ed8; color: white; border: 0; border-radius: 8px; }
 .btn-resume { margin-top: 12px; padding: 8px 16px; background: #1d4ed8; color: white; border: 0; border-radius: 8px; }
 .btn-resume[hidden] { display: none; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }

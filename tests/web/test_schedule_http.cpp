@@ -49,6 +49,7 @@ TEST_F(ScheduleHttpTest, ProductionStatusIncludesScheduleConfigurationAndPending
     status.schedule_enabled = true; status.schedule_paused = true;
     status.schedule_pending = true; status.schedule_persistence_error = true; status.schedule_revision = 123;
     status.schedule_instance_id = "test-instance";
+    status.control_source = "default"; status.schedule_defaults = {1,35,48};
     snapshots.push(status);
     const auto response = request("/api/status", "", "GET");
     bool enabled = false, pending = false, error = false;
@@ -56,7 +57,58 @@ TEST_F(ScheduleHttpTest, ProductionStatusIncludesScheduleConfigurationAndPending
     EXPECT_TRUE(mg_json_get_bool(json(response), "$.schedulePending", &pending)); EXPECT_TRUE(pending);
     EXPECT_TRUE(mg_json_get_bool(json(response), "$.schedulePersistenceError", &error)); EXPECT_TRUE(error);
     EXPECT_EQ(mg_json_get_long(json(response), "$.scheduleRevision", -1), 123);
+    EXPECT_NE(response.find("\"controlSource\":\"default\""),std::string::npos);
+    EXPECT_EQ(mg_json_get_long(json(response),"$.scheduleDefaults.mode",-1),1);
+    double heat=0,dhw=0;
+    EXPECT_TRUE(mg_json_get_num(json(response),"$.scheduleDefaults.heatingTemp",&heat)); EXPECT_DOUBLE_EQ(heat,35);
+    EXPECT_TRUE(mg_json_get_num(json(response),"$.scheduleDefaults.dhwTemp",&dhw)); EXPECT_DOUBLE_EQ(dhw,48);
     EXPECT_NE(response.find("\"scheduleInstanceId\":\"test-instance\""), std::string::npos);
+}
+TEST_F(ScheduleHttpTest, IndependentDefaultsAreCommittedAndReturnedWithoutImplicitResume) {
+    scheduler.replace(true,{}, {3,40,50}); scheduler.pause(); saves=0;
+    const auto response=request("/api/schedule",R"({"enabled":true,"defaults":{"mode":1,"heatingTemp":35,"dhwTemp":48},"ranges":[{"start":390,"end":540,"mode":3,"heatingTemp":45,"dhwTemp":52}]})");
+    EXPECT_NE(response.find("200 OK"),std::string::npos);
+    EXPECT_EQ(scheduler.snapshot().defaults.mode,1);
+    EXPECT_EQ(scheduler.snapshot().defaults.dhwTemp,48);
+    EXPECT_EQ(mg_json_get_long(json(response),"$.defaults.mode",-1),1);
+    EXPECT_TRUE(scheduler.isPaused());
+    EXPECT_EQ(saves,1); EXPECT_EQ(wakes,1);
+}
+TEST_F(ScheduleHttpTest, LegacyEditPreservesDefaultsAndInvalidOrFailedDefaultSaveDoesNotPublish) {
+    scheduler.replace(false,{{0,1440,3,40,50}},{1,35,48}); saves=0;
+    auto response=request("/api/schedule",dayJson);
+    EXPECT_NE(response.find("200 OK"),std::string::npos);
+    EXPECT_EQ(scheduler.snapshot().defaults.mode,1);
+    const auto before=scheduler.snapshot();
+    response=request("/api/schedule",R"({"enabled":false,"defaults":{"mode":8,"heatingTemp":35,"dhwTemp":48},"ranges":[]})");
+    EXPECT_NE(response.find("422"),std::string::npos);
+    EXPECT_EQ(scheduler.snapshot().revision,before.revision);
+    diskWorks=false;
+    response=request("/api/schedule",R"({"enabled":false,"defaults":{"mode":2,"heatingTemp":40,"dhwTemp":50},"ranges":[]})");
+    EXPECT_NE(response.find("500"),std::string::npos);
+    EXPECT_EQ(scheduler.snapshot().defaults.mode,1);
+    EXPECT_EQ(scheduler.snapshot().revision,before.revision);
+}
+TEST_F(ScheduleHttpTest, DefaultsOnlySaveCannotOverwriteConcurrentPeriodsEnableOrPause) {
+    scheduler.replace(true,{{390,540,3,47,52}},{1,35,48}); scheduler.pause(); saves=0;
+    auto response=request("/api/schedule/defaults",R"({"mode":2,"heatingTemp":38,"dhwTemp":51})");
+    EXPECT_NE(response.find("200 OK"),std::string::npos);
+    EXPECT_EQ(scheduler.snapshot().defaults.mode,2);
+    ASSERT_EQ(scheduler.snapshot().ranges.size(),1u);
+    EXPECT_EQ(scheduler.snapshot().ranges[0].heatingTemp,47);
+    EXPECT_TRUE(scheduler.isEnabled()); EXPECT_TRUE(scheduler.isPaused()); EXPECT_EQ(saves,1);
+    const auto before=scheduler.snapshot();
+    for (const auto& bad : {R"({"mode":1})",R"({"mode":1,"heatingTemp":38,"dhwTemp":51} garbage)",
+                           R"({"mode":1,"heatingTemp":38,"dhwTemp":51},"paused":false)",
+                           R"({"mode":1,"heatingTemp":38,"dhwTemp":51,"enabled":false})"}) {
+        response=request("/api/schedule/defaults",bad);
+        EXPECT_NE(response.find("422"),std::string::npos);
+        EXPECT_EQ(scheduler.snapshot().revision,before.revision);
+    }
+    diskWorks=false;
+    response=request("/api/schedule/defaults",R"({"mode":1,"heatingTemp":35,"dhwTemp":48})");
+    EXPECT_NE(response.find("500"),std::string::npos);
+    EXPECT_EQ(scheduler.snapshot().defaults.mode,2); EXPECT_TRUE(scheduler.isPaused());
 }
 TEST_F(ScheduleHttpTest, InvalidSaveCannotEnableOrPersistAnything) {
     auto before = scheduler.snapshot();
@@ -111,10 +163,11 @@ TEST_F(ScheduleHttpTest, EditsAndEnablePreservePauseUntilExplicitResume) {
     EXPECT_FALSE(scheduler.isPaused());
     EXPECT_EQ(saves, 4); EXPECT_EQ(wakes, 4);
 }
-TEST_F(ScheduleHttpTest, CannotEnableEmptyScheduleAndFailedResumeStaysPaused) {
+TEST_F(ScheduleHttpTest, CanEnableDefaultOnlyPolicyAndFailedResumeStaysPaused) {
     scheduler.replace(false, {});
     auto response = request("/api/schedule/toggle", R"({"enabled":true})");
-    EXPECT_NE(response.find("422"), std::string::npos);
+    EXPECT_NE(response.find("200 OK"), std::string::npos);
+    EXPECT_TRUE(scheduler.isEnabled());
     scheduler.replace(true, {{0,1440,3,40,50}}); scheduler.pause(); diskWorks = false;
     response = request("/api/schedule/resume", "{}");
     EXPECT_NE(response.find("500"), std::string::npos);

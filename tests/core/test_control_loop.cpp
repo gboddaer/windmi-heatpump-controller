@@ -1449,19 +1449,19 @@ TEST(ScheduleLoopSafetyTest, TemperatureOnlyEditAndReenableReapplyCurrentWindow)
     EXPECT_TRUE(status.schedule_enabled);
     EXPECT_FALSE(status.schedule_pending);
 }
-TEST(ScheduleLoopSafetyTest, ManualModePausesAndGapKeepsLastSettings) {
+TEST(ScheduleLoopSafetyTest, ManualModePausesAndGapsRestoreExplicitDefault) {
     FakeModbusClient client(fullRegisters());
     TickedLoop runner(client);
     runner.setMinute(60);
-    runner.schedule().replace(true, {{0,120,2,42,48}});
+    runner.schedule().replace(true, {{0,120,2,42,48}}, {1,35,48});
     ASSERT_TRUE(runner.start(1, "dhw", 46, 40));
     auto status = runner.tickSnapshot();
     EXPECT_EQ(status.working_mode, 2);
     runner.setMinute(240);
     status = runner.tickSnapshot();
     EXPECT_FALSE(status.schedule_active);
-    EXPECT_EQ(status.working_mode, 2);
-    EXPECT_EQ(status.heating_target, 42);
+    EXPECT_EQ(status.working_mode, 1);
+    EXPECT_EQ(status.heating_target, 35);
     runner.setMinute(60);
     status = runner.tickSnapshot();
     EXPECT_TRUE(status.schedule_active);
@@ -1470,6 +1470,51 @@ TEST(ScheduleLoopSafetyTest, ManualModePausesAndGapKeepsLastSettings) {
     runner.stop();
     EXPECT_TRUE(status.schedule_paused);
     EXPECT_EQ(status.working_mode, 1);
+}
+TEST(ScheduleDefaultsLoopTest, EqualPeriodAndDefaultChangeSourceWithoutRedundantTargetWrites) {
+    FakeModbusClient client(fullRegisters()); TickedLoop runner(client); runner.setMinute(400);
+    runner.schedule().replace(true,{{390,540,3,40,46}},{3,40,46});
+    ASSERT_TRUE(runner.start(3,"dhw",46,40));
+    auto status=runner.tickSnapshot(); EXPECT_EQ(status.control_source,"schedule");
+    const auto writes=client.writes().size(); runner.setMinute(600); status=runner.tickSnapshot();
+    EXPECT_EQ(status.control_source,"default"); EXPECT_FALSE(status.schedule_active);
+    EXPECT_EQ(client.writes().size(),writes); runner.stop();
+}
+TEST(ScheduleDefaultsLoopTest, SameModePressPausesWithoutNeedlessNativeWritesAndResumeAppliesEditedDefault) {
+    FakeModbusClient client(fullRegisters());
+    TickedLoop runner(client); runner.setMinute(400);
+    runner.schedule().replace(true,{{390,540,3,45,50}},{1,35,48});
+    ASSERT_TRUE(runner.start(3,"dhw",46,40));
+    auto status=runner.tickSnapshot();
+    const auto nativeWrites=writeCountFor(client,REG_RUNNING_MODE);
+    runner.sendWorkingMode(3); status=runner.tickSnapshot();
+    EXPECT_TRUE(status.schedule_paused); EXPECT_EQ(status.working_mode,3);
+    EXPECT_EQ(status.control_source,"manual"); EXPECT_EQ(status.schedule_defaults.mode,1);
+    EXPECT_EQ(writeCountFor(client,REG_RUNNING_MODE),nativeWrites);
+    EXPECT_EQ(runner.schedule().snapshot().defaults.mode,1);
+    runner.schedule().replace(true,{{390,540,3,45,50}},{2,37,49});
+    runner.setMinute(600); status=runner.tickSnapshot();
+    EXPECT_TRUE(status.schedule_paused); EXPECT_EQ(status.working_mode,3); EXPECT_EQ(status.dhw_target,50);
+    runner.schedule().resume(); runner.advanceTime(130000); status=runner.tickSnapshot();
+    runner.stop();
+    EXPECT_FALSE(status.schedule_paused); EXPECT_FALSE(status.schedule_active);
+    EXPECT_EQ(status.control_source,"default"); EXPECT_EQ(status.schedule_defaults.mode,2);
+    EXPECT_EQ(status.working_mode,2); EXPECT_EQ(status.heating_target,37); EXPECT_EQ(status.dhw_target,49);
+}
+TEST(ScheduleDefaultsLoopTest, PausedRestartRetainsManualTargetsUntilResumeRestoresDefault) {
+    FakeModbusClient client(fullRegisters());
+    TickedLoop first(client); first.setMinute(400);
+    first.schedule().replace(true,{{390,540,3,45,50}},{1,35,48});
+    ASSERT_TRUE(first.start(3,"dhw",46,40)); first.tick();
+    first.sendDhwTarget(53); auto manual=first.tickSnapshot();
+    const auto state=first.schedule().snapshot(); first.stop();
+    ASSERT_TRUE(state.paused); EXPECT_EQ(state.defaults.dhwTemp,48);
+    TickedLoop restarted(client); restarted.setMinute(600); restarted.schedule().restore(state);
+    ASSERT_TRUE(restarted.start(manual.working_mode,"dhw",manual.dhw_target,manual.heating_target));
+    auto status=restarted.tickSnapshot();
+    EXPECT_TRUE(status.schedule_paused); EXPECT_EQ(status.dhw_target,53); EXPECT_EQ(status.working_mode,3);
+    restarted.schedule().resume(); restarted.advanceTime(130000); status=restarted.tickSnapshot(); restarted.stop();
+    EXPECT_EQ(status.working_mode,1); EXPECT_EQ(status.dhw_target,48); EXPECT_EQ(status.heating_target,35);
 }
 class ScheduleProtectedClient : public FakeModbusClient {
 public:
@@ -1496,6 +1541,20 @@ TEST(ScheduleLoopSafetyTest, ScheduledWritesWaitForNativeProtectionToFinish) {
     runner.stop();
     EXPECT_EQ(status.working_mode, 2);
     EXPECT_EQ(status.heating_target, 44);
+    EXPECT_FALSE(status.schedule_pending);
+}
+TEST(ScheduleDefaultsLoopTest, DefaultOnlyPolicyWaitsForDefrostAndAntiFreeze) {
+    ScheduleProtectedClient client; TickedLoop runner(client);
+    runner.schedule().replace(true,{}, {2,44,52});
+    ASSERT_TRUE(runner.start(1,"dhw",46,40));
+    auto status=runner.tickSnapshot();
+    EXPECT_FALSE(status.schedule_active); EXPECT_TRUE(status.schedule_pending);
+    EXPECT_EQ(status.control_source,"default");
+    EXPECT_EQ(status.working_mode,1); EXPECT_TRUE(client.writes().empty());
+    client.operation=MODE_STATUS_ANTIFREEZE; status=runner.tickSnapshot();
+    EXPECT_TRUE(status.schedule_pending); EXPECT_TRUE(client.writes().empty());
+    client.operation=MODE_STATUS_HEAT; status=runner.tickSnapshot(); runner.stop();
+    EXPECT_EQ(status.working_mode,2); EXPECT_EQ(status.heating_target,44); EXPECT_EQ(status.dhw_target,52);
     EXPECT_FALSE(status.schedule_pending);
 }
 class ScheduleWriteFailClient : public FakeModbusClient {
@@ -1548,6 +1607,18 @@ public:
         return FakeModbusClient::readRegister(address);
     }
 };
+TEST(ScheduleDefaultsLoopTest, DefaultTargetFailureRetriesAndDoesNotPreventExplicitOff) {
+    ScheduleWriteFailClient client; TickedLoop runner(client);
+    runner.schedule().replace(true,{}, {2,44,52});
+    ASSERT_TRUE(runner.start(1,"dhw",46,40)); auto status=runner.tickSnapshot();
+    EXPECT_TRUE(status.schedule_pending); EXPECT_EQ(status.working_mode,1);
+    client.fail=false; runner.advanceTime(130000); status=runner.tickSnapshot();
+    EXPECT_EQ(status.working_mode,2); EXPECT_EQ(status.heating_target,44); EXPECT_FALSE(status.schedule_pending);
+    client.fail=true; runner.schedule().replace(true,{}, {0,45,53}); status=runner.tickSnapshot();
+    runner.stop();
+    EXPECT_EQ(status.working_mode,0); EXPECT_TRUE(status.schedule_pending);
+    EXPECT_TRUE(wroteValue(client,REG_RUNNING_MODE,MODE_SET_OFF));
+}
 TEST(ScheduleLoopSafetyTest, ProtectionAlsoBlocksAutomaticTargetDriftRestoration) {
     ProtectionDriftClient client;
     TickedLoop runner(client);
@@ -1571,8 +1642,17 @@ TEST(ScheduleLoopSafetyTest, OfflineStatusStillReportsEnabledAndPausedConfigurat
     EXPECT_FALSE(status.device_online);
     EXPECT_TRUE(status.schedule_enabled);
     EXPECT_TRUE(status.schedule_paused);
+    EXPECT_EQ(status.control_source,"manual");
 }
 
+TEST(ScheduleDefaultsLoopTest, OfflineDefaultPolicyReportsPendingInsteadOfInventingActuation) {
+    FakeModbusClient client({}); TickedLoop runner(client);
+    runner.schedule().replace(true,{}, {1,35,48});
+    ASSERT_TRUE(runner.start(3,"dhw",50,45)); const auto status=runner.tickSnapshot(); runner.stop();
+    EXPECT_FALSE(status.device_online); EXPECT_EQ(status.control_source,"pending");
+    EXPECT_TRUE(status.schedule_pending); EXPECT_FALSE(status.schedule_active);
+    EXPECT_EQ(status.schedule_defaults.mode,1); EXPECT_EQ(status.schedule_defaults.dhwTemp,48);
+}
 // ---- Liveness has to be in the payload ----
 // A calm unit and a stalled control loop look identical from outside: the registers
 // stop moving in both cases, because there is nothing to move. Measured 2026-11-13

@@ -24,13 +24,14 @@ TEST(ScheduleSafetyTest, RejectsUnsafeAndNonfiniteTemperaturesInEveryMode) {
     EXPECT_TRUE(Scheduler::validateRanges({{0,1440,3,25,40}}));
     EXPECT_TRUE(Scheduler::validateRanges({{0,1440,3,63,63}}));
 }
-TEST(ScheduleSafetyTest, EmptyDisabledScheduleIsValidButCannotBeEnabled) {
+TEST(ScheduleSafetyTest, EmptyScheduleCanRunItsValidatedDefault) {
     Scheduler s;
     EXPECT_TRUE(Scheduler::validateRanges({}));
-    EXPECT_TRUE(s.replace(false, {}));
-    EXPECT_FALSE(s.setEnabled(true));
-    EXPECT_FALSE(s.replace(true, {}));
-    EXPECT_FALSE(s.isEnabled());
+    EXPECT_TRUE(s.replace(false, {}, {1,35,50}));
+    EXPECT_TRUE(s.setEnabled(true));
+    EXPECT_TRUE(s.replace(true, {}));
+    EXPECT_TRUE(s.isEnabled());
+    EXPECT_EQ(Scheduler::select(s.snapshot(),600).settings.mode,1);
     EXPECT_TRUE(s.replace(true, day()));
     EXPECT_TRUE(s.replace(false, {}));
     EXPECT_TRUE(s.getRanges().empty());

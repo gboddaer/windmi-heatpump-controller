@@ -19,6 +19,9 @@
 namespace windmi {
 static void copyScheduleMetadata(StatusSnapshot& status, const ScheduleState& state) {
     status.schedule_enabled = state.enabled;
+    status.schedule_defaults = state.defaults;
+    status.control_source = state.enabled && !state.paused ? "pending" : "manual";
+    status.schedule_pending = state.enabled && !state.paused;
     status.schedule_paused = state.paused;
     status.schedule_revision = state.revision;
     status.schedule_instance_id = state.instanceId;
@@ -657,6 +660,10 @@ void ControlLoop::processCommands() {
 
             case CommandType::CMD_SET_RUNNING_MODE:
                 WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_RUNNING_MODE, mode=%d", cmd.int_val);
+                // The explicit command already paused scheduling above. An
+                // unchanged working-mode intent must not force a native-mode
+                // round trip (e.g. combined then back to DHW-priority mode 5).
+                if (desired_working_mode_ == cmd.int_val) { fireSettingsCallback(); break; }
                 desired_working_mode_ = cmd.int_val;
                 fireSettingsCallback();
 
@@ -710,14 +717,16 @@ void ControlLoop::processCommands() {
 void ControlLoop::updateSchedule(StatusSnapshot& status, int minute) {
     const auto state = scheduler_.snapshot();
     copyScheduleMetadata(status, state);
-    ScheduleRange range;
-    status.schedule_active = Scheduler::evaluate(state, minute, range);
-    if (!status.schedule_active) { schedule_was_active_ = false; return; }
-    const bool changed = !schedule_was_active_ || state.revision != last_schedule_revision_ ||
-        range.startMinutes != lastScheduleRange_.startMinutes || range.endMinutes != lastScheduleRange_.endMinutes ||
-        range.mode != lastScheduleRange_.mode || range.heatingTemp != lastScheduleRange_.heatingTemp ||
-        range.dhwTemp != lastScheduleRange_.dhwTemp;
-    schedule_was_active_ = true;
+    const auto selection = Scheduler::select(state, minute);
+    status.schedule_active = selection.source == ScheduleSource::Period;
+    status.control_source = selection.source == ScheduleSource::Period ? "schedule" :
+                            selection.source == ScheduleSource::Default ? "default" : "manual";
+    status.schedule_pending = false;
+    if (selection.source == ScheduleSource::Manual) { schedule_was_applying_ = false; return; }
+    const auto& settings = selection.settings;
+    const bool changed = !schedule_was_applying_ || state.revision != last_schedule_revision_ ||
+        settings.mode != last_schedule_settings_.mode || settings.heatingTemp != last_schedule_settings_.heatingTemp ||
+        settings.dhwTemp != last_schedule_settings_.dhwTemp;
     if (!changed) return;
     status.schedule_pending = true;
     if (status.running_status == MODE_STATUS_DEFROST || status.running_status == MODE_STATUS_ANTIFREEZE) return;
@@ -725,23 +734,24 @@ void ControlLoop::updateSchedule(StatusSnapshot& status, int minute) {
     // Targets precede enabling a different service; Off must not depend on an
     // unrelated target write succeeding. The arbiter remains the only automatic
     // native-mode selector, preserving DHW demand priority.
-    if (range.mode == 0) desired_working_mode_ = 0;
-    const bool dhw_ok = setDhwTarget(range.dhwTemp) == 0;
-    if (dhw_ok) { saved_dhw_target_ = range.dhwTemp; status.dhw_target = range.dhwTemp; }
-    const bool heat_ok = setHeatingTarget(range.heatingTemp) == 0;
+    if (settings.mode == 0) desired_working_mode_ = 0;
+    const bool dhw_ok = setDhwTarget(settings.dhwTemp) == 0;
+    if (dhw_ok) { saved_dhw_target_ = settings.dhwTemp; status.dhw_target = settings.dhwTemp; }
+    const bool heat_ok = setHeatingTarget(settings.heatingTemp) == 0;
     if (heat_ok) {
-        saved_heating_target_ = range.heatingTemp;
-        last_heating_target_ = range.heatingTemp;
-        status.heating_target = range.heatingTemp;
+        saved_heating_target_ = settings.heatingTemp;
+        last_heating_target_ = settings.heatingTemp;
+        status.heating_target = settings.heatingTemp;
     }
     if (!dhw_ok || !heat_ok) return; // Retry the same revision next normal tick.
-    desired_working_mode_ = range.mode;
+    desired_working_mode_ = settings.mode;
     fireSettingsCallback();
-    lastScheduleRange_ = range;
+    last_schedule_settings_ = settings;
+    schedule_was_applying_ = true;
     last_schedule_revision_ = state.revision;
     status.schedule_pending = false;
-    WINDMI_LOG_INFO(LOG_TAG_SCHEDULER, "Applied schedule revision %llu: mode=%d, heat=%.1f, dhw=%.1f",
-        static_cast<unsigned long long>(state.revision), range.mode, range.heatingTemp, range.dhwTemp);
+    WINDMI_LOG_INFO(LOG_TAG_SCHEDULER, "Applied %s revision %llu: mode=%d, heat=%.1f, dhw=%.1f",
+        status.control_source.c_str(), static_cast<unsigned long long>(state.revision), settings.mode, settings.heatingTemp, settings.dhwTemp);
 }
 
 void ControlLoop::applyControlLogic(StatusSnapshot& status) {
@@ -948,7 +958,7 @@ void ControlLoop::threadFunc() {
             updateCycleCop(status);
             // Apply control logic
             applyControlLogic(status);
-            if (status.schedule_active && current_mode_ != requested_device_mode_) status.schedule_pending = true;
+            if (status.schedule_enabled && !status.schedule_paused && current_mode_ != requested_device_mode_) status.schedule_pending = true;
 
             // Set working mode for status reporting
             status.working_mode = desired_working_mode_;

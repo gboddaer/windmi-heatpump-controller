@@ -21,7 +21,9 @@ let currentMode = 3; // default: Heating + DHW Priority
 let currentOccupancy = 'home'; // 'away', 'sleep', 'home'
 
 // Schedule state
-let scheduleData = { enabled: false, paused: false, ranges: [] };
+let scheduleData = { enabled: false, paused: false, defaults: null, ranges: [] };
+let scheduleDefaultDraft = null;
+let scheduleDefaultDirty = false;
 let editingRangeIndex = -1; // -1 means adding a new range
 let scheduleLoaded = false;
 let scheduleBusy = false;
@@ -144,7 +146,8 @@ elements.setHeatingBtn.addEventListener('click', async () => {
 
 // Working mode buttons (0=OFF, 1=DHW Only, 2=Heating Only, 3=Heating+DHW Priority, 4=Heating Priority+DHW)
 function setWorkingMode(mode) {
-    if (mode === currentMode) return;
+    // Even selecting the effective mode is an explicit manual override.
+    if (pendingMode !== null) return;
 
     currentMode = mode;
     pendingMode = mode;
@@ -181,7 +184,7 @@ elements.mode3Btn.addEventListener('click', () => setWorkingMode(3));
 // Power button (ON/OFF toggle)
 elements.powerBtn.addEventListener('click', () => {
     if (currentMode === 0) {
-        // Turn on: restore to Heating + DHW Priority (default)
+        // Turn on in manual combined mode; Schedule defaults are independent.
         setWorkingMode(3);
     } else {
         // Turn off
@@ -250,7 +253,22 @@ function delay(ms) {
 }
 
 // Update UI with status data
+function updateControlSource(status) {
+    const target = document.getElementById('controlSourceValue');
+    if (!target) return;
+    let text = 'Awaiting controller update';
+    if (status.deviceOnline === false) text = 'Device offline — control state unconfirmed';
+    else if (status.controlSource === 'manual') text = status.schedulePaused ?
+        'Manual override — schedule paused' : 'Manual control';
+    else if (status.controlSource === 'default') text = 'Schedule default';
+    else if (status.controlSource === 'schedule') text = 'Scheduled period';
+    if (status.deviceOnline !== false && status.controlSource !== 'manual' && status.schedulePending)
+        text += ' — device update pending';
+    if (status.schedulePersistenceError) text += ' · Warning: manual pause could not be saved';
+    if (target.textContent !== text) target.textContent = text;
+}
 function updateUI(status) {
+    updateControlSource(status);
     // Device status
     if (status.deviceOnline) {
         elements.deviceStatus.textContent = 'Online';
@@ -491,11 +509,14 @@ function applyScheduleResponse(data) {
         scheduleLoadError = 'Controller restarted — reload page before editing';
         throw new Error(scheduleLoadError);
     }
-    if (Number.isInteger(data.revision) && Number.isInteger(scheduleData.revision) && data.revision < scheduleData.revision) return;
-    scheduleData = {...data, ranges: data.ranges.map(r => ({...r}))};
+    if (Number.isInteger(data.revision) && Number.isInteger(scheduleData.revision) && data.revision < scheduleData.revision) return false;
+    if (!validScheduleDefaults(data.defaults)) throw new Error('Invalid schedule defaults in response');
+    scheduleData = {...data, defaults: {...data.defaults}, ranges: data.ranges.map(r => ({...r}))};
+    if (!scheduleDefaultDirty) scheduleDefaultDraft = {...data.defaults};
     scheduleLoaded = true;
     scheduleLoadError = '';
     if (!scheduleRuntime || scheduleRuntime.revision !== data.revision) scheduleRuntime = null;
+    return true;
 }
 
 function loadSchedule() {
@@ -525,7 +546,7 @@ function updateScheduleStatus(status) {
     if (Number.isInteger(revision) && Number.isInteger(scheduleData.revision) && revision < scheduleData.revision) return;
     if (typeof status.scheduleEnabled === 'boolean') scheduleData.enabled = status.scheduleEnabled;
     scheduleData.paused = status.schedulePaused === true;
-    scheduleRuntime = {revision, active: status.scheduleActive, pending: status.schedulePending === true,
+    scheduleRuntime = {revision, source: status.controlSource, active: status.scheduleActive, pending: status.schedulePending === true,
         online: status.deviceOnline, persistenceError: status.schedulePersistenceError === true};
     if (!scheduleLoaded || (Number.isInteger(revision) && revision !== scheduleData.revision)) loadSchedule();
     renderSchedule();
@@ -573,13 +594,58 @@ function modeLabel(mode) {
     return labels[mode] || 'Unknown';
 }
 
+function validScheduleDefaults(value) {
+    return value && Number.isInteger(value.mode) && value.mode >= 0 && value.mode <= 3 &&
+        Number.isFinite(value.heatingTemp) && value.heatingTemp >= 25 && value.heatingTemp <= 63 &&
+        Number.isFinite(value.dhwTemp) && value.dhwTemp >= 40 && value.dhwTemp <= 63;
+}
+function captureScheduleDefaultDraft() {
+    scheduleDefaultDraft = {
+        mode: document.getElementById('scheduleDefaultMode').value,
+        heatingTemp: document.getElementById('scheduleDefaultHeating').value,
+        dhwTemp: document.getElementById('scheduleDefaultDhw').value
+    };
+    scheduleDefaultDirty = true;
+    const note = document.getElementById('scheduleDefaultState');
+    if (note) note.textContent = 'Unsaved default changes — current default unchanged';
+}
+function renderScheduleDefaults(unavailable) {
+    if (!scheduleDefaultDraft && scheduleLoaded && validScheduleDefaults(scheduleData.defaults))
+        scheduleDefaultDraft = {...scheduleData.defaults};
+    for (const [id,key] of [['scheduleDefaultMode','mode'],['scheduleDefaultHeating','heatingTemp'],['scheduleDefaultDhw','dhwTemp']]) {
+        const input = document.getElementById(id);
+        if (!input) continue;
+        input.disabled = scheduleBusy || unavailable;
+        if (scheduleDefaultDraft && String(input.value) !== String(scheduleDefaultDraft[key])) input.value = scheduleDefaultDraft[key];
+    }
+    const save = document.getElementById('saveScheduleDefaultBtn');
+    if (save) save.disabled = scheduleBusy || unavailable;
+    const note = document.getElementById('scheduleDefaultState');
+    if (note) note.textContent = unavailable ? 'Waiting for saved default settings' : scheduleDefaultDirty ?
+        'Unsaved default changes — current default unchanged' : 'Saved default — used outside periods while scheduling is enabled and not paused';
+}
+async function saveScheduleDefault() {
+    if (scheduleBusy || !scheduleLoaded || scheduleLoadError) return;
+    captureScheduleDefaultDraft();
+    const draft = scheduleDefaultDraft;
+    const defaults = {mode:Number(draft.mode),heatingTemp:Number(draft.heatingTemp),dhwTemp:Number(draft.dhwTemp)};
+    if (Object.values(draft).some(v => String(v).trim() === '') || !validScheduleDefaults(defaults)) {
+        showNotification('Default requires a valid mode, heating 25–63°C and DHW 40–63°C', 'error'); return;
+    }
+    if (await performScheduleAction(API_SCHEDULE_URL + '/defaults', defaults, 'Schedule default saved')) {
+        scheduleDefaultDirty = false;
+        scheduleDefaultDraft = {...scheduleData.defaults};
+        renderSchedule();
+    }
+}
 function renderSchedule() {
     // Toggle
     const toggle = document.getElementById('scheduleEnabled');
     const unavailable = !scheduleLoaded || Boolean(scheduleLoadError);
+    renderScheduleDefaults(unavailable);
     if (toggle) {
         toggle.checked = scheduleData.enabled;
-        toggle.disabled = scheduleBusy || unavailable || (!scheduleData.enabled && scheduleData.ranges.length === 0);
+        toggle.disabled = scheduleBusy || unavailable;
     }
     const resume = document.getElementById('resumeScheduleBtn');
     if (resume) {
@@ -610,9 +676,10 @@ function renderSchedule() {
         } else if (scheduleRuntime && scheduleRuntime.online === false)
             stateEl.textContent = 'Schedule enabled — waiting for device connection';
         else if (scheduleRuntime && scheduleRuntime.pending)
-            stateEl.textContent = 'Schedule active — device update pending';
-        else if (scheduleRuntime && scheduleRuntime.active === false)
-            stateEl.textContent = 'Schedule enabled — outside a configured range; holding last settings';
+            stateEl.textContent = (scheduleRuntime.source === 'default' ? 'Schedule default' :
+                scheduleRuntime.source === 'schedule' ? 'Scheduled period' : 'Schedule enabled') + ' — device update pending';
+        else if (scheduleRuntime && scheduleRuntime.source === 'default')
+            stateEl.textContent = scheduleData.ranges.length ? 'Schedule default active — outside configured periods' : 'Schedule default active — no periods configured';
         else if (scheduleRuntime && scheduleRuntime.active === true) {
             stateEl.textContent = 'Schedule active';
             stateEl.className = 'schedule-state active';
@@ -629,7 +696,7 @@ function renderSchedule() {
     container.innerHTML = '';
 
     if (scheduleData.ranges.length === 0) {
-        container.innerHTML = '<p class="placeholder-text">No time ranges configured. Tap "+ Add" below.</p>';
+        container.innerHTML = '<p class="placeholder-text">No periods configured. The saved default applies whenever scheduling is enabled and not paused.</p>';
         return;
     }
 
@@ -684,17 +751,20 @@ function closeEditModal() {
 }
 
 async function performScheduleAction(url, payload, message, closeEditor = false) {
-    if (scheduleBusy || !scheduleLoaded || scheduleLoadError) return;
+    if (scheduleBusy || !scheduleLoaded || scheduleLoadError) return false;
     scheduleBusy = true;
     renderSchedule();
     try {
         const response = await apiPost(url, payload);
         // Older backends return only {success:true}; reload rather than guessing.
-        applyScheduleResponse(Array.isArray(response.ranges) ? response : await apiGet(API_SCHEDULE_URL));
+        if (!applyScheduleResponse(Array.isArray(response.ranges) ? response : await apiGet(API_SCHEDULE_URL)))
+            throw new Error('Newer schedule settings received; review and retry');
         if (closeEditor) closeEditModal();
         showNotification(message, 'success');
+        return true;
     } catch (e) {
         showNotification('Schedule change failed: ' + e.message, 'error');
+        return false;
     } finally {
         scheduleBusy = false;
         renderSchedule();
@@ -723,22 +793,23 @@ async function saveEditModal() {
 async function deleteEditModal() {
     if (editingRangeIndex < 0 || scheduleBusy) return;
     const ranges = scheduleData.ranges.filter((_, i) => i !== editingRangeIndex).map(r => ({...r}));
-    await performScheduleAction(API_SCHEDULE_URL, {enabled: ranges.length ? scheduleData.enabled : false, ranges},
-        ranges.length ? 'Range deleted' : 'Last range deleted; schedule disabled', true);
+    await performScheduleAction(API_SCHEDULE_URL, {enabled: scheduleData.enabled, ranges},
+        ranges.length ? 'Range deleted' : 'Last period deleted; default-only policy saved', true);
 }
 
 // Schedule event bindings
 function bindScheduleEvents() {
+    for (const id of ['scheduleDefaultMode','scheduleDefaultHeating','scheduleDefaultDhw']) {
+        const input = document.getElementById(id);
+        if (input) for (const event of ['input','change']) input.addEventListener(event,captureScheduleDefaultDraft);
+    }
+    const defaultSave = document.getElementById('saveScheduleDefaultBtn');
+    if (defaultSave) defaultSave.addEventListener('click',saveScheduleDefault);
     // Toggle enable/disable
     const toggle = document.getElementById('scheduleEnabled');
     if (toggle) {
         toggle.addEventListener('change', async () => {
             const wanted = toggle.checked;
-            if (wanted && scheduleData.ranges.length === 0) {
-                showNotification('Add a time range before enabling the schedule', 'error');
-                renderSchedule();
-                return;
-            }
             await performScheduleAction(API_SCHEDULE_TOGGLE_URL, {enabled: wanted},
                 'Schedule ' + (wanted ? 'enabled' : 'disabled'));
         });

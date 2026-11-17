@@ -71,7 +71,7 @@ bool temperature(const Fields& f, const char* key, float& out, double minimum, d
     out = static_cast<float>(value); return true;
 }
 }
-bool ScheduleConfig::parseJson(const std::string& json, ScheduleState& out, std::string& error) {
+bool ScheduleConfig::parseJson(const std::string& json, ScheduleState& out, std::string& error, bool* defaultsPresent) {
     auto fail = [&](const char* reason) { error = reason; return false; };
     const auto first = json.find_first_not_of(" \r\n\t"), last = json.find_last_not_of(" \r\n\t");
     if (first == std::string::npos) return fail("Empty schedule JSON");
@@ -82,7 +82,7 @@ bool ScheduleConfig::parseJson(const std::string& json, ScheduleState& out, std:
     if (mg_json_get(root, "$", &length) != 0 || static_cast<size_t>(length) != trimmed.size())
         return fail("Malformed schedule JSON");
     Fields f;
-    if (!fields(root, {"enabled", "paused", "ranges"}, f)) return fail("Invalid or duplicate schedule fields");
+    if (!fields(root, {"enabled", "paused", "ranges", "defaults"}, f)) return fail("Invalid or duplicate schedule fields");
     const auto enabled = f.find("\"enabled\""), ranges = f.find("\"ranges\"");
     if (enabled == f.end() || ranges == f.end()) return fail("Enabled and ranges are required");
     ScheduleState candidate;
@@ -93,6 +93,8 @@ bool ScheduleConfig::parseJson(const std::string& json, ScheduleState& out, std:
     }
     const auto paused = f.find("\"paused\"");
     if (paused != f.end() && !mg_json_get_bool(paused->second, "$", &candidate.paused)) return fail("Paused must be boolean");
+    const auto defaults = f.find("\"defaults\"");
+    if (defaults != f.end() && !parseDefaultsJson(std::string(defaults->second.buf,defaults->second.len),candidate.defaults,error)) return false;
     const auto array = ranges->second;
     if (array.len < 2 || array.buf[0] != '[') return fail("Ranges must be an array");
     size_t offset = 0; mg_str object{};
@@ -109,9 +111,23 @@ bool ScheduleConfig::parseJson(const std::string& json, ScheduleState& out, std:
         if (candidate.ranges.size() > 1440) return fail("Too many schedule ranges");
     }
     if (!Scheduler::validateRanges(candidate.ranges)) return fail("Invalid bounds or overlapping schedule ranges");
-    if (candidate.enabled && candidate.ranges.empty()) return fail("Cannot enable an empty schedule");
+    if (defaultsPresent) *defaultsPresent = defaults != f.end();
     out = std::move(candidate);
     error.clear(); return true;
+}
+bool ScheduleConfig::parseDefaultsJson(const std::string& json, ScheduleDefaults& out, std::string& error) {
+    const auto first = json.find_first_not_of(" \r\n\t"), last = json.find_last_not_of(" \r\n\t");
+    const auto trimmed = first == std::string::npos ? std::string{} : json.substr(first,last-first+1);
+    const auto root = mg_str_n(trimmed.data(),trimmed.size());
+    Fields values; ScheduleDefaults candidate; int length = 0;
+    if (!lexicalJson(trimmed) || mg_json_get(root,"$",&length) != 0 || static_cast<size_t>(length) != trimmed.size() ||
+        !fields(root,{"mode","heatingTemp","dhwTemp"},values) || values.size() != 3 ||
+        !integer(values,"\"mode\"",candidate.mode) ||
+        !temperature(values,"\"heatingTemp\"",candidate.heatingTemp,HEATING_TEMP_MIN,HEATING_TEMP_MAX) ||
+        !temperature(values,"\"dhwTemp\"",candidate.dhwTemp,DHW_TEMP_MIN,DHW_TEMP_MAX) || !Scheduler::validateDefaults(candidate)) {
+        error = "Invalid or incomplete schedule defaults"; return false;
+    }
+    out = candidate; error.clear(); return true;
 }
 bool ScheduleConfig::parseEnabledJson(const std::string& json, bool& enabled) {
     const auto first = json.find_first_not_of(" \r\n\t"), last = json.find_last_not_of(" \r\n\t");
@@ -132,7 +148,9 @@ bool ScheduleConfig::parseEnabledJson(const std::string& json, bool& enabled) {
 std::string ScheduleConfig::toJson(const ScheduleState& state, bool runtime) {
     std::ostringstream out; out.imbue(std::locale::classic());
     out << "{\"enabled\":" << (state.enabled ? "true" : "false")
-        << ",\"paused\":" << (state.paused ? "true" : "false") << ",\"ranges\":[";
+        << ",\"paused\":" << (state.paused ? "true" : "false")
+        << ",\"defaults\":{\"mode\":" << state.defaults.mode << ",\"heatingTemp\":" << state.defaults.heatingTemp
+        << ",\"dhwTemp\":" << state.defaults.dhwTemp << "},\"ranges\":[";
     for (size_t i = 0; i < state.ranges.size(); ++i) {
         if (i) out << ',';
         const auto& r = state.ranges[i];
@@ -149,21 +167,21 @@ bool ScheduleConfig::setRanges(const std::vector<ScheduleRange>& ranges) {
     state_.ranges = ranges; return true;
 }
 bool ScheduleConfig::setState(const ScheduleState& state) {
-    if (!Scheduler::validateRanges(state.ranges) || (state.enabled && state.ranges.empty())) return false;
-    state_ = state; return true;
+    if (!Scheduler::validateRanges(state.ranges) || !Scheduler::validateDefaults(state.defaults)) return false;
+    state_ = state; has_defaults_ = true; return true;
 }
 bool ScheduleConfig::loadFromFile(const std::string& filename) {
     std::ifstream file(filename);
     if (!file) return false;
     std::stringstream contents; contents << file.rdbuf();
-    ScheduleState candidate; std::string error;
-    if (file.bad() || !parseJson(contents.str(), candidate, error)) {
+    ScheduleState candidate; std::string error; bool defaultsPresent = false;
+    if (file.bad() || !parseJson(contents.str(), candidate, error, &defaultsPresent)) {
         WINDMI_LOG_WARN(LOG_TAG_SCHEDULER, "Invalid schedule file: %s", error.c_str()); return false;
     }
-    state_ = std::move(candidate); return true;
+    state_ = std::move(candidate); has_defaults_ = defaultsPresent; return true;
 }
 bool ScheduleConfig::saveToFile(const std::string& filename) const {
-    if (!Scheduler::validateRanges(state_.ranges) || (state_.enabled && state_.ranges.empty())) return false;
+    if (!Scheduler::validateRanges(state_.ranges) || !Scheduler::validateDefaults(state_.defaults)) return false;
     const std::filesystem::path destination(filename);
     std::error_code error;
     if (!destination.parent_path().empty()) std::filesystem::create_directories(destination.parent_path(), error);

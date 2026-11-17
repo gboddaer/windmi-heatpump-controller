@@ -31,7 +31,6 @@ TEST(ScheduleJsonSafetyTest, StrictShapeTypesAndCompleteDocument) {
         R"({"enabled":false,"ranges":[{"start":0,"end":1440,"mode":3,"heatingTemp":63.000001}]})",
         std::string("{\"enabled\":false,\"ranges\":[],\"paused\":") + std::string(10000,'1') + "}",
         R"({"enabled":false,"ranges":[{"start":0,"end":1440,"mode":3},{"start":10}]})",
-        R"({"enabled":true,"ranges":[]})",
         R"({"enabled":false,"ranges":[],"paused":0})"}) {
         EXPECT_FALSE(ScheduleConfig::parseJson(bad, state, error)) << bad;
         EXPECT_FALSE(error.empty());
@@ -41,6 +40,8 @@ TEST(ScheduleJsonSafetyTest, EmptyDisabledAndLegacySafeDefaultsAreAccepted) {
     ScheduleState state; std::string error;
     EXPECT_TRUE(ScheduleConfig::parseJson(R"({"enabled":false,"ranges":[]})", state, error));
     EXPECT_TRUE(state.ranges.empty());
+    EXPECT_TRUE(ScheduleConfig::parseJson(R"({"enabled":true,"ranges":[]})", state, error));
+    EXPECT_EQ(Scheduler::select(state,600).source,ScheduleSource::Default);
     EXPECT_TRUE(ScheduleConfig::parseJson(R"({"enabled":1,"ranges":[{"start":0,"end":1440,"mode":3}]})", state, error));
     EXPECT_EQ(state.ranges[0].heatingTemp, 40);
     EXPECT_EQ(state.ranges[0].dhwTemp, 50);

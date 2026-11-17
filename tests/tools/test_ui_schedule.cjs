@@ -4,6 +4,7 @@ const fs = require('node:fs'); const vm = require('node:vm'); const path = requi
 const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root,'static/index.html'),'utf8');
 const day = {start:0,end:1440,mode:3,heatingTemp:40,dhwTemp:50};
+const defaults = {mode:1,heatingTemp:35,dhwTemp:48};
 function fixture(state = {}) {
     const node = () => { const classes = new Set(); return {value:'',textContent:'',innerHTML:'',checked:false,disabled:false,
         dataset:{},style:{},children:[],handlers:{},classList:{add:c=>classes.add(c),remove:c=>classes.delete(c),
@@ -15,15 +16,17 @@ function fixture(state = {}) {
         document:{getElementById:id=>nodes[id]||null,querySelectorAll:()=>[],createElement:node,head:node(),body:node()},
         fetch:async(url,options={})=>{requests.push({url,...options}); const reply=replies.shift();
             if (!reply) throw new Error('unexpected mocked fetch '+url);
-            return {ok:reply.code<400,status:reply.code,json:async()=>reply.body};}});
+            return {ok:reply.code<400,status:reply.code,json:async()=>Array.isArray(reply.body.ranges) ?
+                {defaults:{...context.initial.defaults},...reply.body} : reply.body};}});
     vm.runInContext(fs.readFileSync(path.join(root,'static/diagnostics.js'),'utf8'),context);
     vm.runInContext(fs.readFileSync(path.join(root,'static/app.js'),'utf8').replace(/^init\(\);$/m,''),context);
-    context.initial={enabled:false,paused:false,ranges:[{...day}],revision:1,...state};
+    context.initial={enabled:false,paused:false,defaults:{...defaults},ranges:[{...day}],revision:1,...state};
     vm.runInContext('scheduleData=initial; scheduleLoaded=true; bindScheduleEvents();',context);
     return {nodes,replies,requests,run:code=>vm.runInContext(code,context),
         data:()=>JSON.parse(vm.runInContext('JSON.stringify(scheduleData)',context))};
 }
-(async()=>{
+module.exports={fixture,day,defaults};
+if (require.main === module) (async()=>{
     let f=fixture(); f.run('openEditModal(0)');
     f.replies.push({code:422,body:{error:'Rejected'}}); await f.run('deleteEditModal()');
     assert.equal(f.data().ranges.length,1,'failed deletion must retain confirmed ranges');
@@ -46,9 +49,9 @@ function fixture(state = {}) {
     assert(!f.nodes.scheduleEditModal.classList.contains('visible'));
 
     f=fixture({enabled:true}); f.run('openEditModal(0)');
-    f.replies.push({code:200,body:{enabled:false,paused:false,ranges:[],revision:2}});
+    f.replies.push({code:200,body:{enabled:true,paused:false,ranges:[],revision:2}});
     await f.run('deleteEditModal()');
-    assert.equal(JSON.parse(f.requests[0].body).enabled,false,'deleting last range disables scheduling');
+    assert.equal(JSON.parse(f.requests[0].body).enabled,true,'deleting last range retains default-only automation');
     assert.equal(f.data().ranges.length,0);
 
     for (const invalid of ['999','', '24.9']) {
@@ -73,7 +76,7 @@ function fixture(state = {}) {
     assert.equal(f.data().revision,4,'late GET must not replace a newer confirmed save');
     f.run('updateScheduleStatus({scheduleEnabled:false,schedulePaused:true,scheduleRevision:3,scheduleActive:false,deviceOnline:true})');
     assert.equal(f.data().enabled,true,'older status must not undo a confirmed save');
-    f.run('updateScheduleStatus({scheduleEnabled:true,schedulePaused:false,scheduleRevision:4,scheduleActive:false,deviceOnline:true})');
+    f.run('updateScheduleStatus({controlSource:"default",scheduleEnabled:true,schedulePaused:false,scheduleRevision:4,scheduleActive:false,deviceOnline:true})');
     assert.match(f.nodes.scheduleState.textContent,/outside/i);
     f.run('updateScheduleStatus({scheduleEnabled:true,schedulePaused:false,scheduleRevision:4,scheduleActive:true,schedulePending:true,deviceOnline:true})');
     assert.match(f.nodes.scheduleState.textContent,/pending/i);

@@ -1,0 +1,64 @@
+const assert=require('node:assert/strict');
+const {fixture,day,defaults}=require('./test_ui_schedule.cjs');
+(async()=>{
+    let f=fixture({enabled:true});
+    f.run('currentMode=3; pendingMode=null');
+    f.replies.push({code:200,body:{success:true}});
+    await f.run('setWorkingMode(3)');
+    assert.equal(f.requests.length,1,'same-mode selection must post explicit manual intent');
+    assert.equal(f.requests[0].url,'/api/set-mode');
+    assert.equal(JSON.parse(f.requests[0].body).mode,3);
+    await f.run('setWorkingMode(3)');
+    assert.equal(f.requests.length,1,'ignore duplicate clicks while the request is pending');
+
+    f=fixture({enabled:true,paused:true}); f.run('renderSchedule()');
+    assert.equal(Number(f.nodes.scheduleDefaultMode.value),1);
+    assert.equal(Number(f.nodes.scheduleDefaultHeating.value),35);
+    f.nodes.scheduleDefaultHeating.value='37'; f.nodes.scheduleDefaultHeating.handlers.input();
+    f.run('updateScheduleStatus({controlSource:"manual",scheduleEnabled:true,schedulePaused:true,scheduleRevision:1,deviceOnline:true})');
+    assert.equal(Number(f.nodes.scheduleDefaultHeating.value),37,'polls must not destroy the draft');
+    assert.equal(f.data().defaults.heatingTemp,35,'typing must not change committed defaults');
+    f.replies.push({code:500,body:{error:'Disk full'}});
+    await f.nodes.saveScheduleDefaultBtn.handlers.click();
+    assert.equal(f.data().defaults.heatingTemp,35); assert.equal(f.data().paused,true);
+    assert.equal(Number(f.nodes.scheduleDefaultHeating.value),37,'failed save retains draft');
+    const posted=JSON.parse(f.requests[0].body);
+    assert.equal(f.requests[0].url,'/api/schedule/defaults');
+    assert.deepEqual(posted,{...defaults,heatingTemp:37},'default save must not send cached periods or enable state');
+    f.nodes.scheduleDefaultMode.value='2'; f.nodes.scheduleDefaultHeating.value='38'; f.nodes.scheduleDefaultDhw.value='51';
+    f.replies.push({code:200,body:{enabled:true,paused:true,defaults:{mode:2,heatingTemp:38,dhwTemp:51},ranges:[day],revision:2}});
+    await f.nodes.saveScheduleDefaultBtn.handlers.click();
+    assert.equal(f.data().defaults.mode,2); assert.equal(f.data().paused,true,'saving a default must not Resume');
+    assert.equal(f.data().ranges[0].heatingTemp,40,'default changes must not edit periods');
+    assert.equal(f.run('scheduleDefaultDirty'),false);
+
+    for (const [id,value] of [['scheduleDefaultHeating',''],['scheduleDefaultHeating','24.9'],['scheduleDefaultDhw','63.1'],['scheduleDefaultMode','7']]) {
+        f=fixture(); f.run('renderSchedule()'); f.nodes[id].value=value;
+        await f.nodes.saveScheduleDefaultBtn.handlers.click(); assert.equal(f.requests.length,0,'reject unsafe default '+id+':'+value);
+    }
+    f=fixture({enabled:true}); f.run('renderSchedule()');
+    f.nodes.scheduleDefaultHeating.value='37'; f.nodes.scheduleDefaultHeating.handlers.input();
+    f.run('openEditModal(0)'); f.nodes.editHeatingTemp.value='44';
+    f.replies.push({code:200,body:{enabled:true,paused:false,ranges:[{...day,heatingTemp:44}],revision:2}});
+    await f.run('saveEditModal()');
+    assert.equal(Number(f.nodes.scheduleDefaultHeating.value),37,'period save retains independent default draft');
+    assert.equal(f.data().defaults.heatingTemp,35); assert.equal(f.data().ranges[0].heatingTemp,44);
+    f.replies.push({code:200,body:{enabled:true,paused:false,defaults:{...defaults,heatingTemp:37},ranges:[day],revision:1}});
+    await f.nodes.saveScheduleDefaultBtn.handlers.click();
+    assert.equal(f.data().revision,2,'late default reply must not roll back confirmed state');
+    assert.equal(f.data().defaults.heatingTemp,35); assert.equal(f.run('scheduleDefaultDirty'),true);
+    f=fixture({enabled:true,ranges:[]}); f.run('renderSchedule()');
+    assert.equal(f.nodes.scheduleEnabled.disabled,false,'default-only scheduling is valid');
+    f.run('updateScheduleStatus({controlSource:"default",scheduleEnabled:true,schedulePaused:false,scheduleRevision:1,scheduleActive:false,deviceOnline:true})');
+    assert.match(f.nodes.scheduleState.textContent,/default/i);
+    assert.doesNotMatch(f.nodes.scheduleState.textContent,/holding last/i);
+    f.run('updateControlSource({controlSource:"default",deviceOnline:true})');
+    assert.match(f.nodes.controlSourceValue.textContent,/schedule default/i);
+    f.run('updateControlSource({controlSource:"schedule",schedulePending:true,deviceOnline:true})');
+    assert.match(f.nodes.controlSourceValue.textContent,/period.*pending/i);
+    f.run('updateControlSource({controlSource:"manual",schedulePaused:true,deviceOnline:true})');
+    assert.match(f.nodes.controlSourceValue.textContent,/manual.*paused/i);
+    f.run('updateControlSource({controlSource:"default",deviceOnline:false})');
+    assert.match(f.nodes.controlSourceValue.textContent,/offline|unconfirmed/i);
+    console.log('Schedule defaults UI: same-mode intent, independent drafts, rollback, validation, pause and source checks passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});
