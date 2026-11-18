@@ -232,6 +232,28 @@
                             <dt>Reported DHW profile</dt><dd id="diagDhwProfile">Unavailable</dd>
                         </dl>
                     </section>
+                    <section class="status-card diagnostic-wide" id="backupHeaterCard">
+                        <h3>Backup water heater — validation only</h3>
+                        <div class="backup-validation-grid">
+                            <dl class="diagnostic-values">
+                                <dt>Heater activation state</dt><dd id="diagBackupState">Unknown — validation not complete</dd>
+                                <dt>Before heater (Tw-out, 0x1008)</dt><dd id="diagBackupBefore">Unavailable</dd>
+                                <dt>After heater (T1, 0x0004)</dt><dd id="diagBackupAfter">Unavailable</dd>
+                                <dt>After − before temperature</dt><dd id="diagBackupDelta">Unavailable</dd>
+                                <dt>Estimated added water heat</dt><dd id="diagBackupHeat">Unavailable</dd>
+                                <dt>Measurement check</dt><dd id="diagBackupValidity">Unavailable</dd>
+                                <dt>Source sampling span</dt><dd id="diagBackupSpan">Unavailable</dd>
+                            </dl>
+                            <dl class="diagnostic-values">
+                                <dt>Backup configuration (0x0259)</dt><dd id="diagBackupType">Unavailable</dd>
+                                <dt>Warm-up setting (0x025A, raw)</dt><dd id="diagBackupWarmup">Unavailable</dd>
+                                <dt>Booster temperature deficit (0x025B)</dt><dd id="diagBackupDeltaSetting">Unavailable</dd>
+                                <dt>Booster outdoor threshold (0x025C)</dt><dd id="diagBackupOatSetting">Unavailable</dd>
+                                <dt>Compressor minimum heating OAT (0x0202)</dt><dd id="diagCompressorMinOat">Unavailable</dd>
+                            </dl>
+                        </div>
+                        <p class="diagnostic-note">Water-based estimate, not an ON/OFF signal or electricity meter. Sensor offsets and thermal lag need comparison with controller query item 36. Settings are read-only; no anti-freeze-only configuration has been verified.</p>
+                    </section>
                     <section class="status-card">
                         <h3>Electrical &amp; heat estimates</h3>
                         <dl class="diagnostic-values">
@@ -246,7 +268,7 @@
                     </section>
                     <section class="status-card">
                         <h3>Raw registers &amp; sample ages</h3>
-                        <p class="diagnostic-note">Alarm banks rotate every 2 minutes; auxiliary registers every 4½ minutes at the normal 30-second tick. Missing or stale banks cannot confirm the absence of faults.</p>
+                        <p class="diagnostic-note">Alarm banks rotate every 2 minutes; auxiliary registers every 7 minutes at the normal 30-second tick. Missing or stale banks cannot confirm the absence of faults.</p>
                         <details>
                             <summary>Show register readings</summary>
                             <div class="diagnostic-table-scroll">

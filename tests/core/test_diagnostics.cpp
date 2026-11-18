@@ -27,6 +27,24 @@ const DiagnosticReading& reading(const DiagnosticSnapshot& s, uint16_t address) 
 }
 }
 
+TEST(DiagnosticRegistersTest, BackupParametersStayWithinTwoReadBudgetAndHaveDerivedFreshness) {
+    EXPECT_EQ(diagnosticGroupCount(DiagnosticGroup::Auxiliary), 14u);
+    EXPECT_EQ(diagnosticMaxAgeSeconds(DiagnosticGroup::Auxiliary), 480);
+    EXPECT_EQ(diagnosticMaxAgeSeconds(DiagnosticGroup::Alarm), 180);
+    DiagnosticClient c;
+    c.values[0x0259] = 6; c.values[0x025A] = 600; c.values[0x025B] = 100;
+    c.values[0x025C] = -50; c.values[0x0202] = -260;
+    DiagnosticMonitor m;
+    for (uint64_t i = 0; i < 14; ++i) m.sampleOptional(c, i * 30000);
+    EXPECT_EQ(c.reads.size(), 28u);
+    auto snapshot = m.snapshot(14 * 30000);
+    for (uint16_t address : {0x0259,0x025A,0x025B,0x025C,0x0202}) {
+        ASSERT_LT(diagnosticIndex(address), kDiagnosticRegisterCount);
+        EXPECT_TRUE(reading(snapshot, address).raw);
+    }
+    EXPECT_EQ(c.writes, 0);
+}
+
 TEST(DiagnosticRegistersTest, ZeroAndUnsignedHighBitsAreNotMissing) {
     DiagnosticClient c;
     c.values[0x1009] = static_cast<int16_t>(0x8001);

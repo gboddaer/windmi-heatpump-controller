@@ -147,6 +147,31 @@ const DiagnosticsUI = (() => {
         set('diagUnitRating', fmt(get('unitCapacity', status.unitCapacityKw > 0 ? status.unitCapacityKw : undefined), n => n + ' kW'));
         set('diagCapacityRaw', fmt(get('capacityOutput', status.actualCapacityOutput)));
 
+        const backup = status.backupHeater;
+        const evidence = (value, format) => !live ? (stale && !apiError ? 'Stale' : missing) :
+            number(value) ? format(value) : missing;
+        set('diagBackupState', backup ? 'Unknown — validation not complete' : 'Unknown — backend update required');
+        set('diagBackupBefore', evidence(backup && backup.beforeC, n => n.toFixed(1) + ' °C'));
+        set('diagBackupAfter', evidence(backup && backup.afterC, n => n.toFixed(1) + ' °C'));
+        set('diagBackupDelta', evidence(backup && backup.deltaC, n => n.toFixed(1) + ' °C'));
+        set('diagBackupHeat', evidence(backup && backup.measurementValid === true ? backup.estimatedAddedHeatW : null,
+            n => Math.round(n) + ' W'));
+        set('diagBackupSpan', evidence(backup && backup.sampleSpanMs, n => n + ' ms'));
+        const reasons = {ok: 'Paired readings usable; heater state unvalidated', no_flow: 'No flow — heat estimate unavailable',
+            offline: 'Device offline', missing_temperature: 'A paired temperature is unavailable',
+            invalid_temperature: 'Invalid temperature reading', missing_flow: 'Flow reading unavailable',
+            invalid_flow: 'Invalid flow reading', sample_skew: 'Source reads more than 5 seconds apart',
+            stale_sample: 'Source readings too old', sample_time: 'Invalid source timing'};
+        set('diagBackupValidity', !live ? (stale && !apiError ? 'Stale snapshot' : missing) :
+            backup ? reasons[backup.reason] || 'Unknown measurement condition' : 'Backend update required');
+        const backupTypes = ['Main-loop + DHW + boiler', 'Main-loop + DHW', 'DHW + boiler', 'Main-loop + boiler',
+            'DHW only', 'Boiler only', 'Main-loop EH only', 'No auxiliary heater configured'];
+        set('diagBackupType', fmt(get('backupType'), n => n + ' · ' + (backupTypes[n] || 'Unknown configuration')));
+        set('diagBackupWarmup', fmt(get('backupWarmup'), n => n + ' raw (scale/range unverified)'));
+        set('diagBackupDeltaSetting', temp(get('backupDelta')));
+        set('diagBackupOatSetting', temp(get('backupOatThreshold')));
+        set('diagCompressorMinOat', temp(get('minHeatingOat')));
+
         let coverage = 0, activeBits = 0;
         const alarms = [];
         for (let bank = 0; bank < 4; bank++) {

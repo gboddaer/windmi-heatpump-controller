@@ -19,8 +19,7 @@ inline std::string diagnosticsJson(const DiagnosticSnapshot& snapshot) {
         const uint64_t age_ms = snapshot.observed_at_ms >= reading.sampled_at_ms
             ? snapshot.observed_at_ms - reading.sampled_at_ms : 0;
         json += reading.raw ? std::to_string(age_ms / 1000) : "null";
-        const int max_age = spec.group == DiagnosticGroup::Existing ? 90 :
-                            spec.group == DiagnosticGroup::Alarm ? 180 : 330;
+        const int max_age = diagnosticMaxAgeSeconds(spec.group);
         json += ",\"maxAgeSeconds\":" + std::to_string(max_age) + '}';
     }
     return json + "}}";

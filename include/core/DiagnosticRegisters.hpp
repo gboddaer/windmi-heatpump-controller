@@ -29,6 +29,7 @@ inline constexpr DiagnosticRegisterSpec kDiagnosticRegisters[] = {
     {"capacityOutput", REG_ACTUAL_CAPACITY_OUTPUT, DiagnosticGroup::Existing},
     {"unitCapacity", REG_UNIT_CAPACITY, DiagnosticGroup::Existing},
     {"leavingWater", REG_LEAVING_WATER_TEMP, DiagnosticGroup::Existing},
+    {"beforeHeater", REG_BEFORE_BACKUP_HEATER_TEMP, DiagnosticGroup::Existing},
     {"enteringWater", REG_ENTERING_WATER_TEMP, DiagnosticGroup::Existing},
     {"tankTemperature", REG_DHW_TANK_TEMP, DiagnosticGroup::Existing},
     {"dhwTarget", REG_DHW_TARGET, DiagnosticGroup::Existing},
@@ -54,8 +55,22 @@ inline constexpr DiagnosticRegisterSpec kDiagnosticRegisters[] = {
     {"fanUpper", 0x101D, DiagnosticGroup::Auxiliary},
     {"fanLower", 0x101E, DiagnosticGroup::Auxiliary},
     {"ipmReason", 0x1022, DiagnosticGroup::Auxiliary},
+    // Configuration, not current heater state. Read only here; no setters.
+    {"backupType", 0x0259, DiagnosticGroup::Auxiliary},
+    {"backupWarmup", 0x025A, DiagnosticGroup::Auxiliary},
+    {"backupDelta", 0x025B, DiagnosticGroup::Auxiliary},
+    {"backupOatThreshold", 0x025C, DiagnosticGroup::Auxiliary},
+    {"minHeatingOat", 0x0202, DiagnosticGroup::Auxiliary},
 };
 inline constexpr size_t kDiagnosticRegisterCount = sizeof(kDiagnosticRegisters) / sizeof(kDiagnosticRegisters[0]);
+inline constexpr size_t diagnosticGroupCount(DiagnosticGroup group) {
+    size_t count = 0;
+    for (const auto& spec : kDiagnosticRegisters) if (spec.group == group) ++count;
+    return count;
+}
+inline constexpr int diagnosticMaxAgeSeconds(DiagnosticGroup group) {
+    return group == DiagnosticGroup::Existing ? 90 : static_cast<int>(diagnosticGroupCount(group) * 30 + 60);
+}
 inline size_t diagnosticIndex(uint16_t address) {
     for (size_t i = 0; i < kDiagnosticRegisterCount; ++i)
         if (kDiagnosticRegisters[i].address == address) return i;
