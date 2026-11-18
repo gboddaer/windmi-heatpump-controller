@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include "core/ControlLoop.hpp"
 #include "core/StatusMonitor.hpp"
+#include "core/BackupHeater.hpp"
 #include "modbus/IModbusClient.hpp"
 #include "config.h"
 #include "utils/Platform.hpp"
@@ -1653,6 +1654,51 @@ TEST(ScheduleDefaultsLoopTest, OfflineDefaultPolicyReportsPendingInsteadOfInvent
     EXPECT_TRUE(status.schedule_pending); EXPECT_FALSE(status.schedule_active);
     EXPECT_EQ(status.schedule_defaults.mode,1); EXPECT_EQ(status.schedule_defaults.dhwTemp,48);
 }
+TEST(BackupHeaterLoopTest, CapturesPairedTemperatureWithoutChangingPowerOrWrites) {
+    auto registers = fullRegisters();
+    registers[REG_LEAVING_WATER_TEMP] = 336;
+    registers[REG_ENTERING_WATER_TEMP] = 300;
+    registers[REG_WATER_FLOW] = 100;
+    registers[REG_BEFORE_BACKUP_HEATER_TEMP] = 310;
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(2, "dhw", 46, 40));
+    auto status = runner.tickSnapshot(); runner.stop();
+    auto validation = estimateBackupHeater(status.diagnostics, status.device_online);
+    ASSERT_TRUE(validation.measurement_valid);
+    EXPECT_NEAR(*validation.estimated_added_heat_w, 3023.22, .1);
+    EXPECT_TRUE(status.heat_output_valid);
+    EXPECT_NEAR(status.heat_output_w, 4186.0, .2); // Existing total-water output stays unchanged.
+    EXPECT_FALSE(wrote(client, REG_BEFORE_BACKUP_HEATER_TEMP));
+}
+TEST(BackupHeaterLoopTest, ValidationStillWorksWithCompressorAndEstimatedElectricalInputAtZero) {
+    auto registers = fullRegisters();
+    registers[REG_COMPRESSOR_FREQ] = 0;
+    registers[REG_AC_CURRENT] = 0;
+    registers[REG_BEFORE_BACKUP_HEATER_TEMP] = 310;
+    registers[REG_LEAVING_WATER_TEMP] = 336;
+    registers[REG_WATER_FLOW] = 100;
+    FakeModbusClient client(registers);
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(2, "dhw", 46, 40));
+    auto status = runner.tickSnapshot(); runner.stop();
+    auto validation = estimateBackupHeater(status.diagnostics, status.device_online);
+    EXPECT_TRUE(validation.measurement_valid);
+    EXPECT_FALSE(status.cop_valid);
+    EXPECT_EQ(status.ac_power_w, 0);
+}
+TEST(BackupHeaterLoopTest, UnsupportedBeforeSensorLeavesOnlineAndExistingCopUsable) {
+    FakeModbusClient client(fullRegisters());
+    TickedLoop runner(client);
+    ASSERT_TRUE(runner.start(2, "dhw", 46, 40));
+    auto status = runner.tickSnapshot(); runner.stop();
+    auto validation = estimateBackupHeater(status.diagnostics, status.device_online);
+    EXPECT_TRUE(status.device_online);
+    EXPECT_TRUE(status.cop_valid);
+    EXPECT_FALSE(validation.measurement_valid);
+    EXPECT_EQ(validation.reason, "missing_temperature");
+}
+
 // ---- Liveness has to be in the payload ----
 // A calm unit and a stalled control loop look identical from outside: the registers
 // stop moving in both cases, because there is nothing to move. Measured 2026-11-13

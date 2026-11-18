@@ -84,6 +84,7 @@ extern "C" {
 #define REG_INDOOR_TEMP           0x0002  // R  - Indoor temperature (0.1°C)
 #define REG_ENTERING_WATER_TEMP   0x0003  // R  - Entering water temperature (0.1°C)
 #define REG_LEAVING_WATER_TEMP    0x0004  // R  - Leaving water temperature (0.1°C)
+#define REG_BEFORE_BACKUP_HEATER_TEMP 0x1008 // R - Tw-out after BPHE, before EH; 0.1 C
 #define REG_WATER_CONTROL_POINT   0x0033  // R  - Water control point status
 #define REG_RUNNING_STATUS        0x002D  // R  - Current running status (0-5 normal, 7=defrost, 20=antifreeze)
 #define REG_DHW_MODE_STATUS       0x00C9  // R  - DHW mode: 0=Eco, 1=Anti Legionella, 2=Regular

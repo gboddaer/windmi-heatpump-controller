@@ -341,6 +341,13 @@ bool ControlLoop::readStatus(StatusSnapshot& status) {
         ok = false;
     }
 
+    // Pair T1 (after EH) with Tw-out (after BPHE, before EH). Keep adjacent
+    // and non-critical: an unsupported validation sensor must not affect control.
+    try {
+        (void)readRegister(REG_BEFORE_BACKUP_HEATER_TEMP);
+    } catch (const ModbusException&) {
+        // Diagnostic monitor records null; never substitute a synthetic zero.
+    }
     // Read entering water temp (0x0003)
     try {
         raw = readRegister(REG_ENTERING_WATER_TEMP);

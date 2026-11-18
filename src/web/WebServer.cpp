@@ -5,6 +5,7 @@
 
 #include "web/WebServer.hpp"
 #include "web/DiagnosticsJson.hpp"
+#include "web/BackupHeaterJson.hpp"
 #include "utils/Logger.hpp"
 #include "utils/LogTags.hpp"
 #include "utils/ScheduleConfig.hpp"
@@ -338,7 +339,8 @@ void WebServer::apiStatusHandler(struct mg_connection* c) {
     // string so a full register set cannot truncate the production JSON response.
     std::string payload(response);
     payload.pop_back();
-    payload += ",\"diagnostics\":" + diagnosticsJson(last_status_.diagnostics) + '}';
+    payload += ",\"diagnostics\":" + diagnosticsJson(last_status_.diagnostics);
+    payload += ",\"backupHeater\":" + backupHeaterJson(last_status_.diagnostics, last_status_.device_online) + '}';
     sendJsonReply(c, 200, payload.c_str());
 }
 

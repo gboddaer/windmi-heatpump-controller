@@ -25,13 +25,13 @@ progress only after the page has opened, not how old its first snapshot already 
 Existing register readings are recorded during their normal reads; there are no duplicate
 reads. At most two optional reads are added per normal 30-second tick: one rotating
 alarm bank and one rotating auxiliary register. UI command kicks do not accelerate
-this polling. Alarm banks refresh every 120 seconds; the nine auxiliaries every 270
-seconds. Read failures do not trigger retries in the diagnostics layer, change online
+this polling. Alarm banks refresh every 120 seconds; the fourteen auxiliaries every 420
+seconds (including the read-only backup-heater review settings). Read failures do not trigger retries in the diagnostics layer, change online
 status, or change arbitration. The underlying Modbus client's normal timeout policy
 still applies; this is a read-count limit, not a hard wall-clock deadline.
 
 Each register exposes an individual sample age. Alarm samples older than 180 seconds,
-auxiliary samples older than 330 seconds, and existing samples older than 90 seconds
+auxiliary samples older than 480 seconds, and existing samples older than 90 seconds
 are stale. Time since the last snapshot advance is added by the browser. "No alarm
 bits set" requires all four banks to have usable, fresh samples, and refers only to
 those samples—not a guarantee the device is fault-free. Set reserved/unknown bits
@@ -47,6 +47,12 @@ reported hours, not verified lifetime totals.
 Older backends still display existing values where useful, qualified with "validity
 not reported". Fields needing new reads and hardware alarm coverage remain unavailable.
 A new backend read failure never falls back to an older zero-filled API field.
+
+## Backup water heater validation
+
+See [backup-heater.md](backup-heater.md) for the paired before/after temperature
+estimate, GET-only CSV logger, parameter evidence and frost-safety limitations.
+This is explicitly unvalidated and does not assert activation or count runtime.
 
 ## DHW progress watchdog
 

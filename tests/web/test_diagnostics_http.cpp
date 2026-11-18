@@ -75,4 +75,31 @@ TEST(DiagnosticsHttpTest, FullRegisterPayloadIsNotTruncatedAtLegacyBufferSize) {
     EXPECT_EQ(mg_json_get_long(body, "$.diagnostics.registers.ipmReason.ageSeconds", -1), 86400);
     EXPECT_EQ(json.back(), '}');
 }
+TEST(BackupHeaterHttpTest, ProductionHandlerLabelsValidationAndPreservesUnavailableData) {
+    CmdQueue commands; StatusQueue snapshots; StatusSnapshot status;
+    status.device_online = true;
+    status.diagnostics.observed_at_ms = 4000;
+    status.diagnostics.readings.at(diagnosticIndex(REG_BEFORE_BACKUP_HEATER_TEMP)) = {310,1100};
+    status.diagnostics.readings.at(diagnosticIndex(REG_LEAVING_WATER_TEMP)) = {336,1000};
+    status.diagnostics.readings.at(diagnosticIndex(REG_WATER_FLOW)) = {107,3000};
+    snapshots.push(status);
+    WebServer server(19419, "static", &commands, &snapshots, nullptr);
+    auto json = getStatus(server, 19419);
+    auto body = mg_str_n(json.data(),json.size());
+    bool valid = false;
+    EXPECT_TRUE(mg_json_get_bool(body,"$.backupHeater.measurementValid",&valid)); EXPECT_TRUE(valid);
+    double watts = 0;
+    EXPECT_TRUE(mg_json_get_num(body,"$.backupHeater.estimatedAddedHeatW",&watts));
+    EXPECT_NEAR(watts,3234.8,.1);
+    double flow = 0;
+    EXPECT_TRUE(mg_json_get_num(body,"$.backupHeater.flowM3h",&flow));
+    EXPECT_NEAR(flow,1.07,.0001);
+    EXPECT_NE(json.find("\"status\":\"unvalidated\""),std::string::npos);
+    EXPECT_EQ(mg_json_get_long(body,"$.diagnostics.registers.backupWarmup.maxAgeSeconds",-1),480);
+    status.diagnostics.readings.at(diagnosticIndex(REG_BEFORE_BACKUP_HEATER_TEMP)).raw.reset();
+    snapshots.push(status); json = getStatus(server,19419);
+    EXPECT_NE(json.find("\"estimatedAddedHeatW\":null"),std::string::npos);
+    EXPECT_NE(json.find("\"reason\":\"missing_temperature\""),std::string::npos);
+    Command command; EXPECT_FALSE(commands.pop(command));
+}
 #endif
