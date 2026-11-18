@@ -73,4 +73,23 @@ assert.equal(nodes.dailyCostValue.textContent, '€0.30');
 render({dailyEnergyValid: true, dailyEnergyKwh: 1, pricePerKwhCents: 27.5});
 assert.equal(nodes.priceCentsInput.value, '27.5');
 
+
+// Placement: the estimates sit after the cycle COPs in the status row, and stay
+// inside that row, so the order the owner asked for cannot drift back.
+{
+    const row = html.slice(html.indexOf('status-row-main'));
+    const mainRow = row.slice(0, row.indexOf('</section>'));
+    const at = id => mainRow.indexOf('id="' + id + '"');
+    for (const id of ['modeValue', 'powerOutputValue', 'dailyEnergyValue', 'dailyCostValue',
+                      'heatingCycleCopValue', 'dhwCycleCopValue']) {
+        assert.ok(at(id) !== -1, id + ' must stay in the main status row');
+    }
+    assert.ok(at('heatingCycleCopValue') < at('dailyEnergyValue'),
+        'Energy today must come after Heating cycle COP');
+    assert.ok(at('dhwCycleCopValue') < at('dailyEnergyValue'),
+        'Energy today must come after DHW cycle COP');
+    assert.ok(at('dailyEnergyValue') < at('dailyCostValue'),
+        'Cost today follows Energy today');
+}
+
 console.log('Daily energy and cost: kWh/cost rendering, unavailable states, fallback tariff, input sync passed');
