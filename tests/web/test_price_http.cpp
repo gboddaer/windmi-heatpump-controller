@@ -112,6 +112,24 @@ TEST_F(PriceHttpTest, StatusCarriesDailyEnergyAndPrice)
   EXPECT_DOUBLE_EQ(27.5, price);
 }
 
+TEST_F(PriceHttpTest, StatusReturnsTheTariffTheUserSaved)
+{
+  // A tariff can be typed with decimals; the snapshot must carry it back unchanged,
+  // or the field visibly rewrites what the user just saved.
+  StatusSnapshot status;
+  status.device_online = true;
+  status.daily_energy_kwh = 2.0;
+  status.daily_energy_valid = true;
+  status.price_cents_per_kwh = 30.25;
+  snapshots.push(status);
+
+  const auto response = request("/api/status", "", "GET");
+  const mg_str json = bodyOf(response);
+  double price = 0;
+  ASSERT_TRUE(mg_json_get_num(json, "$.pricePerKwhCents", &price)) << response;
+  EXPECT_DOUBLE_EQ(30.25, price);
+}
+
 TEST_F(PriceHttpTest, PriceSaveIsAcceptedAndQueued)
 {
   const auto response = request("/api/price", R"({"priceCentsPerKwh":30})");

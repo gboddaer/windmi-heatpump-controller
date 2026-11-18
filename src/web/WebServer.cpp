@@ -293,7 +293,7 @@ void WebServer::apiStatusHandler(struct mg_connection* c)
       "\"powerValid\":%s,"
       "\"dailyEnergyKwh\":%.3f,"
       "\"dailyEnergyValid\":%s,"
-      "\"pricePerKwhCents\":%.1f,"
+      "\"pricePerKwhCents\":%.2f,"
       "\"compressorFrequency\":%.1f,"
       "\"waterFlow\":%.2f,"
       "\"unitCapacityKw\":%d,"
