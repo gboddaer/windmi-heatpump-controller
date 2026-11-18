@@ -2,6 +2,7 @@ add_executable(test_core
     test_mode_names.cpp
     test_arbitration.cpp
     test_cycle_cop.cpp
+    test_daily_energy.cpp
     test_backup_heater.cpp
     test_diagnostics.cpp
     test_control_loop.cpp
