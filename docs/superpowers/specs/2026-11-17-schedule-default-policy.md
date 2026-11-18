@@ -19,7 +19,7 @@ Implement in `.worktrees/schedule-default-policy`, independently of the unactiva
 ## Persistence/API
 
 - Persist defaults together with ranges, enabled and paused in schedule.json, using existing atomic transactions.
-- Legacy files without defaults migrate in memory from the existing startup UI working mode/targets; validate and use safe existing factory values if corrupt. Do not guess an earlier pre-schedule mode. No silent file rewrite on load; the next normal persisted mutation writes the new schema.
+- Legacy files without defaults seed from existing startup UI working mode/targets; validate and use safe existing factory values if corrupt. Do not guess an earlier pre-schedule mode. The adapter loads without writing; controller startup explicitly commits the seeded defaults before automation can overwrite UI settings. A failed migration save pauses enabled scheduling until explicit Resume. This startup durability correction was identified by real-process restart tests during main integration.
 - Legacy API updates omitting defaults preserve existing defaults; explicit defaults must contain all three correctly typed and bounded fields. Invalid defaults reject the entire transaction.
 - Default editor uses a dedicated defaults-only POST so it cannot resubmit stale periods/enabled/pause fields from another client. Whole-policy updates remain supported.
 - Expose `controlSource` (manual/default/schedule/pending) plus default values in live status, including offline metadata. Keep `scheduleActive` meaning a matching period, not default application.

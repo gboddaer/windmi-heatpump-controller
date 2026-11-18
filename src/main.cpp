@@ -344,9 +344,9 @@ int main(int argc, char* argv[])
   // Load schedule
   windmi::ScheduleConfig scheduleConfig;
   std::string schedule_path = windmi::platform::get_home_dir() + "/.windmi/schedule.json";
-  scheduleConfig.loadFromFile(schedule_path);
-  // Old files had no independent default; preserve current startup UI values
-  // without rewriting the file or guessing a previous pre-schedule mode.
+  const bool schedule_loaded = scheduleConfig.loadFromFile(schedule_path);
+  // Old files had no independent default. Seed from current startup UI values,
+  // never a guessed historical pre-schedule mode.
   g_control_loop->scheduler().restore(scheduleConfig.stateWithLegacyDefaults(
       {init_working_mode, init_heating_target, init_dhw_target}));
   g_control_loop->scheduler().setPersistenceHandler(
@@ -354,6 +354,21 @@ int main(int argc, char* argv[])
         windmi::ScheduleConfig candidate;
         return candidate.setState(state) && candidate.saveToFile(schedule_path);
       });
+  if (schedule_loaded && !scheduleConfig.hasDefaults())
+  {
+    // Commit the migration before any period can rewrite ui.*. Otherwise a
+    // restart during that period could silently turn its override into default.
+    auto& scheduler = g_control_loop->scheduler();
+    if (!scheduler.setDefaults(scheduler.snapshot().defaults))
+    {
+      scheduler.pause();
+      WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Legacy schedule defaults could not be saved; enabled "
+                                     "scheduling stays paused until Resume");
+    } else
+    {
+      WINDMI_LOG_INFO(LOG_TAG_MAIN, "Persisted independent defaults for legacy schedule");
+    }
+  }
   // Domestic hot water always has priority; these are the margins it is
   // exercised with, not a switch for whether it applies.
   windmi::ArbitrationConfig arbitration;

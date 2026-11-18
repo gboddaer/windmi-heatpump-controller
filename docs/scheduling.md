@@ -62,9 +62,11 @@ Legacy files without defaults are seeded **in memory from the existing startup U
 working mode/targets**, not a guessed historical manual baseline. The old scheduler
 may already have overwritten those UI values. Review the new Default editor and
 explicitly save the desired normal settings. Invalid legacy fallback values use the
-validated factory settings (combined, heating 40°C/DHW 50°C). Loading does not rewrite
-the file; the next normal persisted change stores the new schema. Existing periods,
-enabled and paused are preserved. Older files without paused restore unpaused;
+validated factory settings (combined, heating 40°C/DHW 50°C). The configuration adapter's load does not rewrite the file. Before automation, controller
+startup explicitly persists migrated defaults atomically so a later period cannot
+become the default on restart. If that save fails, enabled scheduling stays paused
+until storage is fixed and Resume succeeds. Existing periods and enabled state are
+preserved, as is an existing pause. Older files without paused restore unpaused;
 omitted period temperatures retain their legacy 40°C/50°C defaults.
 
 Candidates are validated and atomically saved using a same-directory temporary file

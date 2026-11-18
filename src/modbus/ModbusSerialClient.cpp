@@ -8,6 +8,7 @@
 #include "utils/Logger.hpp"
 #include "config.h"
 #include <cstring>
+#include <memory>
 #include <sstream>
 
 namespace windmi {
@@ -29,7 +30,7 @@ struct ModbusSerialClient::Impl
 
 ModbusSerialClient::ModbusSerialClient(const std::string& device, int baud, char parity,
                                        int stop_bits, bool rs485_enabled, uint8_t slave_id)
-    : mImpl(new Impl())
+    : mImpl(nullptr)
 {
 
   // Validate baud rate
@@ -59,13 +60,17 @@ ModbusSerialClient::ModbusSerialClient(const std::string& device, int baud, char
     throw ModbusException(oss.str());
   }
 
-  mImpl->c_client =
+  // A throwing constructor never runs ~ModbusSerialClient. Keep the
+  // implementation locally owned until both allocations have succeeded.
+  auto impl = std::make_unique<Impl>();
+  impl->c_client =
       modbus_serial_client_create(device.c_str(), baud, parity, stop_bits, rs485_enabled, slave_id);
 
-  if (!mImpl->c_client)
+  if (!impl->c_client)
   {
     throw ModbusException("Failed to create Modbus serial client");
   }
+  mImpl = impl.release();
 }
 
 ModbusSerialClient::~ModbusSerialClient()
