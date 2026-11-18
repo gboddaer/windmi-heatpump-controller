@@ -4,6 +4,7 @@ const API_SET_DHW_URL = '/api/set-dhw';
 const API_SET_HEATING_URL = '/api/set-heating';
 const API_SET_PRIORITY_URL = '/api/set-priority';
 const API_SET_OCCUPANCY_URL = '/api/set-occupancy';
+const API_PRICE_URL = '/api/price';
 const API_SCHEDULE_URL = '/api/schedule';
 const API_SCHEDULE_TOGGLE_URL = '/api/schedule/toggle';
 const API_SCHEDULE_RESUME_URL = '/api/schedule/resume';
@@ -13,6 +14,8 @@ const RETRY_DELAY = 1000;
 
 // Track pending user settings to prevent UI from reverting before server updates
 let pendingDhwTarget = null;
+// Posted tariff, held until /api/status confirms it, so the field does not flicker back.
+let pricePending = null;
 let pendingHeatingTarget = null;
 let pendingMode = null;  // Prevents status poll from reverting mode before command is processed
 
@@ -46,6 +49,11 @@ const elements = {
     outdoorTempValue: document.getElementById('outdoorTempValue'),
     powerInputValue: document.getElementById('powerInputValue'),
     powerOutputValue: document.getElementById('powerOutputValue'),
+    dailyEnergyValue: document.getElementById('dailyEnergyValue'),
+    dailyCostValue: document.getElementById('dailyCostValue'),
+    priceCentsInput: document.getElementById('priceCentsInput'),
+    savePriceBtn: document.getElementById('savePriceBtn'),
+    priceSaveState: document.getElementById('priceSaveState'),
     heatingCycleCopValue: document.getElementById('heatingCycleCopValue'),
     dhwCycleCopValue: document.getElementById('dhwCycleCopValue'),
     dhwTempValue: document.getElementById('dhwTempValue'),
@@ -112,6 +120,32 @@ elements.setDhwBtn.addEventListener('click', async () => {
     } finally {
         elements.setDhwBtn.disabled = false;
         elements.setDhwBtn.textContent = 'Set DHW';
+    }
+});
+
+// Set the energy price used for the daily cost estimate
+// A display setting only: it never writes a control value to the unit.
+elements.savePriceBtn.addEventListener('click', async () => {
+    const cents = parseFloat(elements.priceCentsInput.value);
+    if (!Number.isFinite(cents) || cents < 0 || cents > 500) {
+        alert('Price must be between 0 and 500 cents per kWh');
+        return;
+    }
+    pricePending = cents;
+    elements.savePriceBtn.disabled = true;
+    elements.savePriceBtn.textContent = 'Saving...';
+    const priceTimeout = setTimeout(() => { pricePending = null; }, 15000);
+    try {
+        await apiPost(API_PRICE_URL, { priceCentsPerKwh: cents });
+        elements.priceSaveState.textContent = "Saved ✓ (used for today's cost estimate)";
+    } catch (error) {
+        pricePending = null;
+        clearTimeout(priceTimeout);
+        elements.priceSaveState.textContent = 'Price was not saved: ' + error.message;
+        showNotification('Failed to set price: ' + error.message, 'error');
+    } finally {
+        elements.savePriceBtn.disabled = false;
+        elements.savePriceBtn.textContent = 'Save';
     }
 });
 
@@ -355,6 +389,21 @@ function updateUI(status) {
         ? Math.round(status.acPowerW) + ' W' : 'Unavailable';
     elements.powerOutputValue.textContent = status.deviceOnline && status.heatOutputValid && Number.isFinite(status.heatOutputW)
         ? Math.round(status.heatOutputW) + ' W' : 'Unavailable';
+
+    // Estimated input energy for today and its cost. The backend owns kWh and the
+    // tariff; the multiplication lives here so a price change needs no request.
+    const priceCents = Number.isFinite(status.pricePerKwhCents) ? status.pricePerKwhCents : 30;
+    const energyKnown = status.dailyEnergyValid === true && Number.isFinite(status.dailyEnergyKwh);
+    elements.dailyEnergyValue.textContent = energyKnown
+        ? status.dailyEnergyKwh.toFixed(2) + ' kWh' : 'Unavailable';
+    elements.dailyCostValue.textContent = energyKnown
+        ? '€' + (status.dailyEnergyKwh * priceCents / 100).toFixed(2) : 'Unavailable';
+    if (pricePending !== null && Math.abs(priceCents - pricePending) < 0.05) {
+        pricePending = null; // the server has it
+    }
+    if (pricePending === null && document.activeElement !== elements.priceCentsInput) {
+        elements.priceCentsInput.value = String(priceCents);
+    }
     elements.heatingCycleCopValue.textContent = Number.isFinite(status.heatingCycleCop)
         ? status.heatingCycleCop.toFixed(2) : 'Awaiting cycle';
     elements.dhwCycleCopValue.textContent = Number.isFinite(status.dhwCycleCop)

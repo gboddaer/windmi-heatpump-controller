@@ -5,7 +5,18 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root, 'static/index.html'), 'utf8');
 const section = html.slice(html.indexOf('id="tab-diagnostics"'), html.indexOf('</main>'));
-assert(!/<(?:button|input|select|form)\b/i.test(section), 'diagnostics must have no write controls');
+// Diagnostics stays read-only except for the energy price, which is a display
+// setting: it changes the cost estimate, never the unit. Strip exactly that card
+// and hold the rest of the tab to the original rule, so a second control cannot
+// arrive unnoticed.
+const priceStart = section.indexOf('id="priceCard"');
+const priceCard = priceStart === -1 ? '' :
+    section.slice(priceStart, section.indexOf('</section>', priceStart) + '</section>'.length);
+assert(priceCard.length > 0, 'diagnostics must declare the energy price card');
+assert.match(priceCard, /id="priceCentsInput"/);
+assert.match(priceCard, /id="savePriceBtn"/);
+assert(!/<(?:button|input|select|form)\b/i.test(section.replace(priceCard, '')),
+    'diagnostics must have no write controls other than the energy price setting');
 const ids = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]);
 const element = () => ({textContent: '', children: [], dataset: {},
     appendChild(child) { this.children.push(child); }, replaceChildren(...children) { this.children = children; }});

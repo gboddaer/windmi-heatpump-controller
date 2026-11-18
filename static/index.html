@@ -34,6 +34,8 @@
                         <div class="status-item"><span class="label">Outdoor</span> <span id="outdoorTempValue" class="value">-</span></div>
                         <div class="status-item"><span class="label">Estimated input</span> <span id="powerInputValue" class="value">-</span></div>
                         <div class="status-item"><span class="label">Estimated heat output</span> <span id="powerOutputValue" class="value">-</span></div>
+                        <div class="status-item"><span class="label">Energy today (est.)</span> <span id="dailyEnergyValue" class="value">-</span></div>
+                        <div class="status-item"><span class="label">Cost today (est.)</span> <span id="dailyCostValue" class="value">-</span></div>
                         <div class="status-item"><span class="label">Heating cycle COP</span> <span id="heatingCycleCopValue" class="value">Awaiting cycle</span></div>
                         <div class="status-item"><span class="label">DHW cycle COP</span> <span id="dhwCycleCopValue" class="value">Awaiting cycle</span></div>
                     </div>
@@ -305,6 +307,16 @@
                                 </table>
                             </div>
                         </details>
+                    </section>
+                    <section class="status-card" id="priceCard">
+                        <h3>Energy price</h3>
+                        <p class="diagnostic-note">Used only to turn today's estimated kWh into a cost. It changes no unit setting and measures nothing.</p>
+                        <div class="price-row">
+                            <label for="priceCentsInput">Cost per kWh (cents)</label>
+                            <input type="number" id="priceCentsInput" class="price-input" min="0" max="500" step="0.1" value="30">
+                            <button id="savePriceBtn" class="btn btn-small">Save</button>
+                        </div>
+                        <p class="diagnostic-note price-note" id="priceSaveState">Default 30 cents. Every device shows the same estimate.</p>
                     </section>
                 </div>
             </div>

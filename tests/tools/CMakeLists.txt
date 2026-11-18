@@ -10,6 +10,8 @@ if(NODE_EXECUTABLE)
         COMMAND ${NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_ui_schedule_defaults.cjs)
     add_test(NAME test_ui_backup_heater
         COMMAND ${NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_ui_backup_heater.cjs)
+    add_test(NAME test_ui_daily_energy
+        COMMAND ${NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_ui_daily_energy.cjs)
 endif()
 
 find_program(PYTHON_EXECUTABLE NAMES python3 python)

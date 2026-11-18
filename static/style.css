@@ -851,3 +851,31 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
         display: none;
     }
 }
+
+/* Energy-price card: the one editable control on the Diagnostics tab. */
+.price-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin: 0.5rem 0 0.25rem;
+}
+
+.price-row label {
+    font-size: 0.9rem;
+    color: var(--text-secondary, #9aa4b2);
+}
+
+.price-input {
+    width: 6.5rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: 6px;
+    border: 1px solid var(--border, #2c3440);
+    background: var(--surface, #151a21);
+    color: inherit;
+    font: inherit;
+}
+
+.price-note {
+    margin-top: 0.35rem;
+}
