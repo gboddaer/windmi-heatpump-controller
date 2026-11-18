@@ -10,6 +10,7 @@
 #define WINDMI_CORE_CONTROL_LOOP_HPP_
 
 #include <cstdint>
+#include <algorithm>
 #include <memory>
 #include <atomic>
 #include <functional>
@@ -17,6 +18,7 @@
 #include "utils/Platform.hpp"
 #include "core/Arbitration.hpp"
 #include "core/CycleCop.hpp"
+#include "core/DailyEnergy.hpp"
 #include "core/DiagnosticRegisters.hpp"
 #include "config.h"
 #include "core/Scheduler.hpp"
@@ -121,6 +123,11 @@ struct StatusSnapshot
   float ac_power_va = 0.0f; // AC apparent power in VA (ac_voltage * ac_current)
   float ac_power_w = 0.0f;  // AC real power in Watts (estimated: VA * power_factor)
   bool power_valid = false; // True if both AC current and AC voltage were read
+
+  // Daily energy estimate (input side, uncalibrated power hypothesis)
+  double daily_energy_kwh = 0.0;
+  bool daily_energy_valid = false; // The loop holds a total for today (seeded or integrated)
+  double price_cents_per_kwh = static_cast<double>(PRICE_CENTS_DEFAULT);
 
   DiagnosticSnapshot diagnostics;
 
@@ -356,6 +363,45 @@ public:
     mClockOffsetMs += ms;
   }
 
+  /**
+   * @brief Freeze the wall clock the daily energy estimate integrates over
+   *
+   * The steady-clock offset above drives watchdogs and arbitration. The daily
+   * estimate follows calendar time instead, so a test that wants an exact kWh
+   * figure pins this domain and gets samples exactly 30 s apart. Nothing in
+   * production calls this.
+   */
+  void setWallClockForTesting(int64_t wallMs)
+  {
+    mWallClockFrozenMs.store(wallMs);
+  }
+
+  /**
+   * @brief Persist today's estimated kWh whenever the loop thinks an hour passed
+   *
+   * Returning false means the write failed; the loop warns and keeps counting,
+   * with the next attempt an hour later. A failed save never affects control.
+   */
+  using EnergyPersistCallback = std::function<bool(double kwhToday, const std::string& dayKey)>;
+
+  void setEnergyPersistCallback(EnergyPersistCallback callback)
+  {
+    mEnergyPersistCallback = std::move(callback);
+  }
+
+  /** @brief Restore a saved total, accepted only when it belongs to today. */
+  void seedDailyEnergy(double kwh, const std::string& savedDayKey)
+  {
+    mDailyEnergy.seed(wallNowMs(), kwh, savedDayKey);
+  }
+
+  /** @brief Tariff loaded from settings at startup. */
+  void setPriceCentsPerKwh(double cents)
+  {
+    mPriceCentsPerKwh = std::clamp(cents, static_cast<double>(PRICE_CENTS_MIN),
+                                   static_cast<double>(PRICE_CENTS_MAX));
+  }
+
 private:
   void threadFunc();
   bool readStatus(StatusSnapshot& status);
@@ -363,6 +409,8 @@ private:
   void applyControlLogic(StatusSnapshot& status);
   void updateTankState(const StatusSnapshot& status);
   uint64_t nowMs() const;
+  int64_t wallNowMs() const;
+  void updateDailyEnergy(StatusSnapshot& status);
   void updateChargeWatchdog(const StatusSnapshot& status);
   void updateCycleCop(StatusSnapshot& status);
   void updateSchedule(StatusSnapshot& status, int minute);
@@ -419,6 +467,10 @@ private:
   uint64_t mParkedAtMs = 0;     ///< last release of a declined DHW charge
   uint64_t mStatusSequence = 0; ///< published snapshots, for liveness
   CycleCop mCycleCop;
+  DailyEnergyAccumulator mDailyEnergy;
+  std::atomic<int64_t> mWallClockFrozenMs{-1};
+  double mPriceCentsPerKwh = static_cast<double>(PRICE_CENTS_DEFAULT);
+  EnergyPersistCallback mEnergyPersistCallback;
   DiagnosticMonitor mDiagnosticMonitor;
   float mEffectiveDhwTargetC = 0.0f;
   uint64_t mChargeSampleMs = 0; ///< end of the last actuating charge sample

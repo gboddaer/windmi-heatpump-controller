@@ -1055,6 +1055,7 @@ void ControlLoop::threadFunc()
     {
       initial_status.device_online = true;
       initial_status.working_mode = mDesiredWorkingMode;
+      updateDailyEnergy(initial_status);
       if (mStatusQueue)
       {
         if (!mStatusQueue->push(initial_status))
@@ -1130,6 +1131,8 @@ void ControlLoop::threadFunc()
       // Set working mode for status reporting
       status.working_mode = mDesiredWorkingMode;
 
+      updateDailyEnergy(status);
+
       // Publish status to queue (always succeeds with ring buffer)
       status.status_sequence = ++mStatusSequence;
       if (mStatusQueue)
@@ -1143,6 +1146,7 @@ void ControlLoop::threadFunc()
       status.device_online = false;
       status.working_mode = mDesiredWorkingMode;
       updateCycleCop(status);
+      updateDailyEnergy(status);
       // Offline is a fresh statement, not an old one: it advances the sequence
       // so a monitor can tell a quiet unit from a loop that stopped publishing.
       status.status_sequence = ++mStatusSequence;
@@ -1197,6 +1201,58 @@ uint64_t ControlLoop::nowMs() const
   return static_cast<uint64_t>(static_cast<int64_t>(ms) + mClockOffsetMs);
 }
 
+int64_t ControlLoop::wallNowMs() const
+{
+  const int64_t frozen = mWallClockFrozenMs.load();
+  if (frozen >= 0)
+  {
+    return frozen;
+  }
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
+void ControlLoop::updateDailyEnergy(StatusSnapshot& status)
+{
+  const int64_t wallNow = wallNowMs();
+
+  // Only a fresh, valid power sample is evidence of consumption. An offline or
+  // failed read says nothing about the interval, so the counter advances without
+  // adding energy rather than inventing it.
+  if (status.device_online && status.power_valid)
+  {
+    mDailyEnergy.observe(wallNow, status.ac_power_w);
+  } else
+  {
+    mDailyEnergy.advance(wallNow);
+  }
+
+  status.daily_energy_kwh = mDailyEnergy.kwhToday();
+  status.daily_energy_valid = mDailyEnergy.hasToday();
+  status.price_cents_per_kwh = mPriceCentsPerKwh;
+
+  if (!mDailyEnergy.persistDue(wallNow))
+  {
+    return;
+  }
+
+  const double kwh = mDailyEnergy.kwhToday();
+  const std::string dayKey = mDailyEnergy.storedDayKey();
+  if (mEnergyPersistCallback && mEnergyPersistCallback(kwh, dayKey))
+  {
+    WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "Saved daily energy estimate %.3f kWh for %s", kwh,
+                     dayKey.c_str());
+  } else
+  {
+    WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP,
+                    "Daily energy estimate could not be saved; counting continues in memory");
+  }
+  // Marked either way: a failed save retries in an hour, not on every tick, so a
+  // read-only settings file cannot turn into a warning every 30 seconds.
+  mDailyEnergy.markPersisted(wallNow);
+}
+
 void ControlLoop::publishOfflineStatus()
 {
   if (!mStatusQueue)
@@ -1210,6 +1266,7 @@ void ControlLoop::publishOfflineStatus()
   status.working_mode = mDesiredWorkingMode;
   updateCycleCop(status);
   copyScheduleMetadata(status, mScheduler.snapshot());
+  updateDailyEnergy(status);
   status.status_sequence = ++mStatusSequence;
   mStatusQueue->push(status);
 }

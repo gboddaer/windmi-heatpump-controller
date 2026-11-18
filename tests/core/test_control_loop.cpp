@@ -7,12 +7,16 @@
 #include "core/ControlLoop.hpp"
 #include "core/StatusMonitor.hpp"
 #include "core/BackupHeater.hpp"
+#include "core/DailyEnergy.hpp"
 #include "modbus/IModbusClient.hpp"
 #include "config.h"
 #include "utils/Platform.hpp"
 
+#include "TestClock.hpp"
+
 #include <chrono>
 #include <map>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -55,6 +59,12 @@ public:
   {
     writes_.push_back({address, value});
     mRegisters[address] = static_cast<int16_t>(value);
+  }
+
+  /** Remove a register so readRegister throws, as a failed device read does. */
+  void removeRegister(uint16_t address)
+  {
+    mRegisters.erase(address);
   }
 
   const std::vector<std::pair<uint16_t, uint16_t>>& writes() const
@@ -764,6 +774,22 @@ public:
   void advanceTime(int64_t ms)
   {
     loop_.advanceClockForTesting(ms);
+  }
+
+  /** Freeze the wall clock (the domain the daily estimate integrates over). */
+  void setWall(int64_t wallMs)
+  {
+    loop_.setWallClockForTesting(wallMs);
+  }
+
+  void seedEnergy(double kwh, const std::string& dayKey)
+  {
+    loop_.seedDailyEnergy(kwh, dayKey);
+  }
+
+  void onEnergyPersist(ControlLoop::EnergyPersistCallback callback)
+  {
+    loop_.setEnergyPersistCallback(std::move(callback));
   }
 
   /** Idle for longer than the park timeout, then ask the loop to decide. */
@@ -2019,4 +2045,176 @@ TEST(StatusLivenessTest, AGatewayThatIsDownIsSaidToBeDown)
   EXPECT_FALSE(snap.device_online)
       << "an unreachable gateway must be reported, not hidden behind stale numbers";
   EXPECT_GT(snap.status_sequence, 0u) << "and said again each cycle, so its age is knowable";
+}
+
+// ---- Daily energy estimate ----
+
+namespace {
+// Local noon: every window below stays inside one calendar day in any timezone.
+const int64_t kDailyBase = windmi_test::localNoonMs(2026, 11, 18);
+constexpr double kKwhPerWattMs = 1.0 / 3.6e9;
+} // namespace
+
+TEST(DailyEnergyLoopTest, SnapshotDefaultsCarryNoEnergyAndDefaultPrice)
+{
+  const StatusSnapshot snapshot{};
+  EXPECT_DOUBLE_EQ(0.0, snapshot.daily_energy_kwh);
+  EXPECT_FALSE(snapshot.daily_energy_valid);
+  EXPECT_DOUBLE_EQ(static_cast<double>(PRICE_CENTS_DEFAULT), snapshot.price_cents_per_kwh);
+}
+
+TEST(DailyEnergyLoopTest, IntegratesFreshPowerSamplesBetweenTicks)
+{
+  auto registers = fullRegisters();
+  registers[REG_AC_CURRENT] = 20;  // hypothesis: raw / 2 = 10 A
+  registers[REG_AC_VOLTAGE] = 230; // actual 230 V
+  FakeModbusClient client(registers);
+  TickedLoop runner(client);
+  // Freeze the wall clock before the loop publishes: the integrated energy then
+  // follows from the samples, not from how long the test took to run.
+  runner.setWall(kDailyBase);
+  ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+
+  runner.tick();
+  runner.setWall(kDailyBase + 30000);
+  runner.tick();
+  const double oneWindow = 2070.0 * 30000.0 * kKwhPerWattMs;
+  EXPECT_NEAR(oneWindow, runner.latest().daily_energy_kwh, 1e-12);
+
+  runner.setWall(kDailyBase + 60000);
+  runner.tick();
+  EXPECT_NEAR(2.0 * oneWindow, runner.latest().daily_energy_kwh, 1e-12);
+  runner.stop();
+}
+
+TEST(DailyEnergyLoopTest, OfflineTicksDoNotAddEnergy)
+{
+  auto registers = fullRegisters();
+  registers[REG_AC_CURRENT] = 20;
+  registers[REG_AC_VOLTAGE] = 230;
+  FakeModbusClient client(registers);
+  TickedLoop runner(client);
+  runner.setWall(kDailyBase);
+  ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+
+  runner.tick();
+  runner.setWall(kDailyBase + 30000);
+  runner.tick();
+  const double before = runner.latest().daily_energy_kwh;
+  ASSERT_GT(before, 0.0);
+
+  // A failed read keeps the client "connected" (readRegister throws), so the loop
+  // publishes the offline snapshot instead of stalling on a reconnect.
+  client.removeRegister(REG_AC_CURRENT);
+  runner.setWall(kDailyBase + 600000);
+  runner.tick();
+  const StatusSnapshot offline = runner.latest();
+  EXPECT_FALSE(offline.power_valid) << "the reading that would size the interval is missing";
+  EXPECT_DOUBLE_EQ(before, offline.daily_energy_kwh) << "an interval without a power sample is not power";
+  EXPECT_TRUE(offline.daily_energy_valid) << "today's total is still known while the unit is offline";
+  runner.stop();
+}
+
+TEST(DailyEnergyLoopTest, MidnightRollZeroesAndDoesNotResurrect)
+{
+  FakeModbusClient client(fullRegisters());
+  TickedLoop runner(client);
+  runner.setWall(kDailyBase);
+  ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+
+  runner.tick();
+  runner.setWall(kDailyBase + 30000);
+  runner.tick();
+  ASSERT_GT(runner.latest().daily_energy_kwh, 0.0);
+
+  runner.setWall(kDailyBase + 86400000);
+  runner.tick();
+  const StatusSnapshot midnight = runner.latest();
+  EXPECT_DOUBLE_EQ(0.0, midnight.daily_energy_kwh) << "a new day starts at zero, not at yesterday's total";
+
+  runner.setWall(kDailyBase + 86400000 + 30000);
+  runner.tick();
+  const StatusSnapshot afterWindow = runner.latest();
+  EXPECT_TRUE(afterWindow.daily_energy_valid);
+  const double oneWindow = 517.5 * 30000.0 * kKwhPerWattMs;
+  EXPECT_NEAR(oneWindow, afterWindow.daily_energy_kwh, 1e-12) << "only the new window counts";
+  runner.stop();
+}
+
+TEST(DailyEnergyLoopTest, SeedRestoresTodaysValueOnly)
+{
+  const int64_t nowWall = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::system_clock::now().time_since_epoch())
+                              .count();
+
+  FakeModbusClient client(fullRegisters());
+  TickedLoop runner(client);
+  runner.setWall(nowWall);
+  runner.seedEnergy(1.2345, DailyEnergyAccumulator::dayKeyFor(nowWall));
+  ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+  runner.tick();
+  EXPECT_NEAR(1.2345, runner.latest().daily_energy_kwh, 1e-12);
+  EXPECT_TRUE(runner.latest().daily_energy_valid);
+  runner.stop();
+
+  FakeModbusClient staleClient(fullRegisters());
+  TickedLoop stale(staleClient);
+  stale.setWall(nowWall);
+  stale.seedEnergy(1.2345, DailyEnergyAccumulator::dayKeyFor(nowWall - 86400000));
+  ASSERT_TRUE(stale.start(3, "dhw", 50.0f, 45.0f));
+  stale.tick();
+  EXPECT_DOUBLE_EQ(0.0, stale.latest().daily_energy_kwh) << "yesterday's total is not today's";
+  EXPECT_TRUE(stale.latest().daily_energy_valid) << "a counter exists for today, it is simply zero";
+  stale.stop();
+}
+
+TEST(DailyEnergyLoopTest, HourlyPersistCallbackReceivesDayAndKwh)
+{
+  FakeModbusClient client(fullRegisters());
+  TickedLoop runner(client);
+  std::vector<std::pair<double, std::string>> saves;
+  runner.onEnergyPersist([&saves](double kwh, const std::string& dayKey) {
+    saves.emplace_back(kwh, dayKey);
+    return true;
+  });
+  runner.setWall(kDailyBase);
+  ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+  runner.tick();
+  ASSERT_EQ(1u, saves.size()) << "nothing has been saved yet, so the first snapshot saves";
+  EXPECT_EQ(DailyEnergyAccumulator::dayKeyFor(kDailyBase), saves[0].second);
+
+  runner.setWall(kDailyBase + 3599999);
+  runner.tick();
+  EXPECT_EQ(1u, saves.size()) << "not yet an hour";
+
+  runner.setWall(kDailyBase + 3600000);
+  runner.tick();
+  EXPECT_EQ(2u, saves.size()) << "an hour later the total is saved again";
+  EXPECT_DOUBLE_EQ(runner.latest().daily_energy_kwh, saves.back().first);
+  runner.stop();
+}
+
+TEST(DailyEnergyLoopTest, PersistenceFailureKeepsCountingAndKeepsHourlyCadence)
+{
+  FakeModbusClient client(fullRegisters());
+  TickedLoop runner(client);
+  int attempts = 0;
+  runner.onEnergyPersist([&attempts](double, const std::string&) {
+    attempts++;
+    return false; // e.g. a read-only settings directory
+  });
+  runner.setWall(kDailyBase);
+  ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+  runner.tick();
+  ASSERT_EQ(1, attempts);
+
+  runner.setWall(kDailyBase + 30000);
+  runner.tick();
+  EXPECT_EQ(1, attempts) << "a failed save is not retried on every 30-second tick";
+  EXPECT_TRUE(runner.latest().daily_energy_valid) << "counting continues regardless";
+
+  runner.setWall(kDailyBase + 3600000);
+  runner.tick();
+  EXPECT_EQ(2, attempts) << "the hourly cadence survives the failure";
+  runner.stop();
 }

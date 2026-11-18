@@ -38,6 +38,12 @@ extern "C" {
 #define ESTIMATED_POWER_FACTOR 0.90f
 #define HEATING_HYSTERESIS_C 1.0f
 
+// Energy tariff used only to show an estimated daily cost (euro cents per kWh).
+// A user setting, not a meter: nothing here measures or bills consumption.
+#define PRICE_CENTS_MIN 0.0f
+#define PRICE_CENTS_MAX 500.0f
+#define PRICE_CENTS_DEFAULT 30.0f
+
 // Timeouts and Retries
 #define MODBUS_TIMEOUT_MS 1000
 #define MODBUS_MAX_RETRIES 3
