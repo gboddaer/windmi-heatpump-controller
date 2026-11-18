@@ -400,6 +400,34 @@ int main(int argc, char* argv[])
         config.set("ui.heating_target", std::to_string(heating_target));
         config.saveToFile(config_path);
       });
+
+  // Daily energy estimate: restore today's total only, and save it hourly. Both
+  // callbacks run on the control-loop thread, like the settings callback above.
+  g_control_loop->setPriceCentsPerKwh(
+      config.getDouble("ui.price_per_kwh_cents", PRICE_CENTS_DEFAULT));
+  g_control_loop->seedDailyEnergy(config.getDouble("state.energy_today_kwh", 0.0),
+                                  config.getString("state.energy_today_date", ""));
+  g_control_loop->setEnergyPersistCallback([&config, config_path](double kwh,
+                                                                 const std::string& dayKey) {
+    config.set("state.energy_today_kwh", std::to_string(kwh));
+    config.set("state.energy_today_date", dayKey);
+    if (!config.saveToFile(config_path))
+    {
+      WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Daily energy estimate could not be saved to %s",
+                       config_path.c_str());
+      return false;
+    }
+    return true;
+  });
+  g_control_loop->setPricePersistCallback([&config, config_path](double cents) {
+    config.set("ui.price_per_kwh_cents", std::to_string(cents));
+    if (!config.saveToFile(config_path))
+    {
+      WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Tariff could not be saved to %s", config_path.c_str());
+      return false;
+    }
+    return true;
+  });
   if (!g_control_loop->start(modbus_client.get(), &cmd_queue, &status_queue))
   {
     WINDMI_LOG_ERROR(LOG_TAG_MAIN, "Failed to start control loop");

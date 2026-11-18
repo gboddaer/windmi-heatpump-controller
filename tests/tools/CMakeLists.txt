@@ -29,6 +29,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         target_link_libraries(test_demo_main PRIVATE windmi_core windmi_modbus windmi_web windmi_utils windmi_selftest mongoose)
         add_test(NAME test_main_schedule_startup
             COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_main_schedule_startup.py $<TARGET_FILE:test_demo_main>)
-        set_tests_properties(test_main_schedule_startup PROPERTIES TIMEOUT 45)
+        set_tests_properties(test_main_schedule_startup PROPERTIES TIMEOUT 90)
     endif()
 endif()

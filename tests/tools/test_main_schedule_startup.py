@@ -121,5 +121,23 @@ class MainScheduleStartupTest(unittest.TestCase):
             self.assertEqual(json.loads(self.schedule.read_text())["defaults"], DEFAULT)
 
 
+    def test_daily_energy_seed_price_default_and_price_persistence(self):
+        today = time.strftime("%Y-%m-%d")
+        self.settings.write_text(
+            "ui.working_mode=1\nui.priority=dhw\nui.heating_target=35\nui.dhw_target=48\n"
+            "state.energy_today_kwh=1.2\nstate.energy_today_date=" + today + "\n")
+        with self.running():
+            status = self.request("/api/status")
+            self.assertEqual(30.0, status["pricePerKwhCents"], "never set: the default tariff applies")
+            self.assertTrue(status["dailyEnergyValid"])
+            self.assertGreaterEqual(status["dailyEnergyKwh"], 1.19, "today's saved total is restored")
+            self.request("/api/price", {"priceCentsPerKwh": 25})
+            self.wait(lambda s: s["pricePerKwhCents"] == 25.0)
+        saved = self.settings.read_text()
+        self.assertRegex(saved, r"(?m)^ui\.price_per_kwh_cents\s*=\s*25(\.0+)?$")
+        with self.running():
+            self.assertEqual(25.0, self.request("/api/status")["pricePerKwhCents"],
+                             "the tariff survives a restart")
+
 if __name__ == "__main__":
     unittest.main()
