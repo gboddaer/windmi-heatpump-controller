@@ -18,6 +18,7 @@ This project provides a web-based interface for monitoring and controlling Roten
 - **REST API**: JSON-based endpoints for status, mode control, and temperature setpoints
 - **[Read-only Diagnostics](docs/diagnostics.md)**: Control decisions, compressor/pump/fan/valve registers, hardware alarm bitmaps, sample validity and freshness
 - **[Backup-heater validation](docs/backup-heater.md)**: Paired-temperature evidence, API-only CSV logging and read-only parameter review; no inferred ON/OFF or settings changes
+- **Energy estimate**: Overview shows today's estimated input kWh and its cost (€/day); the tariff in euro cents/kWh is set on the Diagnostics tab and stored server-side
 - **[Daily Scheduling](docs/scheduling.md)**: Independent default mode/targets with temporary daily overrides; Overview manual changes pause automation until explicit Resume
 - **Modbus TCP**: Direct TCP communication with Waveshare gateway (transparent mode)
 - **Modbus RTU over Serial (RS-485)**: Serial port communication for devices without TCP gateway

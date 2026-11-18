@@ -65,6 +65,22 @@ as a sensor or charging problem: it is not proof of a faulty sensor. The legacy 
 flag remains `dhwSensorFaultSuspected` for compatibility. This watchdog only reports;
 it does not hand the compressor to space heating.
 
+## Energy price
+
+The tab holds exactly one editable control: **cost per kWh in euro cents**, in the
+*Energy price* card. It is a display setting, not a telemetry reading and not a
+control action.
+
+- It turns today's estimated input kWh into the cost shown on the Overview.
+- It is saved in `~/.windmi/settings.ini` (`ui.price_per_kwh_cents`), so every
+  browser shows the same estimate; the default is 30 cents when it was never set.
+- `POST /api/price` accepts 0–500 and returns `202` once the change is queued. A
+  failed save is logged by the controller, the accepted value stays in effect for
+  the session, and the browser keeps showing the last confirmed value.
+- The energy total itself is an estimate built from the uncalibrated AC-power
+  hypothesis (raw current / 2, power factor 0.90). Neither figure is a meter
+  reading, and no billing or accuracy claim follows from them.
+
 ## Register evidence
 
 Original installation manual, English printed pp. 50–54:
