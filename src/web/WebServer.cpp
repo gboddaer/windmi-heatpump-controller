@@ -197,6 +197,15 @@ void WebServer::handleRequest(struct mg_connection* c, struct mg_http_message* h
     {
       sendJsonReply(c, 405, "{\"error\":\"Method not allowed\"}");
     }
+  } else if (mg_strcmp(hm->uri, mg_str("/api/price")) == 0)
+  {
+    if (mg_strcasecmp(hm->method, mg_str("POST")) == 0)
+    {
+      apiPriceHandler(c, &hm->body);
+    } else
+    {
+      sendJsonReply(c, 405, "{\"error\":\"Method not allowed\"}");
+    }
   } else if (mg_strcmp(hm->uri, mg_str("/api/schedule")) == 0)
   {
     if (mg_strcasecmp(hm->method, mg_str("GET")) == 0)
@@ -282,6 +291,9 @@ void WebServer::apiStatusHandler(struct mg_connection* c)
       "\"acPowerVA\":%.1f,"
       "\"acPowerW\":%.1f,"
       "\"powerValid\":%s,"
+      "\"dailyEnergyKwh\":%.3f,"
+      "\"dailyEnergyValid\":%s,"
+      "\"pricePerKwhCents\":%.1f,"
       "\"compressorFrequency\":%.1f,"
       "\"waterFlow\":%.2f,"
       "\"unitCapacityKw\":%d,"
@@ -330,7 +342,9 @@ void WebServer::apiStatusHandler(struct mg_connection* c)
       mLastStatus.is_running ? "running" : "stopped", mLastStatus.device_online ? "true" : "false",
       mLastStatus.ac_current, mLastStatus.dc_current, mLastStatus.ac_voltage,
       mLastStatus.dc_voltage, mLastStatus.ac_power_va, mLastStatus.ac_power_w,
-      mLastStatus.power_valid ? "true" : "false", mLastStatus.compressor_freq,
+      mLastStatus.power_valid ? "true" : "false", mLastStatus.daily_energy_kwh,
+      mLastStatus.daily_energy_valid ? "true" : "false", mLastStatus.price_cents_per_kwh,
+      mLastStatus.compressor_freq,
       mLastStatus.water_flow, mLastStatus.unit_capacity_kw, mLastStatus.actual_capacity_output,
       mLastStatus.odu_input_status, mLastStatus.compressor_runtime_h, mLastStatus.pump_runtime_h,
       mLastStatus.heat_output_w, mLastStatus.cop, mLastStatus.cop_valid ? "true" : "false",
@@ -361,6 +375,48 @@ void WebServer::apiStatusHandler(struct mg_connection* c)
       ",\"backupHeater\":" + backupHeaterJson(mLastStatus.diagnostics, mLastStatus.device_online) +
       '}';
   sendJsonReply(c, 200, payload.c_str());
+}
+
+void WebServer::apiPriceHandler(struct mg_connection* c, struct mg_str* body)
+{
+  if (isShuttingDown())
+  {
+    sendJsonReply(c, 503, "{\"error\":\"Server is shutting down\"}");
+    return;
+  }
+
+  if (body->len == 0)
+  {
+    sendJsonReply(c, 400, "{\"error\":\"Empty request body\"}");
+    return;
+  }
+
+  double cents = 0;
+  if (mg_json_get_num(*body, "$.priceCentsPerKwh", &cents) < 1)
+  {
+    sendJsonReply(c, 400, "{\"error\":\"Missing or invalid price\"}");
+    return;
+  }
+
+  if (cents < static_cast<double>(PRICE_CENTS_MIN) || cents > static_cast<double>(PRICE_CENTS_MAX))
+  {
+    sendJsonReply(c, 422, "{\"error\":\"Price out of range\"}");
+    return;
+  }
+
+  WINDMI_LOG_DEBUG(LOG_TAG_WEBSERVER,
+                   "Received price set request - %.2f eurocents/kWh (range: %.0f-%.0f)", cents,
+                   static_cast<double>(PRICE_CENTS_MIN), static_cast<double>(PRICE_CENTS_MAX));
+
+  Command cmd;
+  cmd.type = CommandType::CMD_SET_PRICE;
+  cmd.float_val = static_cast<float>(cents);
+  cmd.int_val = 0;
+  bool pushed = mCmdQueue ? mCmdQueue->push(cmd) : false;
+  if (pushed && mWakeCallback)
+    mWakeCallback();
+  // The save happens in the loop, so this reply promises a queue slot, not a file write.
+  sendJsonReply(c, 202, "{\"success\":true,\"verified\":false,\"message\":\"Price queued\"}");
 }
 
 void WebServer::apiSetDhwHandler(struct mg_connection* c, struct mg_str* body)

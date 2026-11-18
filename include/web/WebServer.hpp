@@ -67,6 +67,7 @@ private:
 
   void apiStatusHandler(struct mg_connection* c);
   void apiSetDhwHandler(struct mg_connection* c, struct mg_str* body);
+  void apiPriceHandler(struct mg_connection* c, struct mg_str* body);
   void apiSetHeatingHandler(struct mg_connection* c, struct mg_str* body);
   void apiSetPriorityHandler(struct mg_connection* c, struct mg_str* body);
   void apiSetModeHandler(struct mg_connection* c, struct mg_str* body);
