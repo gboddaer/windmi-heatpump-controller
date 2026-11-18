@@ -5,24 +5,28 @@
 #include <string>
 
 namespace windmi {
-inline std::string diagnosticsJson(const DiagnosticSnapshot& snapshot) {
-    std::string json = "{\"registers\":{";
-    for (size_t i = 0; i < kDiagnosticRegisterCount; ++i) {
-        const auto& spec = kDiagnosticRegisters[i];
-        const auto& reading = snapshot.readings[i];
-        if (i) json += ',';
-        json += '"';
-        json += spec.key; // compile-time keys only; never user input
-        json += "\":{\"address\":" + std::to_string(spec.address) + ",\"raw\":";
-        json += reading.raw ? std::to_string(*reading.raw) : "null";
-        json += ",\"ageSeconds\":";
-        const uint64_t age_ms = snapshot.observed_at_ms >= reading.sampled_at_ms
-            ? snapshot.observed_at_ms - reading.sampled_at_ms : 0;
-        json += reading.raw ? std::to_string(age_ms / 1000) : "null";
-        const int max_age = diagnosticMaxAgeSeconds(spec.group);
-        json += ",\"maxAgeSeconds\":" + std::to_string(max_age) + '}';
-    }
-    return json + "}}";
+inline std::string diagnosticsJson(const DiagnosticSnapshot& snapshot)
+{
+  std::string json = "{\"registers\":{";
+  for (size_t i = 0; i < kDiagnosticRegisterCount; ++i)
+  {
+    const auto& spec = kDiagnosticRegisters[i];
+    const auto& reading = snapshot.readings[i];
+    if (i)
+      json += ',';
+    json += '"';
+    json += spec.key; // compile-time keys only; never user input
+    json += "\":{\"address\":" + std::to_string(spec.address) + ",\"raw\":";
+    json += reading.raw ? std::to_string(*reading.raw) : "null";
+    json += ",\"ageSeconds\":";
+    const uint64_t age_ms = snapshot.observed_at_ms >= reading.sampled_at_ms
+                                ? snapshot.observed_at_ms - reading.sampled_at_ms
+                                : 0;
+    json += reading.raw ? std::to_string(age_ms / 1000) : "null";
+    const int max_age = diagnosticMaxAgeSeconds(spec.group);
+    json += ",\"maxAgeSeconds\":" + std::to_string(max_age) + '}';
+  }
+  return json + "}}";
 }
-}
+} // namespace windmi
 #endif

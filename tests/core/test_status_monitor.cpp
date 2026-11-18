@@ -11,6 +11,7 @@ using namespace windmi;
 // StatusMonitor tests are in test_control_loop.cpp
 // This file exists to keep the CMake target happy.
 
-TEST(StatusMonitorPlaceholder, Placeholder) {
-    EXPECT_TRUE(true);
+TEST(StatusMonitorPlaceholder, Placeholder)
+{
+  EXPECT_TRUE(true);
 }

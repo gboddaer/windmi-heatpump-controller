@@ -37,50 +37,52 @@ int deviceModeForWorkingMode(int working_mode);
  * (spec F9).
  */
 enum class TankState : uint8_t {
-    Unknown,             ///< no usable reading; hold whatever the unit is doing
-    Calling,             ///< below target - hysteresis, domestic hot water wants the compressor
-    SatisfiedCandidate,  ///< at or above target, but not yet confirmed on two ticks
-    Satisfied,           ///< confirmed at target; heating may have the compressor
+  Unknown,            ///< no usable reading; hold whatever the unit is doing
+  Calling,            ///< below target - hysteresis, domestic hot water wants the compressor
+  SatisfiedCandidate, ///< at or above target, but not yet confirmed on two ticks
+  Satisfied,          ///< confirmed at target; heating may have the compressor
 };
 
 /** Tunables, with the values and floors measured on the unit (spec settings table). */
-struct ArbitrationConfig {
-    float hysteresis_c = 5.0f;             ///< width of the window heating may run in
-    int min_switch_gap_s = 120;            ///< debounce between device-mode writes
-    float draw_override_c_per_min = 1.0f;
-    int charge_watchdog_min = 120;
-    /* A DHW grant the unit does not act on is not a demand being served: measured
-     * 2026-11-13, the unit sat idle for 80 min on a grant with the tank parked at its
-     * economic setpoint, which locked space heating out for nothing. */
-    int park_timeout_s = 600;
-    /* After releasing a declined charge, the next attempt waits this long. A unit that
-     * will not charge to a register's value will not change its mind either, so
-     * re-asking every switch gap would be a metronome writing the mode twice a
-     * quarter-hour forever. */
-    int park_cooldown_s = 900;
-    static constexpr int kMinChargeWatchdogMin = 60;
-    static constexpr int kMinParkTimeoutS = 180;
-    static constexpr int kMinParkCooldownS = 300;
-    /** ArbiterInput::seconds_since_park for "no park has happened". */
-    static constexpr int kNoPark = 0x7fffffff;  ///< a fall this fast is somebody using hot water
+struct ArbitrationConfig
+{
+  float hysteresis_c = 5.0f;  ///< width of the window heating may run in
+  int min_switch_gap_s = 120; ///< debounce between device-mode writes
+  float draw_override_c_per_min = 1.0f;
+  int charge_watchdog_min = 120;
+  /* A DHW grant the unit does not act on is not a demand being served: measured
+   * 2026-11-13, the unit sat idle for 80 min on a grant with the tank parked at its
+   * economic setpoint, which locked space heating out for nothing. */
+  int park_timeout_s = 600;
+  /* After releasing a declined charge, the next attempt waits this long. A unit that
+   * will not charge to a register's value will not change its mind either, so
+   * re-asking every switch gap would be a metronome writing the mode twice a
+   * quarter-hour forever. */
+  int park_cooldown_s = 900;
+  static constexpr int kMinChargeWatchdogMin = 60;
+  static constexpr int kMinParkTimeoutS = 180;
+  static constexpr int kMinParkCooldownS = 300;
+  /** ArbiterInput::seconds_since_park for "no park has happened". */
+  static constexpr int kNoPark = 0x7fffffff; ///< a fall this fast is somebody using hot water
 
-    /// How far below the target counts as "at temperature", in degC.
-    static constexpr float kReleaseMarginC = 0.5f;
+  /// How far below the target counts as "at temperature", in degC.
+  static constexpr float kReleaseMarginC = 0.5f;
 
-    /// Floor for each tunable; anything below it is clamped and logged.
-    static constexpr float kMinHysteresisC = 5.0f;
-    static constexpr int kMinSwitchGapS = 60;
-    static constexpr float kMinDrawOverrideCPerMin = 0.5f;
+  /// Floor for each tunable; anything below it is clamped and logged.
+  static constexpr float kMinHysteresisC = 5.0f;
+  static constexpr int kMinSwitchGapS = 60;
+  static constexpr float kMinDrawOverrideCPerMin = 0.5f;
 
-    void applyFloors();
+  void applyFloors();
 };
 
 /** One tank temperature observation, plus the caller's run counter at target. */
-struct TankReading {
-    float temp_c;
-    float target_c;
-    bool valid;            ///< false when the register could not be read
-    int ticks_at_target;   ///< consecutive observations at or above target - margin
+struct TankReading
+{
+  float temp_c;
+  float target_c;
+  bool valid;          ///< false when the register could not be read
+  int ticks_at_target; ///< consecutive observations at or above target - margin
 };
 
 /**
@@ -95,17 +97,18 @@ TankState advanceTankState(TankState previous, const ArbitrationConfig& cfg,
                            const TankReading& reading);
 
 /** Everything the decision needs, evaluated once per control tick. */
-struct ArbiterInput {
-    int working_mode = 3;              ///< application working mode, 0..3
-    TankState tank = TankState::Unknown;
-    int current_mode = MODE_SET_HEAT_DHW;   ///< device mode we believe is active
-    bool tank_drawing = false;         ///< falling at or above draw_override_c_per_min
-    bool blocked = false;              ///< defrost or anti-freeze in progress
-    int seconds_since_last_write = 0;  ///< since the last verified device-mode write
-    bool dhw_granted = false;          ///< DHW-only is what we asked for and the unit says
-    bool unit_actuating = true;        ///< compressor or flow is actually moving heat
-    int seconds_since_actuating = 0;   ///< since either did, while DHW was granted
-    int seconds_since_park = ArbitrationConfig::kNoPark;  ///< since a release; never = kNoPark
+struct ArbiterInput
+{
+  int working_mode = 3; ///< application working mode, 0..3
+  TankState tank = TankState::Unknown;
+  int current_mode = MODE_SET_HEAT_DHW; ///< device mode we believe is active
+  bool tank_drawing = false;            ///< falling at or above draw_override_c_per_min
+  bool blocked = false;                 ///< defrost or anti-freeze in progress
+  int seconds_since_last_write = 0;     ///< since the last verified device-mode write
+  bool dhw_granted = false;             ///< DHW-only is what we asked for and the unit says
+  bool unit_actuating = true;           ///< compressor or flow is actually moving heat
+  int seconds_since_actuating = 0;      ///< since either did, while DHW was granted
+  int seconds_since_park = ArbitrationConfig::kNoPark; ///< since a release; never = kNoPark
 };
 
 /**
@@ -164,18 +167,23 @@ bool chargeIsParked(const ArbitrationConfig& cfg, bool dhw_granted, bool unit_ac
 
 bool chargeIsStalled(const ArbitrationConfig& cfg, int running_s, float start_c, float now_c);
 
-bool tankIsDrawing(float previous_c, float current_c, double elapsed_s,
-                   float override_c_per_min);
+bool tankIsDrawing(float previous_c, float current_c, double elapsed_s, float override_c_per_min);
 
 /// Name of a tank state, for logs and the status payload.
-inline const char* tankStateName(TankState state) {
-    switch (state) {
-        case TankState::Unknown:            return "unknown";
-        case TankState::Calling:            return "calling";
-        case TankState::SatisfiedCandidate: return "candidate";
-        case TankState::Satisfied:          return "satisfied";
-    }
+inline const char* tankStateName(TankState state)
+{
+  switch (state)
+  {
+  case TankState::Unknown:
     return "unknown";
+  case TankState::Calling:
+    return "calling";
+  case TankState::SatisfiedCandidate:
+    return "candidate";
+  case TankState::Satisfied:
+    return "satisfied";
+  }
+  return "unknown";
 }
 
 } // namespace windmi

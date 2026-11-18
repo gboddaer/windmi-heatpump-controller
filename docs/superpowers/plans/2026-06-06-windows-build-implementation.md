@@ -170,12 +170,12 @@ TEST(PlatformTest, AcquireAndReleaseLock) {
     // Use a temporary lock file for testing
     std::string test_lock = "/tmp/test_windmi_lock_" + std::to_string(getpid()) + ".lock";
     windmi::platform::set_instance_lock_name_for_test(test_lock);
-    
+
     bool result = windmi::platform::acquire_instance_lock(false);
     EXPECT_TRUE(result);
-    
+
     windmi::platform::release_instance_lock();
-    
+
     windmi::platform::clear_instance_lock_name_for_test();
 }
 
@@ -184,7 +184,7 @@ TEST(PlatformTest, IsPidAlive) {
     int current_pid = getpid();
     bool result = windmi::platform::is_pid_alive(current_pid);
     EXPECT_TRUE(result);
-    
+
     // Test with invalid PID
     result = windmi::platform::is_pid_alive(-1);
     EXPECT_FALSE(result);
@@ -194,7 +194,7 @@ TEST(PlatformTest, SleepMs) {
     auto start = std::chrono::steady_clock::now();
     windmi::platform::sleep_ms(100);
     auto end = std::chrono::steady_clock::now();
-    
+
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     // Allow some tolerance for system timing
     EXPECT_GE(elapsed, 90);
@@ -205,7 +205,7 @@ TEST(PlatformTest, ResolveStaticDir) {
     // Test with current directory
     std::string result = windmi::platform::resolve_static_dir(".");
     EXPECT_FALSE(result.empty());
-    
+
     // Test with non-existent directory (should return empty)
     result = windmi::platform::resolve_static_dir("/nonexistent/path");
     EXPECT_TRUE(result.empty());

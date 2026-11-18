@@ -7,36 +7,39 @@
 
 namespace windmi {
 
-StatusMonitor::StatusMonitor()
-    : status_{}
-    , valid_{false} {
+StatusMonitor::StatusMonitor() : mStatus{}, mValid{false}
+{}
+
+void StatusMonitor::update(const StatusSnapshot& snapshot)
+{
+  windmi::LockGuard lock(mMutex);
+  mStatus = snapshot;
+  mValid.store(true);
 }
 
-void StatusMonitor::update(const StatusSnapshot& snapshot) {
-    windmi::LockGuard lock(mutex_);
-    status_ = snapshot;
-    valid_.store(true);
+bool StatusMonitor::get(StatusSnapshot& snapshot)
+{
+  windmi::LockGuard lock(mMutex);
+  snapshot = mStatus;
+  return mValid.load();
 }
 
-bool StatusMonitor::get(StatusSnapshot& snapshot) {
-    windmi::LockGuard lock(mutex_);
-    snapshot = status_;
-    return valid_.load();
+StatusSnapshot StatusMonitor::get() const
+{
+  windmi::LockGuard lock(mMutex);
+  return mStatus;
 }
 
-StatusSnapshot StatusMonitor::get() const {
-    windmi::LockGuard lock(mutex_);
-    return status_;
+bool StatusMonitor::isValid() const
+{
+  return mValid.load();
 }
 
-bool StatusMonitor::isValid() const {
-    return valid_.load();
-}
-
-void StatusMonitor::reset() {
-    windmi::LockGuard lock(mutex_);
-    status_ = StatusSnapshot{};
-    valid_.store(false);
+void StatusMonitor::reset()
+{
+  windmi::LockGuard lock(mMutex);
+  mStatus = StatusSnapshot{};
+  mValid.store(false);
 }
 
 } // namespace windmi

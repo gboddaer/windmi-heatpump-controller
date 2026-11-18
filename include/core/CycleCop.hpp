@@ -7,73 +7,87 @@
 namespace windmi {
 enum class CopService { None, Heating, Dhw };
 
-struct CyclePowerSample {
-    CopService service = CopService::None;
-    bool compressor_running = false;
-    bool protection = false;
-    bool valid = true;
-    double input_w = 0;
-    double output_w = 0; // signed: defrost removes heat
+struct CyclePowerSample
+{
+  CopService service = CopService::None;
+  bool compressor_running = false;
+  bool protection = false;
+  bool valid = true;
+  double input_w = 0;
+  double output_w = 0; // signed: defrost removes heat
 };
 
-struct CompletedCycleCop {
-    bool available = false;
-    double cop = 0;
-    double electric_wh = 0;
-    double heat_wh = 0;
+struct CompletedCycleCop
+{
+  bool available = false;
+  double cop = 0;
+  double electric_wh = 0;
+  double heat_wh = 0;
 };
 
 // Left-endpoint integration: a reading applies until the next sample. At a
 // boundary, the preceding interval belongs to the preceding service, not the new
 // one. Results are energy ratios, not arithmetic averages of instantaneous COP.
 // Never publish startup fragments or cycles with missing observations.
-class CycleCop {
+class CycleCop
+{
 public:
-    void update(uint64_t now_ms, CyclePowerSample sample) {
-        sample.valid = sample.valid && std::isfinite(sample.input_w) &&
-            std::isfinite(sample.output_w) && sample.input_w >= 0;
-        const bool continuous = seen_ && now_ms >= previous_ms_ &&
-            now_ms - previous_ms_ <= 90000;
-        if (active_ != CopService::None) {
-            valid_ = valid_ && continuous && previous_.valid && sample.valid;
-            if (continuous) {
-                const double hours = (now_ms - previous_ms_) / 3600000.0;
-                input_wh_ += previous_.input_w * hours;
-                heat_wh_ += previous_.output_w * hours;
-            }
-            if (!sample.protection && (!sample.compressor_running || sample.service != active_)) {
-                if (valid_ && now_ms - started_ms_ >= 60000 && input_wh_ > 0) {
-                    auto& result = active_ == CopService::Heating ? heating_ : dhw_;
-                    result = {true, heat_wh_ / input_wh_, input_wh_, heat_wh_};
-                }
-                active_ = CopService::None;
-            }
+  void update(uint64_t now_ms, CyclePowerSample sample)
+  {
+    sample.valid = sample.valid && std::isfinite(sample.input_w) &&
+                   std::isfinite(sample.output_w) && sample.input_w >= 0;
+    const bool continuous = mSeen && now_ms >= mPreviousMs && now_ms - mPreviousMs <= 90000;
+    if (mActive != CopService::None)
+    {
+      mValid = mValid && continuous && mPrevious.valid && sample.valid;
+      if (continuous)
+      {
+        const double hours = (now_ms - mPreviousMs) / 3600000.0;
+        mInputWh += mPrevious.input_w * hours;
+        mHeatWh += mPrevious.output_w * hours;
+      }
+      if (!sample.protection && (!sample.compressor_running || sample.service != mActive))
+      {
+        if (mValid && now_ms - mStartedMs >= 60000 && mInputWh > 0)
+        {
+          auto& result = mActive == CopService::Heating ? mHeating : mDhw;
+          result = {true, mHeatWh / mInputWh, mInputWh, mHeatWh};
         }
-        if (active_ == CopService::None && !sample.protection &&
-            sample.compressor_running && sample.service != CopService::None) {
-            active_ = sample.service;
-            started_ms_ = now_ms;
-            input_wh_ = heat_wh_ = 0;
-            valid_ = continuous && previous_.valid && sample.valid;
-        }
-        previous_ = sample;
-        previous_ms_ = now_ms;
-        seen_ = true;
+        mActive = CopService::None;
+      }
     }
+    if (mActive == CopService::None && !sample.protection && sample.compressor_running &&
+        sample.service != CopService::None)
+    {
+      mActive = sample.service;
+      mStartedMs = now_ms;
+      mInputWh = mHeatWh = 0;
+      mValid = continuous && mPrevious.valid && sample.valid;
+    }
+    mPrevious = sample;
+    mPreviousMs = now_ms;
+    mSeen = true;
+  }
 
-    const CompletedCycleCop& heating() const { return heating_; }
-    const CompletedCycleCop& dhw() const { return dhw_; }
+  const CompletedCycleCop& heating() const
+  {
+    return mHeating;
+  }
+  const CompletedCycleCop& dhw() const
+  {
+    return mDhw;
+  }
 
 private:
-    CopService active_ = CopService::None;
-    bool seen_ = false;
-    bool valid_ = false;
-    uint64_t started_ms_ = 0;
-    uint64_t previous_ms_ = 0;
-    CyclePowerSample previous_;
-    double input_wh_ = 0;
-    double heat_wh_ = 0;
-    CompletedCycleCop heating_, dhw_;
+  CopService mActive = CopService::None;
+  bool mSeen = false;
+  bool mValid = false;
+  uint64_t mStartedMs = 0;
+  uint64_t mPreviousMs = 0;
+  CyclePowerSample mPrevious;
+  double mInputWh = 0;
+  double mHeatWh = 0;
+  CompletedCycleCop mHeating, mDhw;
 };
 } // namespace windmi
 #endif

@@ -24,8 +24,11 @@ The goal is readable, maintainable, portable code rather than clever code.
 - Header files must be self-contained: they should compile when included alone.
 - Headers must include everything they directly use.
 - Do not rely on transitive includes from other headers.
-- Use include guards named `_<PROJECT>___<PATH>___<FILE>__H_` (e.g.,
-  `WINDMI_SERIAL_PORT_H_` for `include/serial_port.h`).
+- Use include guards named `WINDMI_<PATH>_<FILE>_H_` (for `.h`) or `WINDMI_<PATH>_<FILE>_HPP_`
+  (for `.hpp`). Use single underscores between segments, matching the existing
+  project convention. For example, `include/utils/Config.hpp` uses
+  `WINDMI_UTILS_CONFIG_HPP_`, and `include/modbus_client.h` uses
+  `WINDMI_MODBUS_CLIENT_H_`.
 - Prefer `#include` over forward declarations. Forward declarations introduce
   subtle risks (hidden dependencies, ABI changes, ODR violations) and should
   only be used when the full header is prohibitively expensive to include.
@@ -45,27 +48,85 @@ Separate groups with a blank line.
 ## Naming
 
 Use names that explain intent. Avoid abbreviations unless they are widely known
-or already common in the project.
+or already common in the project. Avoid names that differ only by
+capitalization.
 
-Recommended conventions:
+### camelCase naming
 
-- Files: `snake_case.c`, `snake_case.cpp`, `snake_case.h`, `snake_case.hpp`
-- Variables and parameters: `snake_case`
-- Functions: `PascalCase` in C++ (e.g., `AddTableEntry`), `snake_case` in C
-  files. Accessors and mutators may use `snake_case` matching the variable
-  (e.g., `count()`, `set_count(int)`).
-- Types/classes/structs: `PascalCase` in C++ code
-- Enumerators: `kPascalCase` (e.g., `kOutOfMemory`)
-- Constants: `kPascalCase` in C++ or existing uppercase C-style constants in C
-- Macros: `PROJECT_SPECIFIC_UPPER_CASE`
-- Namespace names: `snake_case`
-- Private C++ class members: trailing underscore (e.g., `port_name_`)
-- Struct data members (public by definition): no trailing underscore
+Use lower camelCase for variables, parameters, functions, methods, and
+properties. Names start with a lowercase letter. Each new word starts with an
+uppercase letter.
 
-Capitalize abbreviations as single words: `StartRpc()` not `StartRPC()`.
+```javascript
+retryCount
+userName
+isConnected
+sendMessage()
+calculateChecksum()
+```
 
-Avoid names like `tmp`, `data`, `val`, or `foo` unless the scope is tiny and the
-meaning is obvious.
+Use clear, descriptive names. Avoid short, unclear abbreviations and type
+prefixes.
+
+```javascript
+// Good
+connectionTimeoutMs
+receivedByteCount
+isOutputEnabled
+
+// Avoid
+connTmo
+rbc
+bEnabled
+```
+
+Treat acronyms like normal words to keep names readable and consistent.
+
+```javascript
+// Good
+httpRequest
+urlParser
+userId
+
+// Avoid
+HTTPRequest
+URLParser
+userID
+```
+
+Boolean names should read naturally as true/false values, preferably using
+`is`, `has`, `can`, `should`, or `needs`.
+
+```javascript
+isEnabled
+hasError
+canRetry
+shouldUpdate
+```
+
+Include units in the name when relevant.
+
+```javascript
+timeoutMs
+sizeBytes
+speedRpm
+```
+
+### Naming convention table
+
+| Entity | Convention | Example |
+|--------|-----------|---------|
+| Files | `snake_case.c`, `snake_case.cpp`, `snake_case.h`, `snake_case.hpp` | `modbus_client.c` |
+| Variables and parameters | `camelCase` | `retryCount`, `receivedByteCount` |
+| Functions / methods | `camelCase` | `sendMessage()`, `calculateChecksum()` |
+| Properties | `camelCase` | `connectionTimeoutMs` |
+| Types / classes / structs | `PascalCase` | `StatusMonitor`, `ModbusClient` |
+| Enumerators | `kPascalCase` | `kOutOfMemory`, `kMaxRetries` |
+| Constants | `kPascalCase` in C++ or uppercase C-style in C | `kDefaultBaudRate` |
+| Macros | `PROJECT_SPECIFIC_UPPER_CASE` | `WINDMI_INVALID_SOCKET` |
+| Namespace names | `snake_case` | `windmi`, `modbus` |
+| Private C++ class members | `camelCase` with trailing underscore | `portName_` |
+| Struct data members | `camelCase` (no trailing underscore) | `portName` |
 
 ## Formatting
 

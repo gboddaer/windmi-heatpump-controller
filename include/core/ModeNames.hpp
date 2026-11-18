@@ -18,16 +18,25 @@ namespace windmi {
  * executed by it (see docs/superpowers/specs/2026-11-11-native-dhw-only-mode-and-dhw-priority.md,
  * findings F1 and F2).
  */
-inline const char* mode_to_string(int mode) {
-    switch (mode) {
-        case MODE_SET_OFF:        return "off";
-        case MODE_SET_COOL_DHW:   return "cool+dhw";
-        case MODE_SET_HEAT_DHW:   return "heat+dhw";
-        case MODE_SET_COOL_ONLY:  return "cool";
-        case MODE_SET_HEAT_ONLY:  return "heat";
-        case MODE_SET_DHW_ONLY:   return "dhw_only";
-        default:                  return "unknown";
-    }
+inline const char* mode_to_string(int mode)
+{
+  switch (mode)
+  {
+  case MODE_SET_OFF:
+    return "off";
+  case MODE_SET_COOL_DHW:
+    return "cool+dhw";
+  case MODE_SET_HEAT_DHW:
+    return "heat+dhw";
+  case MODE_SET_COOL_ONLY:
+    return "cool";
+  case MODE_SET_HEAT_ONLY:
+    return "heat";
+  case MODE_SET_DHW_ONLY:
+    return "dhw_only";
+  default:
+    return "unknown";
+  }
 }
 
 } // namespace windmi

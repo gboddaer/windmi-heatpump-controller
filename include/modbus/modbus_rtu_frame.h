@@ -7,8 +7,8 @@
  *   [slave(1)][func(1)][addr(2)][count(2)][crc_lo(1)][crc_hi(1)]
  */
 
-#ifndef MODBUS_RTU_FRAME_H
-#define MODBUS_RTU_FRAME_H
+#ifndef WINDMI_MODBUS_RTU_FRAME_H_
+#define WINDMI_MODBUS_RTU_FRAME_H_
 
 #include <stdint.h>
 #include <stddef.h>
@@ -28,7 +28,8 @@ extern "C" {
  * @param count Number of registers to read (1-125)
  * @note Frame length is always 8 bytes for Modbus RTU read frames
  */
-void modbus_rtu_build_read_frame(uint8_t *frame, uint8_t slave_id, uint16_t address, uint16_t count);
+void modbus_rtu_build_read_frame(uint8_t* frame, uint8_t slave_id, uint16_t address,
+                                 uint16_t count);
 
 /**
  * Build a Modbus RTU Write Single Register request frame
@@ -41,7 +42,8 @@ void modbus_rtu_build_read_frame(uint8_t *frame, uint8_t slave_id, uint16_t addr
  * @param value Value to write (0-65535)
  * @note Frame length is always 8 bytes for Modbus RTU write frames
  */
-void modbus_rtu_build_write_frame(uint8_t *frame, uint8_t slave_id, uint16_t address, uint16_t value);
+void modbus_rtu_build_write_frame(uint8_t* frame, uint8_t slave_id, uint16_t address,
+                                  uint16_t value);
 
 #ifdef __cplusplus
 }

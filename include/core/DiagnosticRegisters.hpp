@@ -10,10 +10,11 @@
 namespace windmi {
 
 enum class DiagnosticGroup { Existing, Alarm, Auxiliary };
-struct DiagnosticRegisterSpec {
-    const char* key;
-    uint16_t address;
-    DiagnosticGroup group;
+struct DiagnosticRegisterSpec
+{
+  const char* key;
+  uint16_t address;
+  DiagnosticGroup group;
 };
 
 // Original installation manual, English printed pp. 50–54. Raw is deliberately
@@ -62,76 +63,103 @@ inline constexpr DiagnosticRegisterSpec kDiagnosticRegisters[] = {
     {"backupOatThreshold", 0x025C, DiagnosticGroup::Auxiliary},
     {"minHeatingOat", 0x0202, DiagnosticGroup::Auxiliary},
 };
-inline constexpr size_t kDiagnosticRegisterCount = sizeof(kDiagnosticRegisters) / sizeof(kDiagnosticRegisters[0]);
-inline constexpr size_t diagnosticGroupCount(DiagnosticGroup group) {
-    size_t count = 0;
-    for (const auto& spec : kDiagnosticRegisters) if (spec.group == group) ++count;
-    return count;
+inline constexpr size_t kDiagnosticRegisterCount =
+    sizeof(kDiagnosticRegisters) / sizeof(kDiagnosticRegisters[0]);
+inline constexpr size_t diagnosticGroupCount(DiagnosticGroup group)
+{
+  size_t count = 0;
+  for (const auto& spec : kDiagnosticRegisters)
+    if (spec.group == group)
+      ++count;
+  return count;
 }
-inline constexpr int diagnosticMaxAgeSeconds(DiagnosticGroup group) {
-    return group == DiagnosticGroup::Existing ? 90 : static_cast<int>(diagnosticGroupCount(group) * 30 + 60);
+inline constexpr int diagnosticMaxAgeSeconds(DiagnosticGroup group)
+{
+  return group == DiagnosticGroup::Existing
+             ? 90
+             : static_cast<int>(diagnosticGroupCount(group) * 30 + 60);
 }
-inline size_t diagnosticIndex(uint16_t address) {
-    for (size_t i = 0; i < kDiagnosticRegisterCount; ++i)
-        if (kDiagnosticRegisters[i].address == address) return i;
-    return kDiagnosticRegisterCount;
+inline size_t diagnosticIndex(uint16_t address)
+{
+  for (size_t i = 0; i < kDiagnosticRegisterCount; ++i)
+    if (kDiagnosticRegisters[i].address == address)
+      return i;
+  return kDiagnosticRegisterCount;
 }
-struct DiagnosticReading {
-    std::optional<uint16_t> raw;
-    uint64_t sampled_at_ms = 0;
+struct DiagnosticReading
+{
+  std::optional<uint16_t> raw;
+  uint64_t sampled_at_ms = 0;
 };
-struct DiagnosticSnapshot {
-    std::array<DiagnosticReading, kDiagnosticRegisterCount> readings{};
-    uint64_t observed_at_ms = 0;
+struct DiagnosticSnapshot
+{
+  std::array<DiagnosticReading, kDiagnosticRegisterCount> readings{};
+  uint64_t observed_at_ms = 0;
 };
 
-class DiagnosticMonitor {
+class DiagnosticMonitor
+{
 public:
-    void beginSample() {
-        for (size_t i = 0; i < kDiagnosticRegisterCount; ++i)
-            if (kDiagnosticRegisters[i].group == DiagnosticGroup::Existing)
-                state_.readings[i] = {};
+  void beginSample()
+  {
+    for (size_t i = 0; i < kDiagnosticRegisterCount; ++i)
+      if (kDiagnosticRegisters[i].group == DiagnosticGroup::Existing)
+        mState.readings[i] = {};
+  }
+  int16_t readRegister(IModbusClient& client, uint16_t address, uint64_t now_ms)
+  {
+    const size_t index = diagnosticIndex(address);
+    if (index < kDiagnosticRegisterCount)
+      mState.readings[index] = {{}, now_ms};
+    const int16_t value = client.readRegister(address); // failure stays null
+    if (index < kDiagnosticRegisterCount)
+      mState.readings[index].raw = static_cast<uint16_t>(value);
+    return value;
+  }
+  void sampleOptional(IModbusClient& client, uint64_t now_ms)
+  {
+    // Keep a stable deadline: register-read jitter must not turn a normal
+    // 30-second tick into a skipped poll. Skip missed periods without a burst.
+    if (!mPolled)
+    {
+      mNextPollMs = now_ms;
+      mPolled = true;
     }
-    int16_t readRegister(IModbusClient& client, uint16_t address, uint64_t now_ms) {
-        const size_t index = diagnosticIndex(address);
-        if (index < kDiagnosticRegisterCount) state_.readings[index] = {{}, now_ms};
-        const int16_t value = client.readRegister(address); // failure stays null
-        if (index < kDiagnosticRegisterCount)
-            state_.readings[index].raw = static_cast<uint16_t>(value);
-        return value;
-    }
-    void sampleOptional(IModbusClient& client, uint64_t now_ms) {
-        // Keep a stable deadline: register-read jitter must not turn a normal
-        // 30-second tick into a skipped poll. Skip missed periods without a burst.
-        if (!polled_) {
-            next_poll_ms_ = now_ms;
-            polled_ = true;
-        }
-        if (now_ms < next_poll_ms_) return;
-        next_poll_ms_ += ((now_ms - next_poll_ms_) / 30000 + 1) * 30000;
-        sampleNext(client, DiagnosticGroup::Alarm, alarm_cursor_, now_ms);
-        sampleNext(client, DiagnosticGroup::Auxiliary, auxiliary_cursor_, now_ms);
-    }
-    DiagnosticSnapshot snapshot(uint64_t now_ms) const {
-        auto result = state_;
-        result.observed_at_ms = now_ms;
-        return result;
-    }
+    if (now_ms < mNextPollMs)
+      return;
+    mNextPollMs += ((now_ms - mNextPollMs) / 30000 + 1) * 30000;
+    sampleNext(client, DiagnosticGroup::Alarm, mAlarmCursor, now_ms);
+    sampleNext(client, DiagnosticGroup::Auxiliary, mAuxiliaryCursor, now_ms);
+  }
+  DiagnosticSnapshot snapshot(uint64_t now_ms) const
+  {
+    auto result = mState;
+    result.observed_at_ms = now_ms;
+    return result;
+  }
+
 private:
-    void sampleNext(IModbusClient& client, DiagnosticGroup group, size_t& cursor, uint64_t now_ms) {
-        for (size_t n = 0; n < kDiagnosticRegisterCount; ++n) {
-            const size_t i = (cursor + n) % kDiagnosticRegisterCount;
-            if (kDiagnosticRegisters[i].group != group) continue;
-            cursor = (i + 1) % kDiagnosticRegisterCount;
-            try { readRegister(client, kDiagnosticRegisters[i].address, now_ms); }
-            catch (const ModbusException&) { /* Unsupported is not a device fault. */ }
-            return;
-        }
+  void sampleNext(IModbusClient& client, DiagnosticGroup group, size_t& cursor, uint64_t now_ms)
+  {
+    for (size_t n = 0; n < kDiagnosticRegisterCount; ++n)
+    {
+      const size_t i = (cursor + n) % kDiagnosticRegisterCount;
+      if (kDiagnosticRegisters[i].group != group)
+        continue;
+      cursor = (i + 1) % kDiagnosticRegisterCount;
+      try
+      {
+        readRegister(client, kDiagnosticRegisters[i].address, now_ms);
+      } catch (const ModbusException&)
+      { /* Unsupported is not a device fault. */
+      }
+      return;
     }
-    DiagnosticSnapshot state_;
-    size_t alarm_cursor_ = 0, auxiliary_cursor_ = 0;
-    bool polled_ = false;
-    uint64_t next_poll_ms_ = 0;
+  }
+  DiagnosticSnapshot mState;
+  size_t mAlarmCursor = 0, mAuxiliaryCursor = 0;
+  bool mPolled = false;
+  uint64_t mNextPollMs = 0;
 };
-}
+} // namespace windmi
 #endif

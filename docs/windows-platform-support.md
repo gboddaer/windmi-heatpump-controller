@@ -1,7 +1,7 @@
 # Windows Platform Support Report
 
-**Date:** 2026-06-07  
-**Project:** Windmi Heat Pump Controller  
+**Date:** 2026-06-07
+**Project:** Windmi Heat Pump Controller
 **Status:** COMPLETE
 
 ---
@@ -232,5 +232,5 @@ Test project /home/gbo/develop/wpomp/build
 
 ---
 
-**Report Status:** Complete  
+**Report Status:** Complete
 **Next Steps:** Windows CI validation, merge to main after passing
