@@ -56,6 +56,7 @@ enum class CommandType : uint8_t {
   CMD_SET_PRIORITY = 2,
   CMD_SET_RUNNING_MODE = 3,
   CMD_SET_OCCUPANCY_MODE = 4,
+  CMD_SET_PRICE = 5,
 };
 
 /**
@@ -389,6 +390,19 @@ public:
     mEnergyPersistCallback = std::move(callback);
   }
 
+  /**
+   * @brief Persist a new tariff; false means the write failed
+   *
+   * The tariff is a settings value, not a control action: a failed save never
+   * rolls back the accepted price and never touches working mode or targets.
+   */
+  using PricePersistCallback = std::function<bool(double cents)>;
+
+  void setPricePersistCallback(PricePersistCallback callback)
+  {
+    mPricePersistCallback = std::move(callback);
+  }
+
   /** @brief Restore a saved total, accepted only when it belongs to today. */
   void seedDailyEnergy(double kwh, const std::string& savedDayKey)
   {
@@ -471,6 +485,7 @@ private:
   std::atomic<int64_t> mWallClockFrozenMs{-1};
   double mPriceCentsPerKwh = static_cast<double>(PRICE_CENTS_DEFAULT);
   EnergyPersistCallback mEnergyPersistCallback;
+  PricePersistCallback mPricePersistCallback;
   DiagnosticMonitor mDiagnosticMonitor;
   float mEffectiveDhwTargetC = 0.0f;
   uint64_t mChargeSampleMs = 0; ///< end of the last actuating charge sample

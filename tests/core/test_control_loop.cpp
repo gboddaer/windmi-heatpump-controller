@@ -14,6 +14,7 @@
 
 #include "TestClock.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <map>
 #include <string>
@@ -724,6 +725,8 @@ public:
     cfg_.park_timeout_s = ArbitrationConfig::kMinParkTimeoutS;
     cfg_.park_cooldown_s = ArbitrationConfig::kMinParkCooldownS;
     loop_.setArbitration(cfg_);
+    loop_.setSettingsCallback(
+        [this](int, const std::string&, float, float) { mSettingsCalls.fetch_add(1); });
     loop_.setInitialSettings(working_mode, priority, dhw_target, heating_target);
     return loop_.start(&client_, &mCmdQueue, &mStatusQueue);
   }
@@ -792,6 +795,26 @@ public:
     loop_.setEnergyPersistCallback(std::move(callback));
   }
 
+  void onPricePersist(ControlLoop::PricePersistCallback callback)
+  {
+    loop_.setPricePersistCallback(std::move(callback));
+  }
+
+  void sendPrice(double cents)
+  {
+    Command cmd{};
+    cmd.type = CommandType::CMD_SET_PRICE;
+    cmd.float_val = static_cast<float>(cents);
+    mCmdQueue.push(cmd);
+    loop_.kick();
+  }
+
+  /** How often the loop asked to persist mode/targets, to prove a tariff never does. */
+  int settingsCallbackCalls() const
+  {
+    return mSettingsCalls.load();
+  }
+
   /** Idle for longer than the park timeout, then ask the loop to decide. */
   void idlePastPark()
   {
@@ -831,6 +854,7 @@ private:
   ArbitrationConfig cfg_;
   IModbusClient& client_;
   ControlLoop loop_;
+  std::atomic<int> mSettingsCalls{0};
   CmdQueue mCmdQueue;
   StatusQueue mStatusQueue;
 };
@@ -2216,5 +2240,100 @@ TEST(DailyEnergyLoopTest, PersistenceFailureKeepsCountingAndKeepsHourlyCadence)
   runner.setWall(kDailyBase + 3600000);
   runner.tick();
   EXPECT_EQ(2, attempts) << "the hourly cadence survives the failure";
+  runner.stop();
+}
+
+TEST(DailyEnergyLoopTest, PriceCommandUpdatesSnapshotOnly)
+{
+  FakeModbusClient client(fullRegisters());
+  TickedLoop runner(client);
+  runner.setWall(kDailyBase);
+  ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+  runner.tick();
+  runner.setWall(kDailyBase + 30000);
+  runner.tick();
+  const double energyBefore = runner.latest().daily_energy_kwh;
+
+  runner.sendPrice(25.0);
+  runner.tick();
+  const StatusSnapshot after = runner.latest();
+  EXPECT_DOUBLE_EQ(25.0, after.price_cents_per_kwh);
+  EXPECT_DOUBLE_EQ(energyBefore, after.daily_energy_kwh) << "a tariff does not change consumption";
+  runner.stop();
+}
+
+TEST(DailyEnergyLoopTest, PriceCommandClampedToConfiguredRange)
+{
+  FakeModbusClient client(fullRegisters());
+  TickedLoop runner(client);
+  runner.setWall(kDailyBase);
+  ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+
+  runner.sendPrice(5000.0);
+  runner.tick();
+  EXPECT_DOUBLE_EQ(static_cast<double>(PRICE_CENTS_MAX), runner.latest().price_cents_per_kwh);
+
+  runner.sendPrice(-10.0);
+  runner.tick();
+  EXPECT_DOUBLE_EQ(static_cast<double>(PRICE_CENTS_MIN), runner.latest().price_cents_per_kwh);
+  runner.stop();
+}
+
+TEST(DailyEnergyLoopTest, PricePersistCallbackFiresOnCommand)
+{
+  FakeModbusClient client(fullRegisters());
+  TickedLoop runner(client);
+  std::vector<double> saved;
+  runner.onPricePersist([&saved](double cents) {
+    saved.push_back(cents);
+    return true;
+  });
+  runner.setWall(kDailyBase);
+  ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+  runner.tick();
+  EXPECT_TRUE(saved.empty()) << "loading a tariff is not a change worth saving";
+
+  runner.sendPrice(27.3);
+  runner.tick();
+  ASSERT_EQ(1u, saved.size());
+  EXPECT_NEAR(27.3, saved[0], 1e-5) << "Command::float_val is a float";
+  EXPECT_NEAR(27.3, runner.latest().price_cents_per_kwh, 1e-5);
+  runner.stop();
+}
+
+TEST(DailyEnergyLoopTest, PricePersistenceFailureWarnsOnly)
+{
+  FakeModbusClient client(fullRegisters());
+  TickedLoop runner(client);
+  runner.onPricePersist([](double) { return false; });
+  runner.setWall(kDailyBase);
+  ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+
+  runner.sendPrice(40.0);
+  runner.tick();
+  runner.setWall(kDailyBase + 30000);
+  runner.tick();
+  const StatusSnapshot after = runner.latest();
+  EXPECT_DOUBLE_EQ(40.0, after.price_cents_per_kwh) << "keep showing what was accepted in memory";
+  EXPECT_TRUE(after.daily_energy_valid) << "and keep the loop running";
+  runner.stop();
+}
+
+TEST(DailyEnergyLoopTest, PriceCommandDoesNotRewriteModeOrTargets)
+{
+  FakeModbusClient client(fullRegisters());
+  TickedLoop runner(client);
+  int settingsCalls = 0;
+  runner.onEnergyPersist([](double, const std::string&) { return true; });
+  runner.setWall(kDailyBase);
+  ASSERT_TRUE(runner.start(3, "dhw", 50.0f, 45.0f));
+  runner.tick();
+  settingsCalls = runner.settingsCallbackCalls();
+
+  runner.sendPrice(22.0);
+  runner.tick();
+  EXPECT_EQ(settingsCalls, runner.settingsCallbackCalls())
+      << "the tariff must not rewrite ui.working_mode or the targets";
+  EXPECT_DOUBLE_EQ(22.0, runner.latest().price_cents_per_kwh);
   runner.stop();
 }

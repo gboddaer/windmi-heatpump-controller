@@ -751,6 +751,24 @@ void ControlLoop::processCommands()
       mSavedHeatingTarget = cmd.float_val;
       break;
 
+    case CommandType::CMD_SET_PRICE:
+    {
+      // A tariff is a display setting, so it is deliberately neither a scheduler
+      // pause nor a settings-callback change: ui.working_mode and the targets stay put.
+      const double cents = std::clamp(static_cast<double>(cmd.float_val),
+                                      static_cast<double>(PRICE_CENTS_MIN),
+                                      static_cast<double>(PRICE_CENTS_MAX));
+      mPriceCentsPerKwh = cents;
+      WINDMI_LOG_INFO(LOG_TAG_CONTROLLOOP, "Tariff set to %.2f eurocents/kWh (estimate only)",
+                      cents);
+      if (mPricePersistCallback && !mPricePersistCallback(cents))
+      {
+        WINDMI_LOG_WARN(LOG_TAG_CONTROLLOOP,
+                        "Tariff could not be saved; it stays in effect until the next restart");
+      }
+      break;
+    }
+
     case CommandType::CMD_SET_PRIORITY:
       WINDMI_LOG_DEBUG(LOG_TAG_CONTROLLOOP, "CMD_SET_PRIORITY, pri_val=%d", cmd.int_val);
       mCurrentPriority = (cmd.int_val == 1) ? PriorityMode::Dhw : PriorityMode::Heating;
