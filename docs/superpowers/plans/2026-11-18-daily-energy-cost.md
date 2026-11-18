@@ -267,3 +267,17 @@ assert(!/<(?:button|input|select|form)\b/i.test(section.replace(priceCard, '')),
 ## Execution ledger
 
 _(filled during execution: RED/GREEN evidence per task, deviations, rulings)_
+
+## Deployment record (2026-11-18)
+
+- Merged `feature/daily-energy-cost` into `main` fast-forward at `4ebdf3b`, after a fresh full build and 22/22 ctest on the branch head.
+- Backup: `/var/tmp/wpomp-daily-energy-20261118/deployment-20261118T125640Z/` (old binary `windmi-control.old` sha256 `e3186232…` matching the running `/proc` exe, `static.old/`, `settings.ini`, `schedule.json`, `status-before.json`). Pointer: `current-deployment.txt`, pid: `deployed.pid`.
+- Old controller PID 482724 got SIGTERM and exited in ~1 s; log shows `Shutdown mode 5 written and verified (attempt 1)`.
+- Deployed binary = the exact tested artifact, sha256 `d633441c…`, verified equal after copy and again against `/proc/<pid>/exe`.
+- New controller: `./build/windmi-control -o /var/tmp/wpomp.log`, PID **528991**, single established socket to `192.168.123.10:8899` (its own fd 5).
+- Live checks: `/api/status` carries `dailyEnergyKwh` 0.000, `dailyEnergyValid` true, `pricePerKwhCents` 30; `POST /api/price {"priceCentsPerKwh":30}` → 202 "Price queued", loop logged `Tariff set to 30.00 eurocents/kWh`, `settings.ini` gained `ui.price_per_kwh_cents = 30.000000` and `state.energy_today_date = 2026-11-18`; `{}` → 400, `501` and `-3` → 422.
+- Live page renders `0.00 kWh` / `€0.00` / price field `30`, price card present in Diagnostics; screenshot `live-after-deploy-1280.png`.
+- 90 s observation: statusSequence advanced 5→7 at the 30 s cadence, no warnings or errors, one Modbus socket.
+- The kWh counter reads 0.000 because the unit is idle (`acPowerW` 0 W, DHW at target); integration is proven by the unit tests and will move on the next compressor run.
+- Pre-existing state, not caused by this merge: `schedule.json` defaults were already `{mode: 1, heatingTemp: 45, dhwTemp: 50}` in the pre-deploy backup (this branch touches no scheduler or schedule-config file).
+- Both 24 h monitors (PID 484269, 484270) survived the restart and are still logging.
